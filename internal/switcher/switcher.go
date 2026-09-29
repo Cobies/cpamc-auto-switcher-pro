@@ -68,6 +68,14 @@ func (s *Switcher) fetchAccountsConcurrently(ctx context.Context, targetProvider
 		if skipDisabled && f.Disabled {
 			continue
 		}
+		name := strings.TrimSpace(f.Name)
+		if name == "" {
+			name = strings.TrimSpace(f.ID)
+		}
+		// Skip subdirectories (e.g. backup folders) which CPAMC download rejects with 400
+		if strings.Contains(name, "/") || strings.Contains(name, "\\") {
+			continue
+		}
 		matchingFiles = append(matchingFiles, f)
 	}
 
@@ -143,7 +151,7 @@ func (s *Switcher) fetchAccountsConcurrently(ctx context.Context, targetProvider
 				if errQuota != nil {
 					state.QuotaErr = errQuota
 				} else {
-					parsedQuota, errParse := quota.ParseQuotaSummaryForProvider(f.Provider, qBytes)
+					parsedQuota, errParse := quota.ParseQuotaSummaryForProvider(f.Provider, qBytes, parsed.Profile)
 					if errParse != nil {
 						state.QuotaErr = errParse
 					} else {
@@ -207,17 +215,29 @@ func (s *Switcher) SwitchToAccount(ctx context.Context, targetAccount string, dr
 		return nil, fmt.Errorf("list auth files: %w", err)
 	}
 
+	var validFiles []client.AuthFileEntry
+	for _, f := range files {
+		name := strings.TrimSpace(f.Name)
+		if name == "" {
+			name = strings.TrimSpace(f.ID)
+		}
+		if strings.Contains(name, "/") || strings.Contains(name, "\\") {
+			continue
+		}
+		validFiles = append(validFiles, f)
+	}
+
 	type fileWithMeta struct {
 		entry client.AuthFileEntry
 		meta  client.AuthFileMetadata
 	}
-	loadedFiles := make([]fileWithMeta, len(files))
+	loadedFiles := make([]fileWithMeta, len(validFiles))
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var firstErr error
 
 	sem := make(chan struct{}, 10)
-	for i := range files {
+	for i := range validFiles {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
@@ -233,7 +253,7 @@ func (s *Switcher) SwitchToAccount(ctx context.Context, targetAccount string, dr
 				return
 			}
 
-			f := files[idx]
+			f := validFiles[idx]
 			name := f.Name
 			if name == "" {
 				name = f.ID

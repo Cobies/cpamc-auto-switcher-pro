@@ -220,3 +220,51 @@ func TestParseQuotaSummaryForProvider(t *testing.T) {
 		t.Errorf("unexpected codex parsed: %+v", aqCodex.WorstFiveHour)
 	}
 }
+
+func TestParseQuotaSummaryProfileFiltering(t *testing.T) {
+	dualJSON := []byte(`{
+		"groups": [
+			{
+				"displayName": "Gemini Models",
+				"buckets": [
+					{"displayName": "5h Limit", "remainingFraction": 0.8},
+					{"displayName": "Weekly Limit", "remainingFraction": 0.7}
+				]
+			},
+			{
+				"displayName": "Claude and GPT models",
+				"buckets": [
+					{"displayName": "5h Limit", "remainingFraction": 0.1},
+					{"displayName": "Weekly Limit", "remainingFraction": 0.0}
+				]
+			}
+		]
+	}`)
+
+	// Without profile: evaluates Worst-Case across both (Claude is exhausted at 100% weekly)
+	worstCase, err := ParseQuotaSummary(dualJSON)
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if worstCase.WorstWeekly.ConsumedPercentage != 100.0 {
+		t.Errorf("expected worst-case weekly 100%%, got %.1f%%", worstCase.WorstWeekly.ConsumedPercentage)
+	}
+
+	// With profile "g1": ONLY evaluates Gemini (Gemini weekly consumed is 30%)
+	geminiOnly, err := ParseQuotaSummary(dualJSON, "g1")
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if geminiOnly.WorstWeekly.ConsumedPercentage != 30.0 {
+		t.Errorf("expected gemini weekly 30%%, got %.1f%%", geminiOnly.WorstWeekly.ConsumedPercentage)
+	}
+
+	// With profile "son": ONLY evaluates Claude (Claude weekly consumed is 100%)
+	sonnetOnly, err := ParseQuotaSummary(dualJSON, "son")
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if sonnetOnly.WorstWeekly.ConsumedPercentage != 100.0 {
+		t.Errorf("expected sonnet weekly 100%%, got %.1f%%", sonnetOnly.WorstWeekly.ConsumedPercentage)
+	}
+}

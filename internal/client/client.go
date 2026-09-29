@@ -310,6 +310,7 @@ func (c *Client) PatchAuthPrefix(ctx context.Context, nameOrID, newPrefix string
 	payload := map[string]string{
 		"name":   strings.TrimSpace(nameOrID),
 		"prefix": strings.TrimSpace(newPrefix),
+		"note":   strings.TrimSpace(newPrefix),
 	}
 
 	bodyBytes, err := json.Marshal(payload)

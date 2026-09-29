@@ -66,16 +66,36 @@ func ClassifyWindow(name string) QuotaWindow {
 }
 
 // ParseQuotaSummary decodes Antigravity retrieveUserQuotaSummary JSON and calculates
-// worst-case limits across groups (Policy 2A).
-func ParseQuotaSummary(raw []byte) (*AccountQuota, error) {
+// limits across groups. If profile is provided, it filters by the model family assigned
+// to that profile (e.g. Gemini for "g*" or Claude for "son*"). If no profile or an
+// unmapped profile is passed, it calculates worst-case across all groups (Policy 2A).
+func ParseQuotaSummary(raw []byte, profile ...string) (*AccountQuota, error) {
 	var resp quotaSummaryResponse
 	if err := json.Unmarshal(raw, &resp); err != nil {
 		return nil, fmt.Errorf("unmarshal quota response: %w", err)
 	}
 
 	result := &AccountQuota{}
+	prof := ""
+	if len(profile) > 0 {
+		prof = strings.ToLower(strings.TrimSpace(profile[0]))
+	}
 
 	for _, group := range resp.Groups {
+		grpName := strings.ToLower(group.DisplayName)
+		// Model-family filtering by profile to ensure independent quotas
+		if strings.HasPrefix(prof, "g") {
+			// Profile starts with 'g' (e.g. g1, g2): only evaluate Gemini models
+			if !strings.Contains(grpName, "gemini") {
+				continue
+			}
+		} else if strings.HasPrefix(prof, "son") {
+			// Profile starts with 'son': only evaluate Claude / GPT models
+			if !strings.Contains(grpName, "claude") && !strings.Contains(grpName, "gpt") {
+				continue
+			}
+		}
+
 		for _, b := range group.Buckets {
 			name := b.DisplayName
 			if name == "" {
@@ -128,12 +148,13 @@ func ParseQuotaSummary(raw []byte) (*AccountQuota, error) {
 	return result, nil
 }
 
-// ParseQuotaSummaryForProvider parses quota JSON based on the target provider ("antigravity" or "codex").
-func ParseQuotaSummaryForProvider(provider string, raw []byte) (*AccountQuota, error) {
+// ParseQuotaSummaryForProvider parses quota JSON based on the target provider ("antigravity" or "codex")
+// and optional profile for model-family isolation.
+func ParseQuotaSummaryForProvider(provider string, raw []byte, profile ...string) (*AccountQuota, error) {
 	if strings.EqualFold(strings.TrimSpace(provider), "codex") {
 		return ParseCodexQuotaSummary(raw)
 	}
-	return ParseQuotaSummary(raw)
+	return ParseQuotaSummary(raw, profile...)
 }
 
 // CodexWindow represents a rate limit window in Codex.
