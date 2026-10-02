@@ -53,10 +53,10 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 		registration := map[string]any{
 			"schema_version": 6,
 			"metadata": map[string]any{
-				"Name":             "visual-profile",
+				"Name":             "Auto switcher pro",
 				"Version":          version.Version,
 				"Author":           "gonzalez962",
-				"Description":      "Visual profile prefix management plugin with React Flow editor",
+				"Description":      "Auto Switcher Pro: Infrastructure Control, Visual Profile Topology & Pulse Tokens Telemetry",
 				"GitHubRepository": "https://github.com/gonzalez962/cpamc-auto-switcher",
 				"Logo":             "",
 				"ConfigFields":     []any{},
@@ -75,9 +75,19 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 		regResponse := map[string]any{
 			"resources": []map[string]any{
 				{
+					"Path":        "/control-switcher",
+					"Menu":        "Control Switcher",
+					"Description": "CPAMC · Centro de Control de Infraestructura IA",
+				},
+				{
 					"Path":        "/profiles",
 					"Menu":        "Visual Profile",
 					"Description": "Visual profile prefix management and topology editor",
+				},
+				{
+					"Path":        "/pulse-tokens",
+					"Menu":        "Pulse Tokens",
+					"Description": "Telemetría y analítica de consumo de tokens y latencias",
 				},
 			},
 		}
@@ -119,19 +129,19 @@ func MatchProfilesRoute(rawPath string) (subpath string, matched bool) {
 	// Split by '/' to inspect exact path segments
 	segments := strings.Split(normalized, "/")
 
-	profilesIdx := -1
+	matchedIdx := -1
 	for i, seg := range segments {
-		if seg == "profiles" {
-			profilesIdx = i
+		if seg == "profiles" || seg == "control-switcher" || seg == "pulse-tokens" || seg == "pulso-tokens" {
+			matchedIdx = i
 			break
 		}
 	}
 
-	if profilesIdx == -1 {
+	if matchedIdx == -1 {
 		return "", false
 	}
 
-	subSegments := segments[profilesIdx+1:]
+	subSegments := segments[matchedIdx+1:]
 	rawSub := strings.Join(subSegments, "/")
 	rawSub = strings.TrimPrefix(rawSub, "/")
 	rawSub = strings.TrimSpace(rawSub)

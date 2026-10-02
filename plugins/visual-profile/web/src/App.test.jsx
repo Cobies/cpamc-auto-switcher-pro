@@ -134,4 +134,40 @@ describe('App Host Component Integration', () => {
 
     expect(loadSpy).toHaveBeenCalledTimes(2);
   });
+
+  it('renders Auto Switcher Pro brand and switches to Pulso Tokens tab', async () => {
+    vi.spyOn(managementClient, 'getManagementKey').mockReturnValue('valid-key-123');
+    vi.spyOn(managementClient, 'loadAuthFilesWithPrefixes').mockResolvedValue([]);
+
+    render(<App />);
+
+    expect(await screen.findByText('AUTO SWITCHER PRO')).toBeTruthy();
+    const tokensTab = screen.getByTestId('tab-pulse-tokens');
+    expect(tokensTab).toBeTruthy();
+
+    fireEvent.click(tokensTab);
+
+    // After clicking Pulso Tokens, route badge updates to /pulse-tokens
+    expect(screen.getByText('/pulse-tokens')).toBeTruthy();
+    expect(await screen.findByTestId('pulse-tokens-view')).toBeTruthy();
+  });
+
+  it('renders high-visibility action buttons on the right side of the header', async () => {
+    vi.spyOn(managementClient, 'getManagementKey').mockReturnValue('valid-key-123');
+    vi.spyOn(managementClient, 'loadAuthFilesWithPrefixes').mockResolvedValue([]);
+
+    render(<App />);
+
+    const manageBtn = await screen.findByTestId('btn-header-manage-prefixes');
+    expect(manageBtn).toBeTruthy();
+    expect(manageBtn.textContent).toContain('Gestionar Prefijos');
+
+    const createBtn = screen.getByTestId('btn-header-create-group');
+    expect(createBtn).toBeTruthy();
+    expect(createBtn.textContent).toContain('Crear Grupo / Pool / Perfiles');
+
+    const forceBtn = screen.getByTestId('btn-header-force-check');
+    expect(forceBtn).toBeTruthy();
+    expect(forceBtn.textContent).toContain('Chequeo Forzado');
+  });
 });

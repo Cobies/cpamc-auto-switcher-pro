@@ -46,6 +46,155 @@ describe('ProfileGraph Component and onConnect Integration', () => {
     expect(screen.getByTestId('btn-add-child')).toBeTruthy();
   });
 
+  it('opens group creator modal, structures a new pool with active and reserve nodes, and updates graph atomically', () => {
+    const graphRef = React.createRef();
+    render(<ProfileGraph ref={graphRef} initialNodes={initialNodes} allowSynthetic={false} />);
+
+    // El botón Crear Grupo debe estar disponible incluso cuando allowSynthetic es false (producción)
+    const openBtn = screen.getByTestId('btn-open-group-modal');
+    expect(openBtn).toBeTruthy();
+
+    // Abrir modal
+    fireEvent.click(openBtn);
+    expect(screen.getByText('Crear y Armar Grupo de Perfiles')).toBeTruthy();
+
+    // Escribir prefijo base
+    const prefixInput = screen.getByTestId('modal-input-base-prefix');
+    fireEvent.change(prefixInput, { target: { value: 'agy_g3' } });
+
+    // Seleccionar cuenta activa (c1)
+    const activeSelect = screen.getByTestId('modal-select-active-node');
+    fireEvent.change(activeSelect, { target: { value: 'c1' } });
+
+    // Re-asegurar prefijo base tras el cambio de cuenta
+    fireEvent.change(prefixInput, { target: { value: 'agy_g3' } });
+
+    // Seleccionar cuenta de reserva (c2)
+    const reserveCheckbox = screen.getByTestId('modal-check-reserve-c2');
+    fireEvent.click(reserveCheckbox);
+
+    // Confirmar armado de grupo
+    const submitBtn = screen.getByTestId('modal-btn-submit-group');
+    fireEvent.click(submitBtn);
+
+    // El modal debe cerrarse y c1 debe ser ROOT con agy_g3 y c2 debe ser agy_g3_1
+    expect(screen.queryByText('Crear y Armar Grupo de Perfiles')).toBeNull();
+    expect(screen.getByText('agy_g3')).toBeTruthy();
+    expect(screen.getByText('agy_g3_1')).toBeTruthy();
+  });
+
+  it('enforces provider reactive isolation and renders crown icon for active account', async () => {
+    const nodesWithProviders = [
+      { id: 'g_free1', type: 'profile', position: { x: 0, y: 0 }, data: { prefix: '', provider: 'antigravity', email: 'gemini1@test.com' } },
+      { id: 'g_free2', type: 'profile', position: { x: 0, y: 0 }, data: { prefix: '', provider: 'antigravity', email: 'gemini2@test.com' } },
+      { id: 'codex_free1', type: 'profile', position: { x: 0, y: 0 }, data: { prefix: '', provider: 'codex', email: 'codex1@test.com' } },
+    ];
+
+    render(<ProfileGraph initialNodes={nodesWithProviders} allowSynthetic={false} />);
+
+    fireEvent.click(screen.getByTestId('btn-open-group-modal'));
+
+    // Debe mostrar la etiqueta con el icono 👑 para la cuenta principal
+    const activeLabel = screen.getByTestId('label-active-node');
+    expect(activeLabel.textContent).toContain('👑');
+
+    // Seleccionar g_free1 (Gemini) como cuenta activa
+    const selectActive = screen.getByTestId('modal-select-active-node');
+    fireEvent.change(selectActive, { target: { value: 'g_free1' } });
+
+    // La cuenta de Codex NO debe aparecer en la lista de reservas
+    expect(screen.getByTestId('modal-check-reserve-g_free2')).toBeTruthy();
+    expect(screen.queryByTestId('modal-check-reserve-codex_free1')).toBeNull();
+  });
+
+  it('allows un-assigning or dissolving existing pools to release accounts', async () => {
+    const initialPool = [
+      { id: 'parent1', type: 'profile', position: { x: 0, y: 0 }, data: { prefix: 'agy_g3', isRoot: true } },
+      { id: 'child1', type: 'profile', position: { x: 0, y: 0 }, data: { prefix: 'agy_g3_1', isRoot: false } },
+    ];
+    const initialEdge = [{ id: 'edge__parent1-child1', source: 'parent1', target: 'child1' }];
+
+    render(<ProfileGraph initialNodes={initialPool} initialEdges={initialEdge} allowSynthetic={false} />);
+
+    // Abrir modal de grupos y seleccionar la pestaña de disolver / desagrupar
+    fireEvent.click(screen.getByTestId('btn-open-group-modal'));
+    const tabDissolve = screen.getByTestId('modal-tab-dissolve');
+    fireEvent.click(tabDissolve);
+
+    // Debe mostrar el botón para desarmar el pool agy_g3
+    const btnDissolvePool = screen.getByTestId('btn-dissolve-pool-parent1');
+    fireEvent.click(btnDissolvePool);
+
+    // El pool se desarma: ambas cuentas quedan con prefijo vacío o libres
+    expect(screen.queryByTestId('profile-node-prefix-parent1')?.textContent).not.toBe('agy_g3');
+  });
+
+  it('strictly excludes already-assigned accounts from candidate list and shows empty notice when none available', () => {
+    // Todos los nodos están asignados a un grupo existente
+    const fullyAssignedNodes = [
+      { id: 'root1', type: 'profile', position: { x: 0, y: 0 }, data: { prefix: 'agy_g1', isRoot: true } },
+      { id: 'res1', type: 'profile', position: { x: 0, y: 0 }, data: { prefix: 'agy_g1_1', isRoot: false } },
+    ];
+    const edges = [{ id: 'edge__root1-res1', source: 'root1', target: 'res1' }];
+
+    render(<ProfileGraph initialNodes={fullyAssignedNodes} initialEdges={edges} allowSynthetic={false} />);
+
+    fireEvent.click(screen.getByTestId('btn-open-group-modal'));
+
+    // En Armar Nuevo Pool NO debe haber cuentas candidatas
+    expect(screen.getByText(/No hay cuentas libres disponibles/i)).toBeTruthy();
+
+    // El botón de armar grupo debe estar deshabilitado
+    const submitBtn = screen.getByTestId('modal-btn-submit-group');
+    expect(submitBtn.hasAttribute('disabled')).toBe(true);
+
+    // Cambiar a la pestaña disolver
+    fireEvent.click(screen.getByTestId('modal-tab-dissolve'));
+    // Desarmar el pool agy_g1 (automáticamente regresa a la pestaña armar)
+    fireEvent.click(screen.getByTestId('btn-dissolve-pool-root1'));
+
+    // Re-consultar el botón submit en el DOM recién renderizado
+    const activeSubmitBtn = screen.getByTestId('modal-btn-submit-group');
+    expect(screen.queryByText(/No hay cuentas libres disponibles/i)).toBeNull();
+    expect(activeSubmitBtn.hasAttribute('disabled')).toBe(false);
+  });
+
+  it('provides a centralized prefix management table displaying Provider, Account/Email, Role, and Editable Prefix for all accounts', async () => {
+    const multiNodes = [
+      { id: 'acc1', type: 'profile', position: { x: 0, y: 0 }, data: { prefix: 'agy_g1', provider: 'antigravity', email: 'wil1@gmail.com', fileName: 'acc1.json', isRoot: true } },
+      { id: 'acc2', type: 'profile', position: { x: 0, y: 0 }, data: { prefix: '', provider: 'codex', email: 'wil2@gmail.com', fileName: 'acc2.json' } },
+    ];
+
+    render(<ProfileGraph initialNodes={multiNodes} allowSynthetic={false} />);
+
+    // Abrir modal de gestión central de prefijos
+    const btnManage = screen.getByTestId('btn-open-pending-prefixes');
+    expect(btnManage).toBeTruthy();
+    fireEvent.click(btnManage);
+
+    // Debe mostrar la tabla con encabezados de columna
+    expect(screen.getByText('Gestión de Prefijos y Cuentas')).toBeTruthy();
+    expect(screen.getByText('PROVEEDOR')).toBeTruthy();
+    expect(screen.getByText('CUENTA / CORREO')).toBeTruthy();
+    expect(screen.getByText('ROL / ESTADO')).toBeTruthy();
+    expect(screen.getByText('PREFIJO')).toBeTruthy();
+
+    // Debe listar tanto la cuenta con prefijo (acc1) como la que no tiene (acc2)
+    expect(screen.getByTestId('prefix-row-acc1')).toBeTruthy();
+    expect(screen.getByTestId('prefix-row-acc2')).toBeTruthy();
+
+    // Permite cambiar el prefijo existente de acc1 a agy_son
+    const inputAcc1 = screen.getByTestId('input-table-prefix-acc1');
+    fireEvent.change(inputAcc1, { target: { value: 'agy_son' } });
+    fireEvent.click(screen.getByTestId('btn-save-table-prefix-acc1'));
+
+    // Cerrar modal
+    fireEvent.click(screen.getByTestId('btn-close-prefix-table'));
+
+    // En el lienzo del grafo ahora acc1 tiene el nuevo prefijo agy_son
+    expect(screen.getByText('agy_son')).toBeTruthy();
+  });
+
   it('invokes connect and verifies child prefix is updated in the rendered DOM', () => {
     const graphRef = React.createRef();
     render(<ProfileGraph ref={graphRef} initialNodes={initialNodes} />);

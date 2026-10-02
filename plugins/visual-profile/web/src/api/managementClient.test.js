@@ -917,5 +917,23 @@ describe('saveAuthFilePrefixes - Multi-File Staging and Non-Atomic Partial Failu
         );
       });
     });
+
+    it('defensively skips subdirectories and backup folders containing / or \\', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          files: [
+            { name: 'backup-6-accounts/antigravity-1.json' },
+            { name: 'valid-account.json' },
+            { name: 'nested\\backup\\file.json' },
+          ],
+        }),
+      });
+
+      const files = await listAuthFiles({ key: 'test-key', fetchFn: mockFetch });
+      expect(files).toHaveLength(1);
+      expect(files[0].name).toBe('valid-account.json');
+    });
   });
 });

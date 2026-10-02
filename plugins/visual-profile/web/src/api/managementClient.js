@@ -433,6 +433,12 @@ export async function listAuthFiles(options = {}) {
     }
     const exactName = file.name;
 
+    // Skip subdirectories (e.g. backup folders like backup-6-accounts/...)
+    // which CPAMC download endpoint rejects with HTTP 400 Bad Request
+    if (exactName.includes('/') || exactName.includes('\\')) {
+      continue;
+    }
+
     validFiles.push({
       name: exactName,
       id: typeof file.id === 'string' && file.id.trim() ? file.id : exactName,
@@ -512,6 +518,13 @@ export async function loadAuthFilesWithPrefixes(options = {}) {
         if (file.status) record.status = file.status;
         return record;
       } catch (err) {
+        // If an individual auth file fails with 400 Bad Request (e.g. nested path or corrupted descriptor),
+        // skip it defensively rather than failing closed on the entire visual profile graph.
+        if (err.message && err.message.includes('400')) {
+          console.warn(`[VisualProfile] Skipping unreadable auth file "${file.name}":`, err.message);
+          return null;
+        }
+
         const safeName = maskDisplayIdentifier(sanitizeFileName(file.name));
         let statusText = 'request failed';
         if (err.message && err.message.includes('401')) {
@@ -532,8 +545,8 @@ export async function loadAuthFilesWithPrefixes(options = {}) {
   );
 
   // In CLIProxyAPI pool, duplicate prefixes are legitimate (account pools/rotation).
-  // Return loaded results directly without blanket unique-prefix lockout.
-  return results;
+  // Return loaded results directly without blanket unique-prefix lockout. Filter out skipped items.
+  return results.filter(Boolean);
 }
 
 /**

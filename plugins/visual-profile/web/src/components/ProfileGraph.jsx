@@ -571,6 +571,8 @@ const ProfileGraph = forwardRef(function ProfileGraph(
       getEdges: () => edges,
       onNodesChange: (changes) => onNodesChange(changes),
       onEdgesChange: (changes) => onEdgesChange(changes),
+      openPrefixManagement: () => handleOpenPrefixManagement(),
+      openGroupModal: () => handleOpenGroupModal(),
       isDirty: () => nodes.some((n) => Boolean(n.data?.isDirty)),
       isSaving: () => Boolean(isSavingRef.current),
       save: () => handleSaveChanges(),
@@ -617,6 +619,253 @@ const ProfileGraph = forwardRef(function ProfileGraph(
 
   // Input state for custom prefix
   const [customPrefix, setCustomPrefix] = useState('');
+
+  // Modal de Creación y Estructuración de Grupo
+  const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
+  const [activeGroupTab, setActiveGroupTab] = useState('create'); // 'create' | 'dissolve'
+  const [groupBasePrefix, setGroupBasePrefix] = useState('');
+  const [selectedActiveNodeId, setSelectedActiveNodeId] = useState('');
+  const [selectedReserveNodeIds, setSelectedReserveNodeIds] = useState([]);
+  const [groupModalError, setGroupModalError] = useState('');
+
+  // Modal / Drawer de Gestión de Prefijos y Cuentas
+  const [isPendingModalOpen, setIsPendingModalOpen] = useState(false);
+  const [pendingPrefixDrafts, setPendingPrefixDrafts] = useState({});
+  const [prefixTableFilter, setPrefixTableFilter] = useState('all'); // 'all' | 'unassigned' | 'antigravity' | 'codex'
+
+  // Cuentas verdaderamente libres (sin padre entrante, sin reservas salientes, y sin prefijo de pool activo)
+  const freeNodes = useMemo(() => {
+    return nodes.filter((n) => {
+      const hasIncoming = edges.some((e) => e && e.target === n.id);
+      const hasOutgoing = edges.some((e) => e && e.source === n.id);
+      if (hasIncoming || hasOutgoing) return false;
+
+      const pref = (n.data?.prefix || '').trim();
+      if (pref !== '' && !pref.startsWith('unlinked_')) return false;
+
+      return true;
+    });
+  }, [nodes, edges]);
+
+  // Cuentas filtradas para la Tabla Central de Gestión de Prefijos
+  const filteredTableNodes = useMemo(() => {
+    return nodes.filter((n) => {
+      const prov = (n.data?.provider || n.data?.accountType || '').toLowerCase();
+      const pref = (n.data?.prefix || '').trim();
+      const isUnassigned = pref === '' || pref.startsWith('unlinked_');
+
+      if (prefixTableFilter === 'unassigned') {
+        return isUnassigned;
+      }
+      if (prefixTableFilter === 'antigravity') {
+        return prov === 'antigravity';
+      }
+      if (prefixTableFilter === 'codex') {
+        return prov === 'codex';
+      }
+      return true;
+    });
+  }, [nodes, prefixTableFilter]);
+
+  // Manejador para abrir el modal sincronizando los borradores con los prefijos reales
+  const handleOpenPrefixManagement = useCallback(() => {
+    const initialDrafts = {};
+    nodes.forEach((n) => {
+      initialDrafts[n.id] = n.data?.prefix !== undefined ? n.data.prefix : '';
+    });
+    setPendingPrefixDrafts(initialDrafts);
+    setPrefixTableFilter('all');
+    setIsPendingModalOpen(true);
+  }, [nodes]);
+
+  const handleOpenGroupModal = useCallback(() => {
+    setIsGroupModalOpen(true);
+    setActiveGroupTab('create');
+    setGroupBasePrefix('');
+    setGroupModalError('');
+    setSelectedReserveNodeIds([]);
+
+    // Encontrar primera cuenta libre para preseleccionar
+    const freeCandidates = nodes.filter((n) => !edges.some((e) => e.target === n.id));
+    const firstActive = freeCandidates[0]?.id || '';
+    setSelectedActiveNodeId(firstActive);
+
+    // Si la cuenta activa ya tiene un prefijo base (ej. agy_g3), sugerirlo de entrada
+    const activeNode = nodes.find((n) => n.id === firstActive);
+    const existingPref = (activeNode?.data?.prefix || '').trim();
+    if (existingPref && !existingPref.startsWith('unlinked_')) {
+      setGroupBasePrefix(existingPref);
+    }
+  }, [nodes, edges]);
+
+  // Selección reactiva de cuenta activa: actualiza el prefijo sugerido y resetea reservas no compatibles
+  const handleSelectActiveNode = useCallback((nodeId) => {
+    setSelectedActiveNodeId(nodeId);
+    setSelectedReserveNodeIds([]);
+    const chosenNode = nodes.find((n) => n.id === nodeId);
+    const chosenPref = (chosenNode?.data?.prefix || '').trim();
+    if (chosenPref && !chosenPref.startsWith('unlinked_')) {
+      setGroupBasePrefix(chosenPref);
+    } else {
+      const prov = (chosenNode?.data?.provider || chosenNode?.data?.accountType || '').toLowerCase();
+      if (prov === 'codex') {
+        setGroupBasePrefix('codex_');
+      } else {
+        setGroupBasePrefix('agy_');
+      }
+    }
+  }, [nodes]);
+
+  // Cuentas de reserva compatibles con el proveedor de la cuenta activa
+  const compatibleReserveNodes = useMemo(() => {
+    if (!selectedActiveNodeId) return [];
+    const activeNode = nodes.find((n) => n.id === selectedActiveNodeId);
+    if (!activeNode) return [];
+
+    const activeProv = (activeNode.data?.provider || activeNode.data?.accountType || '').toLowerCase();
+    const isActiveCodex = activeProv === 'codex';
+
+    return freeNodes.filter((n) => {
+      if (n.id === selectedActiveNodeId) return false;
+      const prov = (n.data?.provider || n.data?.accountType || '').toLowerCase();
+      const isCodex = prov === 'codex';
+      return isActiveCodex ? isCodex : !isCodex;
+    });
+  }, [selectedActiveNodeId, nodes, freeNodes]);
+
+  const handleToggleReserve = useCallback((nodeId) => {
+    setSelectedReserveNodeIds((prev) =>
+      prev.includes(nodeId) ? prev.filter((id) => id !== nodeId) : [...prev, nodeId]
+    );
+  }, []);
+
+  const handleSubmitGroup = useCallback(() => {
+    const trimmedBase = groupBasePrefix.trim();
+    if (!trimmedBase) {
+      setGroupModalError('El prefijo base del grupo no puede estar vacío.');
+      return;
+    }
+    if (!/^[a-zA-Z0-9_-]+$/.test(trimmedBase)) {
+      setGroupModalError('El prefijo solo puede contener letras, números, guiones y guiones bajos.');
+      return;
+    }
+    if (!selectedActiveNodeId) {
+      setGroupModalError('Debes seleccionar una cuenta para que sea la Principal (Activa).');
+      return;
+    }
+
+    // 1. Asignar prefijo base a la cuenta activa y luego conectar
+    const updatedNodes = nodes.map((node) => {
+      if (node.id === selectedActiveNodeId) {
+        const initial = node.data?.initialPrefix !== undefined ? node.data.initialPrefix : '';
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            prefix: trimmedBase,
+            label: trimmedBase,
+            isDirty: trimmedBase !== initial,
+            isRoot: true,
+          },
+        };
+      }
+      return node;
+    });
+
+    let currentNodes = updatedNodes;
+    let currentEdges = edges;
+
+    // 2. Conectar cada reserva a la activa mediante pure reducer logic
+    selectedReserveNodeIds.forEach((resId) => {
+      if (resId !== selectedActiveNodeId) {
+        const nextState = graphReducer(
+          { nodes: currentNodes, edges: currentEdges, graphFeedback: null, lastRemoval: null },
+          {
+            type: 'CONNECT',
+            connection: {
+              source: selectedActiveNodeId,
+              target: resId,
+            },
+          }
+        );
+        currentNodes = nextState.nodes;
+        currentEdges = nextState.edges;
+      }
+    });
+
+    dispatch({ type: 'LOAD_GRAPH', nodes: currentNodes, edges: currentEdges });
+
+    // 3. Auto-organizar visualmente el layout
+    dispatch({ type: 'AUTO_ARRANGE' });
+
+    if (typeof onGraphChange === 'function') {
+      onGraphChange();
+    }
+
+    setIsGroupModalOpen(false);
+  }, [groupBasePrefix, selectedActiveNodeId, selectedReserveNodeIds, nodes, edges, onGraphChange]);
+
+  // Desarmar / Disolver un pool completo liberando todas sus cuentas
+  const handleDissolvePool = useCallback((rootNodeId) => {
+    const rootNode = nodes.find((n) => n.id === rootNodeId);
+    if (!rootNode) return;
+
+    // Encontrar todas las aristas que parten de esta raíz
+    const outgoingEdges = edges.filter((e) => e && e.source === rootNodeId);
+    const edgeIds = new Set(outgoingEdges.map((e) => e.id));
+
+    // 1. Nuevas aristas sin las del grupo
+    const nextEdges = edges.filter((e) => e && !edgeIds.has(e.id));
+
+    // 2. Limpiar tanto la raíz como las reservas que estaban conectadas a ella
+    const nextNodes = nodes.map((node) => {
+      if (node.id === rootNodeId) {
+        const initial = node.data?.initialPrefix !== undefined ? node.data.initialPrefix : '';
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            prefix: '',
+            label: node.data?.fileName || node.id,
+            isDirty: '' !== initial,
+            isRoot: false,
+          },
+        };
+      }
+      if (outgoingEdges.some((e) => e.target === node.id)) {
+        const initial = node.data?.initialPrefix !== undefined ? node.data.initialPrefix : '';
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            prefix: '',
+            label: node.data?.fileName || node.id,
+            isDirty: '' !== initial,
+            isRoot: false,
+          },
+        };
+      }
+      return node;
+    });
+
+    dispatch({ type: 'LOAD_GRAPH', nodes: nextNodes, edges: nextEdges });
+
+    // 3. Reacomodar el lienzo
+    dispatch({ type: 'AUTO_ARRANGE' });
+
+    if (typeof onGraphChange === 'function') {
+      onGraphChange();
+    }
+  }, [nodes, edges, onGraphChange]);
+
+  // Manejador de asignación o cambio de prefijo individual en la tabla
+  const handleSavePendingPrefix = useCallback((nodeId) => {
+    const draft = (pendingPrefixDrafts[nodeId] || '').trim();
+    dispatch({ type: 'UPDATE_NODE_PREFIX', id: nodeId, prefix: draft });
+    if (typeof onGraphChange === 'function') {
+      onGraphChange();
+    }
+  }, [pendingPrefixDrafts, onGraphChange]);
 
   /**
    * Creates a root node using atomic reducer dispatch.
@@ -686,6 +935,30 @@ const ProfileGraph = forwardRef(function ProfileGraph(
         </div>
 
         <div className="toolbar-controls">
+          <button
+            type="button"
+            onClick={handleOpenPrefixManagement}
+            className="btn btn-outline"
+            data-testid="btn-open-pending-prefixes"
+            title="Gestión centralizada de prefijos de todas las cuentas"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <span>🏷️</span>
+            <span>Gestionar Prefijos ({nodes.length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleOpenGroupModal}
+            className="btn btn-secondary"
+            data-testid="btn-open-group-modal"
+            title="Estructurar un nuevo grupo o pool de perfiles"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <span>⚡</span>
+            <span>Crear Grupo / Pool</span>
+          </button>
+
           {allowSynthetic && (
             <>
               <div className="input-group">
@@ -875,6 +1148,496 @@ const ProfileGraph = forwardRef(function ProfileGraph(
           />
         </ReactFlow>
       </div>
+
+      {/* Modal / Diálogo para Crear y Armar Grupo de Perfiles */}
+      {isGroupModalOpen && (
+        <div className="group-modal-backdrop" onClick={() => setIsGroupModalOpen(false)}>
+          <div
+            className="group-modal-container"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="group-modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '18px' }}>⚡</span>
+                <h3 className="group-modal-title">Crear y Armar Grupo de Perfiles</h3>
+              </div>
+              <button
+                type="button"
+                className="btn-dismiss-banner"
+                onClick={() => setIsGroupModalOpen(false)}
+                aria-label="Cerrar modal"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Pestañas del Modal: Crear Grupo vs Disolver Pools */}
+            <div className="group-modal-tabs">
+              <button
+                type="button"
+                className={`group-modal-tab ${activeGroupTab === 'create' ? 'active' : ''}`}
+                onClick={() => setActiveGroupTab('create')}
+                data-testid="modal-tab-create"
+              >
+                ⚡ Armar Nuevo Pool
+              </button>
+              <button
+                type="button"
+                className={`group-modal-tab ${activeGroupTab === 'dissolve' ? 'active' : ''}`}
+                onClick={() => setActiveGroupTab('dissolve')}
+                data-testid="modal-tab-dissolve"
+              >
+                💥 Disolver / Desagrupar Pools
+              </button>
+            </div>
+
+            {activeGroupTab === 'create' && (
+              <>
+                <p className="group-modal-desc">
+                  Define el prefijo base del pool (ej. <code>agy_g3</code> o <code>codex_dev</code>). Solo se listan cuentas libres; al elegir la Principal, las reservas se filtran al mismo proveedor.
+                </p>
+
+                {groupModalError && (
+                  <div className="group-modal-error">
+                    {groupModalError}
+                  </div>
+                )}
+
+                <div className="group-modal-body">
+                  {freeNodes.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '24px 16px', background: 'rgba(7, 9, 14, 0.5)', borderRadius: '10px', border: '1px dashed rgba(248, 81, 73, 0.4)' }}>
+                      <span style={{ fontSize: '24px' }}>⚠️</span>
+                      <h4 style={{ color: '#f85149', margin: '8px 0 4px', fontSize: '13px' }}>
+                        No hay cuentas libres disponibles
+                      </h4>
+                      <p style={{ color: '#94a3b8', fontSize: '11px', margin: 0, lineHeight: 1.4 }}>
+                        Todas las cuentas están asignadas a grupos existentes. Para armar un nuevo pool, ve a la pestaña <strong>"💥 Disolver / Desagrupar Pools"</strong> para liberar cuentas.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Prefijo Base */}
+                      <div className="group-modal-field">
+                        <label className="group-modal-label">Prefijo Base del Grupo (Pool):</label>
+                        <input
+                          type="text"
+                          className="group-modal-input"
+                          placeholder="ej. agy_g3 o codex_dev"
+                          value={groupBasePrefix}
+                          onChange={(e) => {
+                            setGroupBasePrefix(e.target.value);
+                            setGroupModalError('');
+                          }}
+                          autoFocus
+                          data-testid="modal-input-base-prefix"
+                        />
+                      </div>
+
+                      {/* Cuenta Principal / Activa */}
+                      <div className="group-modal-field">
+                        <label className="group-modal-label" data-testid="label-active-node" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ fontSize: '1em', lineHeight: 1 }}>👑</span>
+                          <span>Cuenta Principal (Activa / Root):</span>
+                        </label>
+                        <select
+                          className="group-modal-select"
+                          value={selectedActiveNodeId}
+                          onChange={(e) => handleSelectActiveNode(e.target.value)}
+                          data-testid="modal-select-active-node"
+                        >
+                          <option value="" disabled>-- Selecciona la cuenta activa --</option>
+                          {freeNodes.map((n) => {
+                            const prov = (n.data?.provider || n.data?.accountType || '').toUpperCase() || 'GENERAL';
+                            const label = n.data?.email || n.data?.fileName || n.id;
+                            const pref = n.data?.prefix ? ` [${n.data.prefix}]` : '';
+                            return (
+                              <option key={n.id} value={n.id}>
+                                👑 {label}{pref} ({prov})
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+
+                      {/* Cuentas de Reserva */}
+                      <div className="group-modal-field">
+                        <label className="group-modal-label">Cuentas de Reserva (Mismo Proveedor en Cascada):</label>
+                        <div className="group-modal-reserves-list">
+                          {compatibleReserveNodes.map((n) => {
+                            const isChecked = selectedReserveNodeIds.includes(n.id);
+                            const label = n.data?.email || n.data?.fileName || n.id;
+                            const pref = n.data?.prefix ? ` [${n.data.prefix}]` : '';
+                            const prov = (n.data?.provider || n.data?.accountType || '').toUpperCase();
+                            return (
+                              <label key={n.id} className="group-modal-reserve-item">
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => handleToggleReserve(n.id)}
+                                  data-testid={`modal-check-reserve-${n.id}`}
+                                />
+                                <span style={{ fontSize: '12px', color: '#cbd5e1' }}>
+                                  {label} <span style={{ color: '#c084fc', fontFamily: 'monospace' }}>{pref}</span>
+                                  {prov && <span style={{ fontSize: '10px', color: '#94a3b8', marginLeft: '6px' }}>({prov})</span>}
+                                </span>
+                              </label>
+                            );
+                          })}
+                          {compatibleReserveNodes.length === 0 && (
+                            <div style={{ fontSize: '11px', color: '#94a3b8', fontStyle: 'italic', padding: '6px' }}>
+                              No hay cuentas libres compatibles con el proveedor seleccionado.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <div className="group-modal-footer">
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    onClick={() => setIsGroupModalOpen(false)}
+                    data-testid="modal-btn-cancel-group"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={handleSubmitGroup}
+                    disabled={freeNodes.length === 0}
+                    data-testid="modal-btn-submit-group"
+                  >
+                    ✓ Armar Grupo en Canvas
+                  </button>
+                </div>
+              </>
+            )}
+
+            {activeGroupTab === 'dissolve' && (
+              <div className="group-modal-body" style={{ gap: '12px' }}>
+                <p className="group-modal-desc" style={{ padding: 0 }}>
+                  Selecciona cualquier pool para desarmarlo por completo. Todas sus cuentas volverán a estar libres y sin grupo.
+                </p>
+                <div className="group-modal-reserves-list" style={{ maxHeight: '240px' }}>
+                  {nodes
+                    .filter((n) => n.data?.isRoot || edges.some((e) => e.source === n.id))
+                    .map((rootNode) => {
+                      const poolPrefix = rootNode.data?.prefix || rootNode.data?.label || rootNode.id;
+                      const childCount = edges.filter((e) => e.source === rootNode.id).length;
+                      return (
+                        <div
+                          key={rootNode.id}
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            padding: '8px 10px',
+                            background: 'rgba(15, 23, 42, 0.6)',
+                            borderRadius: '6px',
+                            border: '1px solid rgba(51, 65, 85, 0.4)',
+                          }}
+                        >
+                          <div>
+                            <span style={{ fontWeight: 700, color: '#f3e8ff', fontFamily: 'monospace' }}>
+                              {poolPrefix}
+                            </span>
+                            <span style={{ fontSize: '11px', color: '#94a3b8', marginLeft: '8px' }}>
+                              ({childCount} reserva{childCount === 1 ? '' : 's'})
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn btn-disconnect-node"
+                            onClick={() => {
+                              handleDissolvePool(rootNode.id);
+                              // Permanecer en el modal y cambiar automáticamente a la pestaña de armar
+                              setActiveGroupTab('create');
+                            }}
+                            data-testid={`btn-dissolve-pool-${rootNode.id}`}
+                            style={{ padding: '4px 10px', fontSize: '11px' }}
+                          >
+                            💥 Desarmar Pool
+                          </button>
+                        </div>
+                      );
+                    })}
+                  {nodes.filter((n) => n.data?.isRoot || edges.some((e) => e.source === n.id)).length === 0 && (
+                    <div style={{ fontSize: '11px', color: '#94a3b8', fontStyle: 'italic', padding: '10px', textAlign: 'center' }}>
+                      No hay pools o grupos activos para desarmar.
+                    </div>
+                  )}
+                </div>
+                <div className="group-modal-footer" style={{ border: 'none', padding: 0 }}>
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    onClick={() => setIsGroupModalOpen(false)}
+                  >
+                    Cerrar
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal / Diálogo Centralizado de Gestión de Prefijos y Cuentas */}
+      {isPendingModalOpen && (
+        <div className="group-modal-backdrop" onClick={() => setIsPendingModalOpen(false)}>
+          <div
+            className="group-modal-container"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            style={{ maxWidth: '840px', width: '92%' }}
+          >
+            <div className="group-modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '18px' }}>🏷️</span>
+                <h3 className="group-modal-title">Gestión de Prefijos y Cuentas</h3>
+              </div>
+              <button
+                type="button"
+                className="btn-dismiss-banner"
+                onClick={() => setIsPendingModalOpen(false)}
+                data-testid="btn-close-prefix-table"
+                aria-label="Cerrar modal"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="group-modal-desc">
+              Visualiza y edita los prefijos de todas tus cuentas (nuevas, existentes o huérfanas). Asigna un prefijo inicial o actualízalo para cambiar el rol o modelo de enrutamiento.
+            </p>
+
+            {/* Barra de Filtros Rápidos */}
+            <div style={{ display: 'flex', gap: '6px', padding: '10px 20px', borderBottom: '1px solid var(--border-color, #30363d)', background: 'rgba(13, 17, 23, 0.4)', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className={`cs-filter-chip ${prefixTableFilter === 'all' ? 'active' : ''}`}
+                onClick={() => setPrefixTableFilter('all')}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  background: prefixTableFilter === 'all' ? 'rgba(168, 85, 247, 0.25)' : 'transparent',
+                  color: prefixTableFilter === 'all' ? '#d8b4fe' : '#94a3b8',
+                  border: prefixTableFilter === 'all' ? '1px solid #a855f7' : '1px solid #30363d',
+                }}
+              >
+                Todas ({nodes.length})
+              </button>
+              <button
+                type="button"
+                className={`cs-filter-chip ${prefixTableFilter === 'unassigned' ? 'active' : ''}`}
+                onClick={() => setPrefixTableFilter('unassigned')}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  background: prefixTableFilter === 'unassigned' ? 'rgba(234, 179, 8, 0.2)' : 'transparent',
+                  color: prefixTableFilter === 'unassigned' ? '#fde047' : '#94a3b8',
+                  border: prefixTableFilter === 'unassigned' ? '1px solid rgba(234, 179, 8, 0.5)' : '1px solid #30363d',
+                }}
+              >
+                ⚪ Sin Prefijo / Libres ({nodes.filter((n) => !(n.data?.prefix || '').trim() || (n.data?.prefix || '').startsWith('unlinked_')).length})
+              </button>
+              <button
+                type="button"
+                className={`cs-filter-chip ${prefixTableFilter === 'antigravity' ? 'active' : ''}`}
+                onClick={() => setPrefixTableFilter('antigravity')}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  background: prefixTableFilter === 'antigravity' ? 'rgba(35, 134, 54, 0.25)' : 'transparent',
+                  color: prefixTableFilter === 'antigravity' ? '#3fb950' : '#94a3b8',
+                  border: prefixTableFilter === 'antigravity' ? '1px solid rgba(46, 160, 67, 0.5)' : '1px solid #30363d',
+                }}
+              >
+                🟢 Antigravity ({nodes.filter((n) => (n.data?.provider || n.data?.accountType || '').toLowerCase() === 'antigravity').length})
+              </button>
+              <button
+                type="button"
+                className={`cs-filter-chip ${prefixTableFilter === 'codex' ? 'active' : ''}`}
+                onClick={() => setPrefixTableFilter('codex')}
+                style={{
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  background: prefixTableFilter === 'codex' ? 'rgba(56, 139, 253, 0.25)' : 'transparent',
+                  color: prefixTableFilter === 'codex' ? '#79c0ff' : '#94a3b8',
+                  border: prefixTableFilter === 'codex' ? '1px solid rgba(56, 139, 253, 0.5)' : '1px solid #30363d',
+                }}
+              >
+                🔵 Codex ({nodes.filter((n) => (n.data?.provider || n.data?.accountType || '').toLowerCase() === 'codex').length})
+              </button>
+            </div>
+
+            {/* Tabla Estructurada con Columnas */}
+            <div style={{ maxHeight: '360px', overflowY: 'auto', padding: '0 20px 10px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12px' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border-color, #30363d)', color: '#94a3b8', fontSize: '11px', letterSpacing: '0.04em' }}>
+                    <th style={{ padding: '10px 8px' }}>PROVEEDOR</th>
+                    <th style={{ padding: '10px 8px' }}>CUENTA / CORREO</th>
+                    <th style={{ padding: '10px 8px' }}>ROL / ESTADO</th>
+                    <th style={{ padding: '10px 8px' }}>PREFIJO</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredTableNodes.map((n) => {
+                    const label = n.data?.email || n.data?.fileName || n.id;
+                    const fileName = n.data?.fileName || n.id;
+                    const prov = (n.data?.provider || n.data?.accountType || '').toUpperCase() || 'GENERAL';
+                    const isCodex = prov === 'CODEX';
+                    const draft = pendingPrefixDrafts[n.id] ?? (n.data?.prefix || '');
+                    const currentPref = (n.data?.prefix || '').trim();
+
+                    // Determinar el Rol / Estado
+                    const isIncoming = edges.some((e) => e.target === n.id);
+                    const isOutgoing = edges.some((e) => e.source === n.id);
+                    let roleBadge = <span style={{ color: '#94a3b8', fontSize: '11px' }}>⚪ Libre</span>;
+
+                    if (isOutgoing) {
+                      roleBadge = <span style={{ color: '#3fb950', fontWeight: 600, fontSize: '11px' }}>👑 Activa (Root)</span>;
+                    } else if (isIncoming) {
+                      roleBadge = <span style={{ color: '#58a6ff', fontWeight: 600, fontSize: '11px' }}>🔄 Reserva (Child)</span>;
+                    } else if (currentPref && !currentPref.startsWith('unlinked_')) {
+                      roleBadge = <span style={{ color: '#c084fc', fontWeight: 600, fontSize: '11px' }}>🏷️ Con Prefijo</span>;
+                    }
+
+                    const placeholder = isCodex ? 'codex_...' : 'agy_...';
+                    const isModified = draft !== currentPref;
+
+                    return (
+                      <tr
+                        key={n.id}
+                        data-testid={`prefix-row-${n.id}`}
+                        style={{ borderBottom: '1px solid rgba(51, 65, 85, 0.3)', transition: 'background-color 0.15s' }}
+                      >
+                        {/* 1. PROVEEDOR */}
+                        <td style={{ padding: '10px 8px' }}>
+                          <span
+                            style={{
+                              fontSize: '10px',
+                              fontWeight: 700,
+                              padding: '2px 7px',
+                              borderRadius: '4px',
+                              fontFamily: 'monospace',
+                              background: isCodex ? 'rgba(56, 139, 253, 0.15)' : 'rgba(35, 134, 54, 0.15)',
+                              color: isCodex ? '#79c0ff' : '#3fb950',
+                              border: isCodex ? '1px solid rgba(56, 139, 253, 0.4)' : '1px solid rgba(46, 160, 67, 0.4)',
+                            }}
+                          >
+                            {prov}
+                          </span>
+                        </td>
+
+                        {/* 2. CUENTA / CORREO */}
+                        <td style={{ padding: '10px 8px', maxWidth: '240px' }}>
+                          <div style={{ fontWeight: 600, color: '#f1f5f9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={label}>
+                            {label}
+                          </div>
+                          <div style={{ fontSize: '10px', color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={fileName}>
+                            #{fileName}
+                          </div>
+                        </td>
+
+                        {/* 3. ROL / ESTADO */}
+                        <td style={{ padding: '10px 8px' }}>
+                          {roleBadge}
+                        </td>
+
+                        {/* 4. PREFIJO EDITABLE */}
+                        <td style={{ padding: '10px 8px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <input
+                              type="text"
+                              className="group-modal-input"
+                              style={{
+                                width: '130px',
+                                padding: '4px 8px',
+                                fontSize: '12px',
+                                borderColor: isModified ? '#d29922' : 'var(--border-color, #30363d)',
+                              }}
+                              placeholder={placeholder}
+                              value={draft}
+                              onChange={(e) =>
+                                setPendingPrefixDrafts((prev) => ({ ...prev, [n.id]: e.target.value }))
+                              }
+                              data-testid={`input-table-prefix-${n.id}`}
+                            />
+                            <button
+                              type="button"
+                              className="btn btn-primary"
+                              style={{ padding: '4px 8px', fontSize: '11px' }}
+                              onClick={() => handleSavePendingPrefix(n.id)}
+                              data-testid={`btn-save-table-prefix-${n.id}`}
+                              disabled={!isModified}
+                              title="Aplicar prefijo"
+                            >
+                              ✓
+                            </button>
+                            {draft && (
+                              <button
+                                type="button"
+                                className="btn btn-outline"
+                                style={{ padding: '4px 6px', fontSize: '11px', color: '#f85149' }}
+                                onClick={() => {
+                                  setPendingPrefixDrafts((prev) => ({ ...prev, [n.id]: '' }));
+                                  dispatch({ type: 'UPDATE_NODE_PREFIX', id: n.id, prefix: '' });
+                                  if (typeof onGraphChange === 'function') onGraphChange();
+                                }}
+                                title="Limpiar prefijo a vacío"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                  {filteredTableNodes.length === 0 && (
+                    <tr>
+                      <td colSpan="4" style={{ textAlign: 'center', padding: '24px', color: '#94a3b8', fontStyle: 'italic' }}>
+                        No hay cuentas que coincidan con el filtro seleccionado.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="group-modal-footer">
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => setIsPendingModalOpen(false)}
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 });

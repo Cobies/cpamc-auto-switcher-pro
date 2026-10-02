@@ -40,8 +40,8 @@ func TestPluginMetadataAndRegistration(t *testing.T) {
 	if payload.SchemaVersion != 6 {
 		t.Errorf("expected schema version 6, got %d", payload.SchemaVersion)
 	}
-	if payload.Metadata.Name != "visual-profile" {
-		t.Errorf("expected plugin name 'visual-profile', got %q", payload.Metadata.Name)
+	if payload.Metadata.Name != "Auto switcher pro" {
+		t.Errorf("expected plugin name 'Auto switcher pro', got %q", payload.Metadata.Name)
 	}
 	if payload.Metadata.Version != version.Version {
 		t.Errorf("expected plugin version %q, got %q", version.Version, payload.Metadata.Version)

@@ -1,0 +1,809 @@
+/* =========================================================================
+   CPAMC CENTRO DE CONTROL DE INFRAESTRUCTURA IA - STYLES PIXEL PERFECT
+   Coincidencia exacta con la referencia visual (tres.jpg)
+   ========================================================================= */
+
+.control-switcher-view {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+  max-width: 1380px;
+  margin: 0 auto;
+  padding: 16px 20px 40px;
+  box-sizing: border-box;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: #f1f5f9;
+}
+
+/* 1. HERO BANNER */
+.cs-hero-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 18px 24px;
+  background: rgba(13, 17, 23, 0.7);
+  border: 1px solid rgba(168, 85, 247, 0.25);
+  border-radius: 16px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.cs-hero-left {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cs-tag-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cs-badge-cat {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(168, 85, 247, 0.15);
+  color: #d8b4fe;
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.cs-status-indicator {
+  font-size: 11px;
+  font-weight: 700;
+  color: #34d399;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cs-dot-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #34d399;
+  box-shadow: 0 0 10px #34d399;
+  animation: cs-pulse 2s infinite;
+}
+
+@keyframes cs-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+.cs-badge-port {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: #1e293b;
+  color: #94a3b8;
+  border: 1px solid #334155;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.cs-title {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 0;
+  letter-spacing: -0.02em;
+}
+
+.cs-title-icon {
+  font-size: 1.2rem;
+}
+
+.cs-subtitle {
+  font-size: 11px;
+  color: #94a3b8;
+  max-width: 680px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.cs-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.cs-btn-force {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 8px;
+  background: rgba(147, 51, 234, 0.25);
+  border: 1px solid rgba(168, 85, 247, 0.4);
+  color: #e9d5ff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.cs-btn-force:hover:not(:disabled) {
+  background: rgba(147, 51, 234, 0.45);
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.35);
+}
+
+.cs-btn-force:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.cs-bolt-icon {
+  font-size: 12px;
+}
+
+.cs-btn-refresh {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #111827;
+  border: 1px solid #374151;
+  color: #cbd5e1;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.cs-btn-refresh:hover:not(:disabled) {
+  background: #1f2937;
+  color: #ffffff;
+}
+
+.cs-refresh-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+
+.cs-refresh-icon.spinning {
+  animation: cs-spin 0.8s linear infinite;
+}
+
+@keyframes cs-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Alert Boxes */
+.cs-alert-success,
+.cs-alert-error {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.cs-alert-success {
+  background: rgba(6, 78, 59, 0.3);
+  border: 1px solid rgba(52, 211, 153, 0.4);
+  color: #6ee7b7;
+}
+
+.cs-alert-error {
+  background: rgba(136, 19, 55, 0.3);
+  border: 1px solid rgba(244, 63, 94, 0.4);
+  color: #fda4af;
+}
+
+.cs-alert-close {
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+/* 2. POOLS GRID */
+.cs-pools-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  align-items: stretch;
+}
+
+@media (max-width: 1024px) {
+  .cs-pools-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cs-pool-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  background: rgba(13, 17, 23, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 18px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: all 0.2s ease;
+}
+
+.cs-pool-card:hover {
+  border-color: rgba(168, 85, 247, 0.35);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.cs-pool-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.cs-pool-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cs-pool-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.cs-pool-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0;
+}
+
+.cs-pool-model {
+  font-size: 11px;
+  color: #c084fc;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  margin-top: 3px;
+}
+
+.cs-status-badge {
+  font-size: 9px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.cs-badge-exhausted {
+  background: rgba(244, 63, 94, 0.15);
+  color: #fda4af;
+  border: 1px solid rgba(244, 63, 94, 0.4);
+}
+
+.cs-badge-warning {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fde68a;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.cs-badge-healthy {
+  background: rgba(16, 185, 129, 0.15);
+  color: #6ee7b7;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+/* ACTIVE ACCOUNT BOX */
+.cs-active-box {
+  background: rgba(7, 9, 14, 0.7);
+  border: 1px solid rgba(51, 65, 85, 0.6);
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 16px;
+}
+
+.cs-active-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.cs-active-label {
+  font-size: 9px;
+  font-weight: 800;
+  color: #94a3b8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  letter-spacing: 0.05em;
+}
+
+.cs-active-badge {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(168, 85, 247, 0.2);
+  color: #d8b4fe;
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.cs-active-email {
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffffff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  margin-bottom: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cs-quota-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cs-metric-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cs-metric-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.cs-metric-label {
+  color: #94a3b8;
+}
+
+.cs-metric-val {
+  font-weight: 600;
+}
+
+.cs-progress-track {
+  width: 100%;
+  height: 5px;
+  background: rgba(51, 65, 85, 0.4);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.cs-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+
+.cs-remaining-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 6px;
+  border-top: 1px solid rgba(51, 65, 85, 0.35);
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* SPECTRAL TRUECOLOR GAUGE */
+.cs-spectral-gauge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(51, 65, 85, 0.45);
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.cs-gauge-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.cs-gauge-cells {
+  display: inline-flex;
+  gap: 2px;
+  letter-spacing: 1px;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.cs-gauge-glyph-fill,
+.cs-gauge-glyph-empty {
+  display: inline-block;
+  transition: color 0.2s ease;
+}
+
+.cs-gauge-pct {
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 44px;
+  text-align: right;
+}
+
+.cs-remaining-label {
+  color: #94a3b8;
+}
+
+.cs-remaining-val {
+  font-weight: 700;
+  color: #ffffff;
+}
+
+/* RESERVES SECTION */
+.cs-reserves-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+  flex: 1;
+}
+
+.cs-reserves-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 800;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  letter-spacing: 0.05em;
+}
+
+.cs-reserves-title {
+  color: #94a3b8;
+}
+
+.cs-reserves-count {
+  color: #c084fc;
+}
+
+.cs-reserves-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cs-reserve-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: rgba(7, 9, 14, 0.6);
+  border: 1px solid rgba(51, 65, 85, 0.45);
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.cs-reserve-item-best {
+  border-color: rgba(234, 179, 8, 0.45);
+  background: rgba(30, 25, 10, 0.4);
+  box-shadow: 0 0 12px rgba(234, 179, 8, 0.08);
+}
+
+.cs-reserve-item:hover {
+  border-color: rgba(168, 85, 247, 0.35);
+}
+
+.cs-reserve-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow: hidden;
+  padding-right: 6px;
+}
+
+.cs-reserve-email-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cs-badge-best-candidate {
+  font-size: 8.5px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(234, 179, 8, 0.2);
+  color: #fde047;
+  border: 1px solid rgba(234, 179, 8, 0.4);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  letter-spacing: 0.02em;
+}
+
+.cs-reserve-email {
+  font-size: 11px;
+  font-weight: 700;
+  color: #cbd5e1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cs-reserve-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.cs-reserve-prefix {
+  color: #c084fc;
+  font-weight: 600;
+}
+
+.cs-reserve-avail {
+  color: #34d399;
+}
+
+.cs-reserve-reset {
+  color: #f59e0b;
+}
+
+.cs-reserve-badge {
+  font-size: 9px;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.cs-reserve-badge.lista {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.cs-reserve-badge.agotada {
+  background: rgba(244, 63, 94, 0.15);
+  color: #fda4af;
+  border: 1px solid rgba(244, 63, 94, 0.3);
+}
+
+.cs-reserves-empty {
+  padding: 10px;
+  font-size: 11px;
+  color: #64748b;
+  font-style: italic;
+  text-align: center;
+}
+
+/* CARD FOOTER */
+.cs-pool-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 12px;
+  margin-top: auto;
+  border-top: 1px solid rgba(51, 65, 85, 0.4);
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.cs-footer-label {
+  color: #64748b;
+}
+
+.cs-footer-code {
+  color: #d8b4fe;
+  font-weight: 700;
+  background: rgba(147, 51, 234, 0.15);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid rgba(168, 85, 247, 0.25);
+}
+
+/* 3. SPECIALISTS SECTION */
+.cs-specialists-section {
+  background: rgba(13, 17, 23, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 18px 20px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.cs-specialists-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.cs-specialists-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.cs-shield-icon {
+  font-size: 16px;
+  margin-top: 2px;
+}
+
+.cs-specialists-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: #ffffff;
+  margin: 0;
+}
+
+.cs-specialists-desc {
+  font-size: 11px;
+  color: #94a3b8;
+  margin: 3px 0 0;
+  line-height: 1.4;
+}
+
+.cs-badge-online {
+  font-size: 9px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: nowrap;
+}
+
+.cs-specialists-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+@media (max-width: 768px) {
+  .cs-specialists-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cs-specialist-card {
+  background: rgba(7, 9, 14, 0.7);
+  border: 1px solid rgba(51, 65, 85, 0.6);
+  border-radius: 12px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cs-specialist-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.cs-spec-title-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cs-spec-icon {
+  font-size: 12px;
+}
+
+.cs-spec-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.cs-spec-badge {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(168, 85, 247, 0.2);
+  color: #d8b4fe;
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.cs-spec-role {
+  font-size: 11px;
+  color: #94a3b8;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.cs-spec-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(15, 23, 42, 0.6);
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(51, 65, 85, 0.4);
+}
+
+.cs-spec-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.cs-spec-label {
+  color: #94a3b8;
+}
+
+.cs-spec-model {
+  color: #34d399;
+  font-weight: 700;
+}
+
+.cs-spec-code {
+  color: #d8b4fe;
+  font-weight: 600;
+}
+
+/* 4. RULES FOOTER */
+.cs-rules-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 18px;
+  background: rgba(7, 9, 14, 0.6);
+  border: 1px solid rgba(51, 65, 85, 0.5);
+  border-radius: 12px;
+  font-size: 11px;
+  color: #94a3b8;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.cs-rules-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 820px;
+  line-height: 1.4;
+}
+
+.cs-gear-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.cs-rules-left strong {
+  color: #e2e8f0;
+}
+
+.cs-rules-right {
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #64748b;
+  white-space: nowrap;
+}

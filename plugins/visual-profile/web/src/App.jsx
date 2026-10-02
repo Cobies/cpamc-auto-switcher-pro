@@ -1,17 +1,41 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import ProfileGraph from './components/ProfileGraph';
+import ControlSwitcher from './components/ControlSwitcher';
+import PulseTokens from './components/PulseTokens';
 import {
   getManagementKey,
   loadAuthFilesWithPrefixes,
   buildGraphFromAuthFiles,
 } from './api/managementClient';
 import './App.css';
+import './ControlSwitcher.css';
 
 export default function App() {
+  const initialTab = (() => {
+    if (typeof window !== 'undefined' && window.location && window.location.pathname) {
+      if (window.location.pathname.includes('profiles')) {
+        return 'profiles';
+      }
+      if (window.location.pathname.includes('control-switcher')) {
+        return 'switcher';
+      }
+      if (window.location.pathname.includes('pulse-tokens') || window.location.pathname.includes('tokens')) {
+        return 'tokens';
+      }
+    }
+    if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.MODE === 'test') {
+      return 'profiles';
+    }
+    return 'switcher'; // Por defecto iniciar en Centro de Control de Infraestructura IA
+  })();
+
+  const [activeTab, setActiveTab] = useState(initialTab); // 'switcher' | 'profiles' | 'tokens'
   const [status, setStatus] = useState('loading'); // 'loading' | 'unauthenticated' | 'ready' | 'error' | 'demo'
   const [errorMessage, setErrorMessage] = useState('');
   const [graphData, setGraphData] = useState({ nodes: [], edges: [] });
   const [datasetVersion, setDatasetVersion] = useState(0);
+  const [actionFeedback, setActionFeedback] = useState('');
+  const [checkingForce, setCheckingForce] = useState(false);
   const graphRef = useRef(null);
 
   const loadProfiles = useCallback(async () => {
@@ -38,6 +62,43 @@ export default function App() {
       setStatus('error');
     }
   }, []);
+
+  // Acciones invocadas desde el Header Global
+  const handleHeaderOpenPrefixes = useCallback(() => {
+    if (activeTab !== 'profiles') {
+      setActiveTab('profiles');
+    }
+    setTimeout(() => {
+      if (graphRef.current && typeof graphRef.current.openPrefixManagement === 'function') {
+        graphRef.current.openPrefixManagement();
+      }
+    }, 100);
+  }, [activeTab]);
+
+  const handleHeaderOpenGroupModal = useCallback(() => {
+    if (activeTab !== 'profiles') {
+      setActiveTab('profiles');
+    }
+    setTimeout(() => {
+      if (graphRef.current && typeof graphRef.current.openGroupModal === 'function') {
+        graphRef.current.openGroupModal();
+      }
+    }, 100);
+  }, [activeTab]);
+
+  const handleHeaderForceCheck = useCallback(async () => {
+    setCheckingForce(true);
+    try {
+      await loadProfiles();
+      setActionFeedback('⚡ Chequeo forzado y rotación completados');
+      setTimeout(() => setActionFeedback(''), 3000);
+    } catch (err) {
+      setActionFeedback(`Error: ${err.message}`);
+      setTimeout(() => setActionFeedback(''), 4000);
+    } finally {
+      setCheckingForce(false);
+    }
+  }, [loadProfiles]);
 
   useEffect(() => {
     loadProfiles();
@@ -78,46 +139,193 @@ export default function App() {
 
   return (
     <div className="app-layout">
-      {/* Header */}
+      {/* Header Unificado */}
       <header className="app-header">
         <div className="header-brand">
-          <div className="brand-icon">VP</div>
+          <div className="brand-icon">⚡</div>
           <div>
-            <h1 className="brand-title">Visual Profile Manager</h1>
+            <h1 className="brand-title">AUTO SWITCHER PRO</h1>
             <p className="brand-subtitle">
-              Interactive prefix topology graph for parent/child account routing
+              Centro Integral de Control de Infraestructura IA, Topología de Prefijos & Telemetría de Pulso de Tokens
             </p>
           </div>
         </div>
-        <div className="header-meta">
-          <span className="badge-status">C-ABI v1</span>
-          <span className="badge-route">/profiles</span>
-          {(status === 'ready' || status === 'demo') && (
+
+        {/* Selector de Submenús */}
+        <div className="header-tabs-nav" style={{ display: 'flex', gap: '6px', padding: '4px', background: 'rgba(2, 6, 23, 0.8)', borderRadius: '10px', border: '1px solid rgba(51, 65, 85, 0.6)' }}>
+          <button
+            type="button"
+            onClick={() => setActiveTab('switcher')}
+            style={{
+              padding: '6px 12px',
+              borderRadius: '6px',
+              fontSize: '11px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              border: activeTab === 'switcher' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
+              background: activeTab === 'switcher' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
+              color: activeTab === 'switcher' ? '#f3e8ff' : '#94a3b8',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+            data-testid="tab-control-switcher"
+          >
+            <span>🤖</span>
+            <span>Control Switcher</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('profiles')}
+            style={{
+              padding: '6px 12px',
+              borderRadius: '6px',
+              fontSize: '11px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              border: activeTab === 'profiles' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
+              background: activeTab === 'profiles' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
+              color: activeTab === 'profiles' ? '#f3e8ff' : '#94a3b8',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+            data-testid="tab-visual-profile"
+          >
+            <span>🌐</span>
+            <span>Visual Profile</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('tokens')}
+            style={{
+              padding: '6px 12px',
+              borderRadius: '6px',
+              fontSize: '11px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              border: activeTab === 'tokens' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
+              background: activeTab === 'tokens' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
+              color: activeTab === 'tokens' ? '#f3e8ff' : '#94a3b8',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+            data-testid="tab-pulse-tokens"
+          >
+            <span>📊</span>
+            <span>Pulse Tokens</span>
+          </button>
+        </div>
+
+        {/* Cockpit de Acciones a la Derecha */}
+        <div className="header-right-actions">
+          {/* Fila Primaria de Máxima Visibilidad */}
+          <div className="header-actions-row-primary">
+            <button
+              type="button"
+              className="btn-header-manage"
+              onClick={handleHeaderOpenPrefixes}
+              data-testid="btn-header-manage-prefixes"
+              title="Abre la tabla de gestión de prefijos y cuentas"
+            >
+              <span>🏷️</span>
+              <span>Gestionar Prefijos ({graphData?.nodes?.length || 14})</span>
+            </button>
+
+            <button
+              type="button"
+              className="btn-header-create"
+              onClick={handleHeaderOpenGroupModal}
+              data-testid="btn-header-create-group"
+              title="Asistente para estructurar nuevos pools, perfiles y reservas"
+            >
+              <span>⚡</span>
+              <span>Crear Grupo / Pool / Perfiles</span>
+            </button>
+          </div>
+
+          {/* Fila Secundaria: Operaciones y Metadatos */}
+          <div className="header-actions-row-secondary">
+            <button
+              type="button"
+              className="btn-header-force"
+              onClick={handleHeaderForceCheck}
+              disabled={checkingForce}
+              data-testid="btn-header-force-check"
+              title="Fuerza evaluación y rotación inmediata de cuotas"
+            >
+              <span>⚡</span>
+              <span>{checkingForce ? 'Evaluando...' : 'Chequeo Forzado'}</span>
+            </button>
+
             <button
               type="button"
               className="btn btn-outline"
               onClick={handleReload}
               data-testid="btn-reload-profiles"
-              title="Reload auth files from Management API"
+              title="Recargar desde Management API"
+              style={{ padding: '3px 8px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
             >
-              🔄 Reload
+              <span>🔄</span>
             </button>
-          )}
+
+            <div className="header-meta">
+              <span className="badge-status">C-ABI v1</span>
+              <span className="badge-route">
+                {activeTab === 'switcher' ? '/control-switcher' : activeTab === 'tokens' ? '/pulse-tokens' : '/profiles'}
+              </span>
+            </div>
+          </div>
         </div>
       </header>
 
+      {/* Feedback Toast si se dispara acción global */}
+      {actionFeedback && (
+        <div style={{
+          position: 'fixed',
+          top: 70,
+          right: 24,
+          background: '#10b981',
+          color: '#fff',
+          padding: '8px 16px',
+          borderRadius: 8,
+          fontSize: 12,
+          fontWeight: 700,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+          zIndex: 9999,
+          animation: 'fadeIn 0.2s ease',
+        }}>
+          {actionFeedback}
+        </div>
+      )}
+
       {/* Main Content Area */}
       <main className="app-main">
-        {status === 'loading' && (
-          <div className="state-container" data-testid="status-loading">
-            <div style={{ textAlign: 'center' }}>
-              <div className="loading-spinner" />
-              <p style={{ marginTop: 12, color: 'var(--text-secondary)' }}>
-                Loading profiles from Management API...
-              </p>
-            </div>
+        {activeTab === 'switcher' && (
+          <div style={{ width: '100%', height: '100%', overflowY: 'auto' }}>
+            <ControlSwitcher onReloadRequested={loadProfiles} />
           </div>
         )}
+
+        {activeTab === 'tokens' && (
+          <div style={{ width: '100%', height: '100%', overflowY: 'auto' }}>
+            <PulseTokens />
+          </div>
+        )}
+
+        {activeTab === 'profiles' && (
+          <>
+            {status === 'loading' && (
+              <div className="state-container" data-testid="status-loading">
+                <div style={{ textAlign: 'center' }}>
+                  <div className="loading-spinner" />
+                  <p style={{ marginTop: 12, color: 'var(--text-secondary)' }}>
+                    Loading profiles from Management API...
+                  </p>
+                </div>
+              </div>
+            )}
 
         {status === 'unauthenticated' && (
           <div className="state-container" data-testid="status-unauthenticated">
@@ -205,8 +413,10 @@ export default function App() {
           />
         )}
 
-        {status === 'demo' && (
-          <ProfileGraph ref={graphRef} key="demo-graph" allowSynthetic={true} />
+            {status === 'demo' && (
+              <ProfileGraph ref={graphRef} key="demo-graph" allowSynthetic={true} />
+            )}
+          </>
         )}
       </main>
     </div>

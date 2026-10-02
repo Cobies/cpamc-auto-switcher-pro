@@ -46,8 +46,8 @@ func TestHandlePluginMethod_PluginRegister(t *testing.T) {
 		if payload.SchemaVersion != 6 {
 			t.Errorf("expected schema version 6, got %d", payload.SchemaVersion)
 		}
-		if payload.Metadata.Name != "visual-profile" {
-			t.Errorf("expected plugin name 'visual-profile', got %q", payload.Metadata.Name)
+		if payload.Metadata.Name != "Auto switcher pro" {
+			t.Errorf("expected plugin name 'Auto switcher pro', got %q", payload.Metadata.Name)
 		}
 		if payload.Metadata.Version != version.Version {
 			t.Errorf("expected version %q, got %q", version.Version, payload.Metadata.Version)
@@ -90,6 +90,7 @@ func TestHandlePluginMethod_ManagementRegister(t *testing.T) {
 	}
 
 	foundProfilesRoute := false
+	foundTokensRoute := false
 	for _, res := range payload.Resources {
 		if res.Path == "/profiles" {
 			foundProfilesRoute = true
@@ -97,9 +98,18 @@ func TestHandlePluginMethod_ManagementRegister(t *testing.T) {
 				t.Errorf("expected Menu 'Visual Profile', got %q", res.Menu)
 			}
 		}
+		if res.Path == "/pulse-tokens" {
+			foundTokensRoute = true
+			if res.Menu != "Pulse Tokens" {
+				t.Errorf("expected Menu 'Pulse Tokens', got %q", res.Menu)
+			}
+		}
 	}
 	if !foundProfilesRoute {
 		t.Errorf("expected route '/profiles' in registered resources, got %+v", payload.Resources)
+	}
+	if !foundTokensRoute {
+		t.Errorf("expected route '/pulse-tokens' in registered resources, got %+v", payload.Resources)
 	}
 }
 
@@ -112,10 +122,16 @@ func TestMatchProfilesRoute_ExactSegmentScoped(t *testing.T) {
 		{"/profiles/", "index.html"},
 		{"/profiles/index.html", "index.html"},
 		{"/profiles/assets/index.js", "assets/index.js"},
+		{"/control-switcher", "index.html"},
+		{"/control-switcher/", "index.html"},
+		{"/pulse-tokens", "index.html"},
+		{"/pulse-tokens/", "index.html"},
+		{"/pulso-tokens", "index.html"},
 		{"/v0/resource/plugins/visual-profile/profiles", "index.html"},
 		{"/v0/resource/plugins/visual-profile/profiles/", "index.html"},
 		{"/v0/resource/plugins/visual-profile/profiles/index.html", "index.html"},
 		{"/v0/resource/plugins/visual-profile/profiles/assets/index.js", "assets/index.js"},
+		{"/v0/resource/plugins/visual-profile/pulse-tokens", "index.html"},
 	}
 
 	for _, tc := range validCases {
