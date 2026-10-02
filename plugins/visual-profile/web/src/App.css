@@ -88,24 +88,30 @@ body, html {
   color: var(--text-secondary);
 }
 
-/* Header Right Actions Cockpit */
-.header-right-actions {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 6px;
-}
-
-.header-actions-row-primary {
+/* Header Left Cluster & Inline Actions */
+.header-left-cluster {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
-.header-actions-row-secondary {
+.header-divider {
+  width: 1px;
+  height: 28px;
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.header-actions-inline {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+}
+
+.header-right-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .btn-header-manage {
@@ -122,6 +128,7 @@ body, html {
   cursor: pointer;
   transition: all 0.2s ease;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  white-space: nowrap;
 }
 
 .btn-header-manage:hover {
@@ -146,6 +153,7 @@ body, html {
   transition: all 0.2s ease;
   box-shadow: 0 0 14px rgba(147, 51, 234, 0.45);
   letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 .btn-header-create:hover {
@@ -158,16 +166,17 @@ body, html {
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 4px 10px;
+  padding: 5px 12px;
   background-color: rgba(147, 51, 234, 0.2);
   border: 1px solid rgba(168, 85, 247, 0.4);
   color: #e9d5ff;
   border-radius: 6px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   font-family: var(--font-mono);
   cursor: pointer;
   transition: all 0.15s ease;
+  white-space: nowrap;
 }
 
 .btn-header-force:hover:not(:disabled) {

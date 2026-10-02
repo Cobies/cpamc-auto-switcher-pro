@@ -141,87 +141,91 @@ export default function App() {
     <div className="app-layout">
       {/* Header Unificado */}
       <header className="app-header">
-        <div className="header-brand">
-          <div className="brand-icon">⚡</div>
-          <div>
-            <h1 className="brand-title">AUTO SWITCHER PRO</h1>
-            <p className="brand-subtitle">
-              Centro Integral de Control de Infraestructura IA, Topología de Prefijos & Telemetría de Pulso de Tokens
-            </p>
+        {/* Lado Izquierdo: Identidad, Submenús y Acciones Estructurales */}
+        <div className="header-left-cluster">
+          <div className="header-brand">
+            <div className="brand-icon">⚡</div>
+            <div>
+              <h1 className="brand-title">AUTO SWITCHER PRO</h1>
+              <p className="brand-subtitle">
+                Centro Integral de Control de Infraestructura IA
+              </p>
+            </div>
           </div>
-        </div>
 
-        {/* Selector de Submenús */}
-        <div className="header-tabs-nav" style={{ display: 'flex', gap: '6px', padding: '4px', background: 'rgba(2, 6, 23, 0.8)', borderRadius: '10px', border: '1px solid rgba(51, 65, 85, 0.6)' }}>
-          <button
-            type="button"
-            onClick={() => setActiveTab('switcher')}
-            style={{
-              padding: '6px 12px',
-              borderRadius: '6px',
-              fontSize: '11px',
-              fontWeight: 700,
-              cursor: 'pointer',
-              border: activeTab === 'switcher' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
-              background: activeTab === 'switcher' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
-              color: activeTab === 'switcher' ? '#f3e8ff' : '#94a3b8',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-            data-testid="tab-control-switcher"
-          >
-            <span>🤖</span>
-            <span>Control Switcher</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('profiles')}
-            style={{
-              padding: '6px 12px',
-              borderRadius: '6px',
-              fontSize: '11px',
-              fontWeight: 700,
-              cursor: 'pointer',
-              border: activeTab === 'profiles' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
-              background: activeTab === 'profiles' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
-              color: activeTab === 'profiles' ? '#f3e8ff' : '#94a3b8',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-            data-testid="tab-visual-profile"
-          >
-            <span>🌐</span>
-            <span>Visual Profile</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('tokens')}
-            style={{
-              padding: '6px 12px',
-              borderRadius: '6px',
-              fontSize: '11px',
-              fontWeight: 700,
-              cursor: 'pointer',
-              border: activeTab === 'tokens' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
-              background: activeTab === 'tokens' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
-              color: activeTab === 'tokens' ? '#f3e8ff' : '#94a3b8',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-            data-testid="tab-pulse-tokens"
-          >
-            <span>📊</span>
-            <span>Pulse Tokens</span>
-          </button>
-        </div>
+          <div className="header-divider" />
 
-        {/* Cockpit de Acciones a la Derecha */}
-        <div className="header-right-actions">
-          {/* Fila Primaria de Máxima Visibilidad */}
-          <div className="header-actions-row-primary">
+          {/* Selector de Submenús */}
+          <div className="header-tabs-nav" style={{ display: 'flex', gap: '6px', padding: '4px', background: 'rgba(2, 6, 23, 0.8)', borderRadius: '10px', border: '1px solid rgba(51, 65, 85, 0.6)' }}>
+            <button
+              type="button"
+              onClick={() => setActiveTab('switcher')}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                border: activeTab === 'switcher' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
+                background: activeTab === 'switcher' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
+                color: activeTab === 'switcher' ? '#f3e8ff' : '#94a3b8',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+              data-testid="tab-control-switcher"
+            >
+              <span>🤖</span>
+              <span>Control Switcher</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('profiles')}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                border: activeTab === 'profiles' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
+                background: activeTab === 'profiles' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
+                color: activeTab === 'profiles' ? '#f3e8ff' : '#94a3b8',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+              data-testid="tab-visual-profile"
+            >
+              <span>🌐</span>
+              <span>Visual Profile</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('tokens')}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                border: activeTab === 'tokens' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
+                background: activeTab === 'tokens' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
+                color: activeTab === 'tokens' ? '#f3e8ff' : '#94a3b8',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+              data-testid="tab-pulse-tokens"
+            >
+              <span>📊</span>
+              <span>Pulse Tokens</span>
+            </button>
+          </div>
+
+          <div className="header-divider" />
+
+          {/* Acciones de Gestión y Pools (En el Lado Izquierdo) */}
+          <div className="header-actions-inline">
             <button
               type="button"
               className="btn-header-manage"
@@ -244,38 +248,38 @@ export default function App() {
               <span>Crear Grupo / Pool / Perfiles</span>
             </button>
           </div>
+        </div>
 
-          {/* Fila Secundaria: Operaciones y Metadatos */}
-          <div className="header-actions-row-secondary">
-            <button
-              type="button"
-              className="btn-header-force"
-              onClick={handleHeaderForceCheck}
-              disabled={checkingForce}
-              data-testid="btn-header-force-check"
-              title="Fuerza evaluación y rotación inmediata de cuotas"
-            >
-              <span>⚡</span>
-              <span>{checkingForce ? 'Evaluando...' : 'Chequeo Forzado'}</span>
-            </button>
+        {/* Lado Derecho: Utilidades de Telemetría y Estado C-ABI */}
+        <div className="header-right-meta">
+          <button
+            type="button"
+            className="btn-header-force"
+            onClick={handleHeaderForceCheck}
+            disabled={checkingForce}
+            data-testid="btn-header-force-check"
+            title="Fuerza evaluación y rotación inmediata de cuotas"
+          >
+            <span>⚡</span>
+            <span>{checkingForce ? 'Evaluando...' : 'Chequeo Forzado'}</span>
+          </button>
 
-            <button
-              type="button"
-              className="btn btn-outline"
-              onClick={handleReload}
-              data-testid="btn-reload-profiles"
-              title="Recargar desde Management API"
-              style={{ padding: '3px 8px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
-            >
-              <span>🔄</span>
-            </button>
+          <button
+            type="button"
+            className="btn btn-outline"
+            onClick={handleReload}
+            data-testid="btn-reload-profiles"
+            title="Recargar desde Management API"
+            style={{ padding: '4px 8px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
+          >
+            <span>🔄</span>
+          </button>
 
-            <div className="header-meta">
-              <span className="badge-status">C-ABI v1</span>
-              <span className="badge-route">
-                {activeTab === 'switcher' ? '/control-switcher' : activeTab === 'tokens' ? '/pulse-tokens' : '/profiles'}
-              </span>
-            </div>
+          <div className="header-meta">
+            <span className="badge-status">C-ABI v1</span>
+            <span className="badge-route">
+              {activeTab === 'switcher' ? '/control-switcher' : activeTab === 'tokens' ? '/pulse-tokens' : '/profiles'}
+            </span>
           </div>
         </div>
       </header>
