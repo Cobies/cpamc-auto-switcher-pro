@@ -91,11 +91,12 @@ func TestHandlePluginMethod_ManagementRegister(t *testing.T) {
 
 	foundProfilesRoute := false
 	foundTokensRoute := false
+	foundCreateRoute := false
 	for _, res := range payload.Resources {
 		if res.Path == "/profiles" {
 			foundProfilesRoute = true
-			if res.Menu != "Visual Profile" {
-				t.Errorf("expected Menu 'Visual Profile', got %q", res.Menu)
+			if res.Menu != "Visual Profiles" {
+				t.Errorf("expected Menu 'Visual Profiles', got %q", res.Menu)
 			}
 		}
 		if res.Path == "/pulse-tokens" {
@@ -104,12 +105,21 @@ func TestHandlePluginMethod_ManagementRegister(t *testing.T) {
 				t.Errorf("expected Menu 'Pulse Tokens', got %q", res.Menu)
 			}
 		}
+		if res.Path == "/create-prefixes" {
+			foundCreateRoute = true
+			if res.Menu != "⚡ Crear Prefijos" {
+				t.Errorf("expected Menu '⚡ Crear Prefijos', got %q", res.Menu)
+			}
+		}
 	}
 	if !foundProfilesRoute {
 		t.Errorf("expected route '/profiles' in registered resources, got %+v", payload.Resources)
 	}
 	if !foundTokensRoute {
 		t.Errorf("expected route '/pulse-tokens' in registered resources, got %+v", payload.Resources)
+	}
+	if !foundCreateRoute {
+		t.Errorf("expected route '/create-prefixes' in registered resources, got %+v", payload.Resources)
 	}
 }
 
@@ -127,6 +137,8 @@ func TestMatchProfilesRoute_ExactSegmentScoped(t *testing.T) {
 		{"/pulse-tokens", "index.html"},
 		{"/pulse-tokens/", "index.html"},
 		{"/pulso-tokens", "index.html"},
+		{"/create-prefixes", "index.html"},
+		{"/create-prefixes/", "index.html"},
 		{"/v0/resource/plugins/visual-profile/profiles", "index.html"},
 		{"/v0/resource/plugins/visual-profile/profiles/", "index.html"},
 		{"/v0/resource/plugins/visual-profile/profiles/index.html", "index.html"},

@@ -935,30 +935,6 @@ const ProfileGraph = forwardRef(function ProfileGraph(
         </div>
 
         <div className="toolbar-controls">
-          <button
-            type="button"
-            onClick={handleOpenPrefixManagement}
-            className="btn btn-outline"
-            data-testid="btn-open-pending-prefixes"
-            title="Gestión centralizada de prefijos de todas las cuentas"
-            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-          >
-            <span>🏷️</span>
-            <span>Gestionar Prefijos ({nodes.length})</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleOpenGroupModal}
-            className="btn btn-secondary"
-            data-testid="btn-open-group-modal"
-            title="Estructurar un nuevo grupo o pool de perfiles"
-            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-          >
-            <span>⚡</span>
-            <span>Crear Grupo / Pool</span>
-          </button>
-
           {allowSynthetic && (
             <>
               <div className="input-group">

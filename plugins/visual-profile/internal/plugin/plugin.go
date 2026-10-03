@@ -75,13 +75,18 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 		regResponse := map[string]any{
 			"resources": []map[string]any{
 				{
+					"Path":        "/create-prefixes",
+					"Menu":        "⚡ Crear Prefijos",
+					"Description": "Gestor y creador integral de prefijos de enrutamiento y cuentas",
+				},
+				{
 					"Path":        "/control-switcher",
 					"Menu":        "Control Switcher",
 					"Description": "CPAMC · Centro de Control de Infraestructura IA",
 				},
 				{
 					"Path":        "/profiles",
-					"Menu":        "Visual Profile",
+					"Menu":        "Visual Profiles",
 					"Description": "Visual profile prefix management and topology editor",
 				},
 				{
@@ -131,7 +136,7 @@ func MatchProfilesRoute(rawPath string) (subpath string, matched bool) {
 
 	matchedIdx := -1
 	for i, seg := range segments {
-		if seg == "profiles" || seg == "control-switcher" || seg == "pulse-tokens" || seg == "pulso-tokens" {
+		if seg == "profiles" || seg == "control-switcher" || seg == "pulse-tokens" || seg == "pulso-tokens" || seg == "create-prefixes" {
 			matchedIdx = i
 			break
 		}

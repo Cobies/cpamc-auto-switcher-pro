@@ -50,12 +50,10 @@ describe('ProfileGraph Component and onConnect Integration', () => {
     const graphRef = React.createRef();
     render(<ProfileGraph ref={graphRef} initialNodes={initialNodes} allowSynthetic={false} />);
 
-    // El botón Crear Grupo debe estar disponible incluso cuando allowSynthetic es false (producción)
-    const openBtn = screen.getByTestId('btn-open-group-modal');
-    expect(openBtn).toBeTruthy();
-
-    // Abrir modal
-    fireEvent.click(openBtn);
+    // Abrir modal usando el método expuesto imperativo
+    act(() => {
+      graphRef.current.openGroupModal();
+    });
     expect(screen.getByText('Crear y Armar Grupo de Perfiles')).toBeTruthy();
 
     // Escribir prefijo base
@@ -90,9 +88,12 @@ describe('ProfileGraph Component and onConnect Integration', () => {
       { id: 'codex_free1', type: 'profile', position: { x: 0, y: 0 }, data: { prefix: '', provider: 'codex', email: 'codex1@test.com' } },
     ];
 
-    render(<ProfileGraph initialNodes={nodesWithProviders} allowSynthetic={false} />);
+    const graphRef = React.createRef();
+    render(<ProfileGraph ref={graphRef} initialNodes={nodesWithProviders} allowSynthetic={false} />);
 
-    fireEvent.click(screen.getByTestId('btn-open-group-modal'));
+    act(() => {
+      graphRef.current.openGroupModal();
+    });
 
     // Debe mostrar la etiqueta con el icono 👑 para la cuenta principal
     const activeLabel = screen.getByTestId('label-active-node');
@@ -114,10 +115,13 @@ describe('ProfileGraph Component and onConnect Integration', () => {
     ];
     const initialEdge = [{ id: 'edge__parent1-child1', source: 'parent1', target: 'child1' }];
 
-    render(<ProfileGraph initialNodes={initialPool} initialEdges={initialEdge} allowSynthetic={false} />);
+    const graphRef = React.createRef();
+    render(<ProfileGraph ref={graphRef} initialNodes={initialPool} initialEdges={initialEdge} allowSynthetic={false} />);
 
     // Abrir modal de grupos y seleccionar la pestaña de disolver / desagrupar
-    fireEvent.click(screen.getByTestId('btn-open-group-modal'));
+    act(() => {
+      graphRef.current.openGroupModal();
+    });
     const tabDissolve = screen.getByTestId('modal-tab-dissolve');
     fireEvent.click(tabDissolve);
 
@@ -137,9 +141,12 @@ describe('ProfileGraph Component and onConnect Integration', () => {
     ];
     const edges = [{ id: 'edge__root1-res1', source: 'root1', target: 'res1' }];
 
-    render(<ProfileGraph initialNodes={fullyAssignedNodes} initialEdges={edges} allowSynthetic={false} />);
+    const graphRef = React.createRef();
+    render(<ProfileGraph ref={graphRef} initialNodes={fullyAssignedNodes} initialEdges={edges} allowSynthetic={false} />);
 
-    fireEvent.click(screen.getByTestId('btn-open-group-modal'));
+    act(() => {
+      graphRef.current.openGroupModal();
+    });
 
     // En Armar Nuevo Pool NO debe haber cuentas candidatas
     expect(screen.getByText(/No hay cuentas libres disponibles/i)).toBeTruthy();
@@ -165,12 +172,13 @@ describe('ProfileGraph Component and onConnect Integration', () => {
       { id: 'acc2', type: 'profile', position: { x: 0, y: 0 }, data: { prefix: '', provider: 'codex', email: 'wil2@gmail.com', fileName: 'acc2.json' } },
     ];
 
-    render(<ProfileGraph initialNodes={multiNodes} allowSynthetic={false} />);
+    const graphRef = React.createRef();
+    render(<ProfileGraph ref={graphRef} initialNodes={multiNodes} allowSynthetic={false} />);
 
-    // Abrir modal de gestión central de prefijos
-    const btnManage = screen.getByTestId('btn-open-pending-prefixes');
-    expect(btnManage).toBeTruthy();
-    fireEvent.click(btnManage);
+    // Abrir modal de gestión central de prefijos usando método imperativo
+    act(() => {
+      graphRef.current.openPrefixManagement();
+    });
 
     // Debe mostrar la tabla con encabezados de columna
     expect(screen.getByText('Gestión de Prefijos y Cuentas')).toBeTruthy();

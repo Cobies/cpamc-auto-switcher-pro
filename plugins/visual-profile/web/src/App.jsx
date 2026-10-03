@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import ProfileGraph from './components/ProfileGraph';
 import ControlSwitcher from './components/ControlSwitcher';
 import PulseTokens from './components/PulseTokens';
+import PrefixManager from './components/PrefixManager';
 import {
   getManagementKey,
   loadAuthFilesWithPrefixes,
@@ -13,6 +14,9 @@ import './ControlSwitcher.css';
 export default function App() {
   const initialTab = (() => {
     if (typeof window !== 'undefined' && window.location && window.location.pathname) {
+      if (window.location.pathname.includes('create-prefixes')) {
+        return 'create-prefixes';
+      }
       if (window.location.pathname.includes('profiles')) {
         return 'profiles';
       }
@@ -26,10 +30,10 @@ export default function App() {
     if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.MODE === 'test') {
       return 'profiles';
     }
-    return 'switcher'; // Por defecto iniciar en Centro de Control de Infraestructura IA
+    return 'create-prefixes'; // Iniciar por defecto en el gestor de prefijos
   })();
 
-  const [activeTab, setActiveTab] = useState(initialTab); // 'switcher' | 'profiles' | 'tokens'
+  const [activeTab, setActiveTab] = useState(initialTab); // 'create-prefixes' | 'switcher' | 'profiles' | 'tokens'
   const [status, setStatus] = useState('loading'); // 'loading' | 'unauthenticated' | 'ready' | 'error' | 'demo'
   const [errorMessage, setErrorMessage] = useState('');
   const [graphData, setGraphData] = useState({ nodes: [], edges: [] });
@@ -159,6 +163,27 @@ export default function App() {
           <div className="header-tabs-nav" style={{ display: 'flex', gap: '6px', padding: '4px', background: 'rgba(2, 6, 23, 0.8)', borderRadius: '10px', border: '1px solid rgba(51, 65, 85, 0.6)' }}>
             <button
               type="button"
+              onClick={() => setActiveTab('create-prefixes')}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                border: activeTab === 'create-prefixes' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
+                background: activeTab === 'create-prefixes' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
+                color: activeTab === 'create-prefixes' ? '#f3e8ff' : '#94a3b8',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+              data-testid="tab-create-prefixes"
+            >
+              <span>⚡</span>
+              <span>Crear Prefijos</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setActiveTab('switcher')}
               style={{
                 padding: '6px 12px',
@@ -197,7 +222,7 @@ export default function App() {
               data-testid="tab-visual-profile"
             >
               <span>🌐</span>
-              <span>Visual Profile</span>
+              <span>Visual Profiles</span>
             </button>
             <button
               type="button"
@@ -278,7 +303,7 @@ export default function App() {
           <div className="header-meta">
             <span className="badge-status">C-ABI v1</span>
             <span className="badge-route">
-              {activeTab === 'switcher' ? '/control-switcher' : activeTab === 'tokens' ? '/pulse-tokens' : '/profiles'}
+              {activeTab === 'create-prefixes' ? '/create-prefixes' : activeTab === 'switcher' ? '/control-switcher' : activeTab === 'tokens' ? '/pulse-tokens' : '/profiles'}
             </span>
           </div>
         </div>
@@ -306,6 +331,12 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="app-main">
+        {activeTab === 'create-prefixes' && (
+          <div style={{ width: '100%', height: '100%', overflowY: 'auto' }}>
+            <PrefixManager nodes={graphData.nodes} onReloadRequested={loadProfiles} />
+          </div>
+        )}
+
         {activeTab === 'switcher' && (
           <div style={{ width: '100%', height: '100%', overflowY: 'auto' }}>
             <ControlSwitcher onReloadRequested={loadProfiles} />
