@@ -170,4 +170,19 @@ describe('App Host Component Integration', () => {
     expect(forceBtn).toBeTruthy();
     expect(forceBtn.textContent).toContain('Chequeo Forzado');
   });
+
+  it('switches to Crear Group/Pefiles tab and renders GroupManager view', async () => {
+    vi.spyOn(managementClient, 'getManagementKey').mockReturnValue('valid-key-123');
+    vi.spyOn(managementClient, 'loadAuthFilesWithPrefixes').mockResolvedValue([]);
+
+    render(<App />);
+
+    const groupTab = await screen.findByTestId('tab-create-groups');
+    expect(groupTab).toBeTruthy();
+
+    fireEvent.click(groupTab);
+
+    expect(screen.getByText('/create-groups')).toBeTruthy();
+    expect(await screen.findByTestId('group-manager-view')).toBeTruthy();
+  });
 });

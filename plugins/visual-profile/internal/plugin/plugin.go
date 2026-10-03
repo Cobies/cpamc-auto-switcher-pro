@@ -80,18 +80,23 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 					"Description": "Gestor y creador integral de prefijos de enrutamiento y cuentas",
 				},
 				{
+					"Path":        "/create-groups",
+					"Menu":        "🛠️ Crear Group/Pefiles",
+					"Description": "Asistente y orquestador para armar o disolver grupos y pools de perfiles",
+				},
+				{
 					"Path":        "/control-switcher",
-					"Menu":        "Control Switcher",
+					"Menu":        "♊ Control Switcher",
 					"Description": "CPAMC · Centro de Control de Infraestructura IA",
 				},
 				{
 					"Path":        "/profiles",
-					"Menu":        "Visual Profiles",
+					"Menu":        "🔵 Visual Profile",
 					"Description": "Visual profile prefix management and topology editor",
 				},
 				{
 					"Path":        "/pulse-tokens",
-					"Menu":        "Pulse Tokens",
+					"Menu":        "🏷️ Pulse Tokens",
 					"Description": "Telemetría y analítica de consumo de tokens y latencias",
 				},
 			},
@@ -136,7 +141,7 @@ func MatchProfilesRoute(rawPath string) (subpath string, matched bool) {
 
 	matchedIdx := -1
 	for i, seg := range segments {
-		if seg == "profiles" || seg == "control-switcher" || seg == "pulse-tokens" || seg == "pulso-tokens" || seg == "create-prefixes" {
+		if seg == "profiles" || seg == "control-switcher" || seg == "pulse-tokens" || seg == "pulso-tokens" || seg == "create-prefixes" || seg == "create-groups" {
 			matchedIdx = i
 			break
 		}

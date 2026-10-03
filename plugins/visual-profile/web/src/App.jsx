@@ -3,6 +3,7 @@ import ProfileGraph from './components/ProfileGraph';
 import ControlSwitcher from './components/ControlSwitcher';
 import PulseTokens from './components/PulseTokens';
 import PrefixManager from './components/PrefixManager';
+import GroupManager from './components/GroupManager';
 import {
   getManagementKey,
   loadAuthFilesWithPrefixes,
@@ -16,6 +17,9 @@ export default function App() {
     if (typeof window !== 'undefined' && window.location && window.location.pathname) {
       if (window.location.pathname.includes('create-prefixes')) {
         return 'create-prefixes';
+      }
+      if (window.location.pathname.includes('create-groups') || window.location.pathname.includes('groups')) {
+        return 'create-groups';
       }
       if (window.location.pathname.includes('profiles')) {
         return 'profiles';
@@ -33,7 +37,7 @@ export default function App() {
     return 'create-prefixes'; // Iniciar por defecto en el gestor de prefijos
   })();
 
-  const [activeTab, setActiveTab] = useState(initialTab); // 'create-prefixes' | 'switcher' | 'profiles' | 'tokens'
+  const [activeTab, setActiveTab] = useState(initialTab); // 'create-prefixes' | 'create-groups' | 'switcher' | 'profiles' | 'tokens'
   const [status, setStatus] = useState('loading'); // 'loading' | 'unauthenticated' | 'ready' | 'error' | 'demo'
   const [errorMessage, setErrorMessage] = useState('');
   const [graphData, setGraphData] = useState({ nodes: [], edges: [] });
@@ -80,15 +84,8 @@ export default function App() {
   }, [activeTab]);
 
   const handleHeaderOpenGroupModal = useCallback(() => {
-    if (activeTab !== 'profiles') {
-      setActiveTab('profiles');
-    }
-    setTimeout(() => {
-      if (graphRef.current && typeof graphRef.current.openGroupModal === 'function') {
-        graphRef.current.openGroupModal();
-      }
-    }, 100);
-  }, [activeTab]);
+    setActiveTab('create-groups');
+  }, []);
 
   const handleHeaderForceCheck = useCallback(async () => {
     setCheckingForce(true);
@@ -184,6 +181,27 @@ export default function App() {
             </button>
             <button
               type="button"
+              onClick={() => setActiveTab('create-groups')}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                border: activeTab === 'create-groups' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
+                background: activeTab === 'create-groups' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
+                color: activeTab === 'create-groups' ? '#f3e8ff' : '#94a3b8',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+              data-testid="tab-create-groups"
+            >
+              <span>🛠️</span>
+              <span>Crear Group/Pefiles</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setActiveTab('switcher')}
               style={{
                 padding: '6px 12px',
@@ -200,7 +218,7 @@ export default function App() {
               }}
               data-testid="tab-control-switcher"
             >
-              <span>🤖</span>
+              <span>♊</span>
               <span>Control Switcher</span>
             </button>
             <button
@@ -221,8 +239,8 @@ export default function App() {
               }}
               data-testid="tab-visual-profile"
             >
-              <span>🌐</span>
-              <span>Visual Profiles</span>
+              <span>🔵</span>
+              <span>Visual Profile</span>
             </button>
             <button
               type="button"
@@ -242,7 +260,7 @@ export default function App() {
               }}
               data-testid="tab-pulse-tokens"
             >
-              <span>📊</span>
+              <span>🏷️</span>
               <span>Pulse Tokens</span>
             </button>
           </div>
@@ -303,7 +321,15 @@ export default function App() {
           <div className="header-meta">
             <span className="badge-status">C-ABI v1</span>
             <span className="badge-route">
-              {activeTab === 'create-prefixes' ? '/create-prefixes' : activeTab === 'switcher' ? '/control-switcher' : activeTab === 'tokens' ? '/pulse-tokens' : '/profiles'}
+              {activeTab === 'create-prefixes'
+                ? '/create-prefixes'
+                : activeTab === 'create-groups'
+                ? '/create-groups'
+                : activeTab === 'switcher'
+                ? '/control-switcher'
+                : activeTab === 'tokens'
+                ? '/pulse-tokens'
+                : '/profiles'}
             </span>
           </div>
         </div>
@@ -334,6 +360,17 @@ export default function App() {
         {activeTab === 'create-prefixes' && (
           <div style={{ width: '100%', height: '100%', overflowY: 'auto' }}>
             <PrefixManager nodes={graphData.nodes} onReloadRequested={loadProfiles} />
+          </div>
+        )}
+
+        {activeTab === 'create-groups' && (
+          <div style={{ width: '100%', height: '100%', overflowY: 'auto' }}>
+            <GroupManager
+              nodes={graphData.nodes}
+              edges={graphData.edges}
+              onReloadRequested={loadProfiles}
+              onSwitchTab={setActiveTab}
+            />
           </div>
         )}
 
