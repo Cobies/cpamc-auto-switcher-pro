@@ -297,24 +297,29 @@ export default function ControlSwitcher({ onReloadRequested }) {
       const isCodex = (f.provider || '').toLowerCase() === 'codex';
       const base = isCodex ? 'codex' : 'agy';
 
+      // Extraer el prefijo activo base del pool (removiendo sufijo _N si es una reserva)
+      const reserveMatch = pref.match(/^(.*)_(\d+)$/);
+      const activePref = reserveMatch ? reserveMatch[1] : pref;
+
       let prof = '';
-      if (pref === base) {
+      if (activePref === base) {
         prof = 'default';
-      } else if (pref.startsWith(`${base}_`)) {
-        const remainder = pref.slice(`${base}_`.length);
-        const matchReserve = remainder.match(/^(.*)_(\d+)$/);
-        prof = matchReserve ? matchReserve[1] : remainder;
+      } else if (activePref.startsWith(`${base}_`)) {
+        prof = activePref.slice(`${base}_`.length);
+      } else {
+        prof = activePref;
       }
 
       if (!prof) return;
 
       const poolKey = `${base}::${prof}`;
       if (!discoveredProfiles.has(poolKey)) {
-        if (canonicalPools[prof]) {
+        if (canonicalPools[prof] && activePref === `${base}_${prof}`) {
           discoveredProfiles.set(poolKey, {
             ...canonicalPools[prof],
             provider: f.provider,
             basePrefix: base,
+            activePrefix: activePref,
             key: poolKey,
           });
         } else {
@@ -343,7 +348,7 @@ export default function ControlSwitcher({ onReloadRequested }) {
             title,
             modelTarget,
             dotColor,
-            activePrefix: `${base}_${prof}`,
+            activePrefix: activePref,
             provider: f.provider,
             basePrefix: base,
             key: poolKey,
@@ -373,8 +378,7 @@ export default function ControlSwitcher({ onReloadRequested }) {
       // Filtrar archivos pertenecientes a este perfil
       const matchingFiles = valid.filter((f) => {
         const pref = (f.note || f.prefix || '').trim();
-        const base = f.provider === 'codex' ? 'codex' : 'agy';
-        return pref === `${base}_${def.profile}` || pref.startsWith(`${base}_${def.profile}_`);
+        return pref === def.activePrefix || pref.startsWith(`${def.activePrefix}_`);
       });
 
       // Encontrar la activa: exactamente el prefijo activo agy_g1 / agy_g2 / agy_son / custom

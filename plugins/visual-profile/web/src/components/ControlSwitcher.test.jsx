@@ -159,4 +159,44 @@ describe('ControlSwitcher Component - TDD Contract & Reserves List', () => {
     const textContent = spectralBars[0].textContent;
     expect(textContent.includes('▰') || textContent.includes('▱')).toBe(true);
   });
+
+  it('discovers custom pools created without agy_ prefix such as sonet and renders active and reserve accounts', async () => {
+    const mockAuthFiles = [
+      { name: 'antigravity-son-infosoytec.json', email: 'infosoytec@gmail.com', note: 'sonet', provider: 'antigravity' },
+      { name: 'antigravity-son-infowilsonlavio.json', email: 'infowilsonlavio@gmail.com', note: 'sonet_1', provider: 'antigravity' },
+      { name: 'antigravity-son-maribelluz.json', email: 'maribelluzbonita@gmail.com', note: 'sonet_2', provider: 'antigravity' },
+    ];
+
+    vi.spyOn(managementClient, 'apiFetch').mockImplementation((endpoint) => {
+      if (endpoint === '/v0/management/auth-files') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ files: mockAuthFiles }),
+        });
+      }
+      if (endpoint.includes('/download')) {
+        const url = new URL(endpoint, 'http://localhost');
+        const name = url.searchParams.get('name');
+        const item = mockAuthFiles.find((f) => f.name === name);
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ prefix: item?.note || '', note: item?.note || '', email: item?.email }),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({}),
+      });
+    });
+
+    render(<ControlSwitcher />);
+
+    // Debe descubrir el pool "sonet"
+    expect(await screen.findByText(/Claude Sonnet \(sonet\)|Pool SONET/i)).toBeTruthy();
+    // La cuenta principal debe estar activa con prefijo sonet
+    expect(screen.getByText('sonet')).toBeTruthy();
+    // Las reservas deben estar visibles en cola
+    expect(screen.getByText('sonet_1')).toBeTruthy();
+    expect(screen.getByText('sonet_2')).toBeTruthy();
+  });
 });

@@ -128,4 +128,52 @@ describe('GroupManager Component - Dedicated Full Screen Pool & Group Engine', (
       ]);
     });
   });
+
+  it('displays the actual parent/root prefix (e.g. [sonet]) with leader badge instead of bare literal [leader]', () => {
+    const mockSonetPoolNodes = [
+      {
+        id: 'acc1',
+        data: {
+          fileName: 'antigravity-son-infosoytec.json',
+          email: 'infosoytec@gmail.com',
+          prefix: 'sonet',
+          provider: 'antigravity',
+        },
+      },
+      {
+        id: 'acc2',
+        data: {
+          fileName: 'antigravity-son-infowilsonlavio.json',
+          email: 'infowilsonlavio@gmail.com',
+          prefix: 'sonet_1',
+          provider: 'antigravity',
+        },
+      },
+      {
+        id: 'acc3',
+        data: {
+          fileName: 'antigravity-son-maribelluz.json',
+          email: 'maribelluzbonita@gmail.com',
+          prefix: 'sonet_2',
+          provider: 'antigravity',
+        },
+      },
+    ];
+
+    render(<GroupManager nodes={mockSonetPoolNodes} />);
+
+    fireEvent.click(screen.getByTestId('tab-disolver-pools'));
+
+    // Debe mostrar la tarjeta del pool "sonet"
+    expect(screen.getByTestId('pool-card-sonet')).toBeTruthy();
+
+    // El padre debe mostrar su prefijo explícito [sonet] y NO el texto plano [leader]
+    expect(screen.getByText('[sonet]')).toBeTruthy();
+    expect(screen.getByText('LEADER')).toBeTruthy();
+    expect(screen.queryByText('[leader]')).toBeNull();
+
+    // Las reservas deben mostrar sus prefijos respectivos
+    expect(screen.getByText('[sonet_1]')).toBeTruthy();
+    expect(screen.getByText('[sonet_2]')).toBeTruthy();
+  });
 });

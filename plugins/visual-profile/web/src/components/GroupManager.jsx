@@ -492,7 +492,22 @@ export default function GroupManager({
                   {pool.root && (
                     <div className="group-pool-member-row">
                       <span style={{ color: '#fbbf24', fontWeight: 600 }}>👑 {pool.root.data?.email || pool.root.data?.fileName}</span>
-                      <span style={{ fontFamily: 'monospace', color: '#94a3b8' }}>[leader]</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontFamily: 'monospace', color: '#fbbf24', fontWeight: 700 }}>
+                          [{pool.root.data?.prefix || pool.basePrefix}]
+                        </span>
+                        <span style={{
+                          fontSize: 9,
+                          fontWeight: 800,
+                          background: 'rgba(234, 179, 8, 0.25)',
+                          color: '#fef08a',
+                          padding: '2px 6px',
+                          borderRadius: 4,
+                          border: '1px solid rgba(234, 179, 8, 0.4)',
+                        }}>
+                          LEADER
+                        </span>
+                      </div>
                     </div>
                   )}
                   {pool.reserves.map(({ node, prefix }) => (
