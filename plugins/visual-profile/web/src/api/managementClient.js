@@ -774,6 +774,25 @@ export async function patchAuthFilePrefix(fileName, prefix, options = {}) {
 }
 
 /**
+ * Lists the model catalog via GET /v1/models.
+ *
+ * Returns raw model IDs, including pool-prefixed routes (e.g. "g1/gemini-3.8-flash-high")
+ * registered by CLIProxyAPI for each auth-file prefix.
+ *
+ * @param {Object} [options]
+ * @returns {Promise<{ models: string[] }>}
+ */
+export async function listModels(options = {}) {
+  const res = await apiFetch('/v1/models', { ...options, method: 'GET' });
+  const payload = await res.json();
+  const data = Array.isArray(payload?.data) ? payload.data : [];
+  const models = data
+    .map((m) => (typeof m?.id === 'string' ? m.id : ''))
+    .filter(Boolean);
+  return { models };
+}
+
+/**
  * Persists an array of dirty auth-file prefixes to the Management API.
  *
  * ATOMICITY & RECONCILIATION CONTRACT:

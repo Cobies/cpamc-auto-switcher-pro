@@ -83,15 +83,15 @@ func ParseQuotaSummary(raw []byte, profile ...string) (*AccountQuota, error) {
 
 	for _, group := range resp.Groups {
 		grpName := strings.ToLower(group.DisplayName)
-		// Model-family filtering by profile to ensure independent quotas
-		if strings.HasPrefix(prof, "g") {
-			// Profile starts with 'g' (e.g. g1, g2): only evaluate Gemini models
-			if !strings.Contains(grpName, "gemini") {
+		// Model-family filtering by profile to ensure independent quotas:
+		// agy_clau*, clau*, son* -> only evaluate Claude / GPT models
+		// agy*, g* -> only evaluate Gemini models
+		if strings.HasPrefix(prof, "agy_clau") || strings.HasPrefix(prof, "clau") || strings.HasPrefix(prof, "son") {
+			if !strings.Contains(grpName, "claude") && !strings.Contains(grpName, "gpt") {
 				continue
 			}
-		} else if strings.HasPrefix(prof, "son") {
-			// Profile starts with 'son': only evaluate Claude / GPT models
-			if !strings.Contains(grpName, "claude") && !strings.Contains(grpName, "gpt") {
+		} else if strings.HasPrefix(prof, "agy") || strings.HasPrefix(prof, "g") {
+			if !strings.Contains(grpName, "gemini") {
 				continue
 			}
 		}

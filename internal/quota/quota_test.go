@@ -267,4 +267,31 @@ func TestParseQuotaSummaryProfileFiltering(t *testing.T) {
 	if sonnetOnly.WorstWeekly.ConsumedPercentage != 100.0 {
 		t.Errorf("expected sonnet weekly 100%%, got %.1f%%", sonnetOnly.WorstWeekly.ConsumedPercentage)
 	}
+
+	// With profile "agy": ONLY evaluates Gemini
+	agyOnly, err := ParseQuotaSummary(dualJSON, "agy")
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if agyOnly.WorstWeekly.ConsumedPercentage != 30.0 {
+		t.Errorf("expected agy weekly 30%%, got %.1f%%", agyOnly.WorstWeekly.ConsumedPercentage)
+	}
+
+	// With profile "agy_clau": ONLY evaluates Claude
+	agyClauOnly, err := ParseQuotaSummary(dualJSON, "agy_clau")
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if agyClauOnly.WorstWeekly.ConsumedPercentage != 100.0 {
+		t.Errorf("expected agy_clau weekly 100%%, got %.1f%%", agyClauOnly.WorstWeekly.ConsumedPercentage)
+	}
+
+	// With profile "clau": ONLY evaluates Claude
+	clauOnly, err := ParseQuotaSummary(dualJSON, "clau")
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if clauOnly.WorstWeekly.ConsumedPercentage != 100.0 {
+		t.Errorf("expected clau weekly 100%%, got %.1f%%", clauOnly.WorstWeekly.ConsumedPercentage)
+	}
 }
