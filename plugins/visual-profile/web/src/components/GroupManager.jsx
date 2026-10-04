@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { saveAuthFilePrefixes, listModels } from '../api/managementClient';
+import { saveAuthFilePrefixes, listModels, virtualizeAccount, deriveVirtualAuthName } from '../api/managementClient';
 import '../GroupManager.css';
 
 // Familias principales soportadas por la convención de cuota del switcher (internal/quota/quota.go)
@@ -44,6 +44,15 @@ const MODEL_FAMILIES = {
     quota: 'Codex',
     note: 'Cuentas individuales Codex / OpenAI.',
   },
+};
+
+// Patrones de nombre por familia objetivo: se usan para liberar modelos del
+// origen al virtualizar aunque el catálogo no los liste (p.ej. excluidos).
+const FAMILY_TARGET_PATTERNS = {
+  gemini_pure: ['gemini'],
+  gemini_claude: ['claude', 'gpt'],
+  claude: ['claude', 'gpt'],
+  codex: ['codex'],
 };
 
 // Determina si un prefijo es descendiente estricto de un pool base:
@@ -173,15 +182,66 @@ export default function GroupManager({
   // Cuentas de reserva compatibles: mismas reglas de familia y SIEMPRE excluye
   // la cuenta principal actual, de modo que al cambiarla la anterior reaparezca
   // abajo como candidata y la vigente nunca se ofrezca como su propia reserva.
-  const compatibleReserveNodes = useMemo(() => {
-    if (!effectiveFamily || !selectedActiveNodeId) return [];
-    const famProvider = effectiveFamily.provider;
-    return freeNodes.filter((n) => {
-      if (n.id === selectedActiveNodeId) return false;
+  const hasAntigravityAccounts = useMemo(
+    () => nodes.some((n) => (n.data?.provider || n.data?.accountType || '').toLowerCase() === 'antigravity'),
+    [nodes]
+  );
+
+  const isGeminiPackageFamily = !!effectiveFamily && (
+    effectiveFamily.key === 'gemini_pure' || effectiveFamily.key === 'gemini_claude'
+  );
+
+  // ¿El prefijo corresponde al sub-tipo Gemini objetivo (mismo paquete)?
+  const prefixMatchesEffectiveFamily = useCallback((prefix) => {
+    const p = (prefix || '').trim();
+    if (!effectiveFamily) return false;
+    if (effectiveFamily.key === 'gemini_pure') return /^agy/.test(p) && !p.startsWith('agy_clau');
+    if (effectiveFamily.key === 'gemini_claude') return p.startsWith('agy_clau');
+    return p.startsWith(effectiveFamily.hintPrefix);
+  }, [effectiveFamily]);
+
+  // Cuentas del paquete Gemini ya asignadas al sub-tipo OPUESTO que pueden
+  // clonarse (virtualizarse) hacia la familia objetivo, siempre que su
+  // identidad física aún no tenga una credencial de la familia objetivo.
+  const virtualizableSourceNodes = useMemo(() => {
+    if (!isGeminiPackageFamily) return [];
+    const oppositeTest = effectiveFamily.key === 'gemini_pure'
+      ? (p) => p.startsWith('agy_clau')
+      : (p) => /^agy/.test(p) && !p.startsWith('agy_clau');
+    const targetEmails = new Set(
+      nodes
+        .filter((n) => prefixMatchesEffectiveFamily(n.data?.prefix))
+        .map((n) => n.data?.email)
+        .filter(Boolean)
+    );
+    return nodes.filter((n) => {
       const prov = (n.data?.provider || n.data?.accountType || '').toLowerCase();
-      return prov === famProvider;
+      if (prov !== 'antigravity') return false;
+      const p = (n.data?.prefix || '').trim();
+      if (!oppositeTest(p)) return false;
+      const email = n.data?.email;
+      return email ? !targetEmails.has(email) : false;
     });
-  }, [effectiveFamily, selectedActiveNodeId, freeNodes]);
+  }, [isGeminiPackageFamily, effectiveFamily, nodes, prefixMatchesEffectiveFamily]);
+
+  const isVirtualSource = useCallback(
+    (node) => !!node && virtualizableSourceNodes.some((n) => n.id === node.id),
+    [virtualizableSourceNodes]
+  );
+
+  // Candidatos unificados: cuentas libres + cuentas virtualizables del paquete Gemini.
+  const leaderCandidates = useMemo(() => ([
+    ...familyCompatibleNodes.map((node) => ({ node, virtual: false })),
+    ...virtualizableSourceNodes.map((node) => ({ node, virtual: true })),
+  ]), [familyCompatibleNodes, virtualizableSourceNodes]);
+
+  const reserveCandidates = useMemo(() => {
+    if (!effectiveFamily || !selectedActiveNodeId) return [];
+    const leaderEmail = nodes.find((n) => n.id === selectedActiveNodeId)?.data?.email;
+    return leaderCandidates.filter(
+      ({ node }) => node.id !== selectedActiveNodeId && (!leaderEmail || node.data?.email !== leaderEmail)
+    );
+  }, [effectiveFamily, selectedActiveNodeId, leaderCandidates, nodes]);
 
   // Mapear pools existentes en el sistema agrupados por prefijo base
   const existingPools = useMemo(() => {
@@ -301,6 +361,14 @@ export default function GroupManager({
 
     const chosenNode = nodes.find((n) => n.id === nodeId);
     const chosenPref = (chosenNode?.data?.prefix || '').trim();
+    if (chosenNode && isVirtualSource(chosenNode)) {
+      // Cuenta de la familia opuesta del paquete Gemini: se clonará, así que el
+      // prefijo destino es el de la familia objetivo, no el suyo actual.
+      if (effectiveFamily) {
+        setGroupBasePrefix(suggestNextBasePrefix(nodes, effectiveFamily.hintPrefix));
+      }
+      return;
+    }
     if (chosenPref && !chosenPref.startsWith('unlinked_')) {
       // Cargar el prefijo ya asignado en el auth-file de la cuenta seleccionada
       setGroupBasePrefix(chosenPref);
@@ -318,7 +386,7 @@ export default function GroupManager({
         setGroupBasePrefix(suggestNextBasePrefix(nodes, hint));
       }
     }
-  }, [nodes, groupBasePrefix, effectiveFamily]);
+  }, [nodes, groupBasePrefix, effectiveFamily, isVirtualSource]);
 
   const handleToggleReserve = useCallback((nodeId) => {
     setSelectedReserveNodeIds((prev) =>
@@ -352,10 +420,17 @@ export default function GroupManager({
       return;
     }
 
-    const updates = [
-      { name: activeNode.data.fileName, prefix: trimmedBase },
-    ];
+    const updates = [];
+    const virtualJobs = [];
+    const queueAssignment = (node, prefix) => {
+      if (isVirtualSource(node)) {
+        virtualJobs.push({ sourceFile: node.data.fileName, prefix, email: node.data.email });
+      } else {
+        updates.push({ name: node.data.fileName, prefix });
+      }
+    };
 
+    queueAssignment(activeNode, trimmedBase);
     const assignedPrefixes = new Set();
     selectedReserveNodeIds.forEach((resId) => {
       const resNode = nodes.find((n) => n.id === resId);
@@ -363,25 +438,89 @@ export default function GroupManager({
         const reserveNum = nextReserveNumber(nodes, trimmedBase, assignedPrefixes);
         const reservePrefix = `${trimmedBase}_${reserveNum}`;
         assignedPrefixes.add(reservePrefix);
-        updates.push({
-          name: resNode.data.fileName,
-          prefix: reservePrefix,
-        });
+        queueAssignment(resNode, reservePrefix);
       }
     });
 
     setIsSubmitting(true);
     setErrorMessage('');
     try {
-      const report = await saveAuthFilePrefixes(updates);
-      if (report.failed.length > 0) {
-        setSaveReport({ base: trimmedBase, successful: report.successful, failed: report.failed });
+      let targetModels = [];
+      let oppositeModels = [];
+      if (virtualJobs.length > 0) {
+        try {
+          const { models } = await listModels();
+          const knownPrefixes = new Set(
+            nodes.map((n) => (n.data?.prefix || '').trim()).filter(Boolean)
+          );
+          const toBaseModelId = (id) => {
+            const slash = id.indexOf('/');
+            if (slash > 0 && knownPrefixes.has(id.slice(0, slash))) return id.slice(slash + 1);
+            return id;
+          };
+          const targetSet = new Set();
+          const oppositeSet = new Set();
+          models
+            .map(toBaseModelId)
+            .filter(Boolean)
+            .forEach((id) => {
+              if (matchesFamilyModel(trimmedBase, id)) targetSet.add(id);
+              else oppositeSet.add(id);
+            });
+          targetModels = [...targetSet];
+          oppositeModels = [...oppositeSet];
+        } catch (err) {
+          setErrorMessage(`No se pudo leer el catálogo de modelos para virtualizar: ${err.message}`);
+          return;
+        }
+      }
+
+      const targetPatterns = FAMILY_TARGET_PATTERNS[effectiveFamily?.key] || [];
+      const patchReport = updates.length > 0
+        ? await saveAuthFilePrefixes(updates)
+        : { successful: [], failed: [] };
+
+      const virtualResults = await Promise.allSettled(
+        virtualJobs.map((job) => virtualizeAccount({
+          sourceFileName: job.sourceFile,
+          prefix: job.prefix,
+          targetModels,
+          targetPatterns,
+          oppositeModels,
+        }))
+      );
+
+      const successful = [...patchReport.successful];
+      const failed = patchReport.failed.map((f) => ({ ...f, kind: 'patch' }));
+      virtualResults.forEach((res, idx) => {
+        const job = virtualJobs[idx];
+        const derivedName = deriveVirtualAuthName(job.sourceFile, job.prefix);
+        if (res.status === 'fulfilled') {
+          successful.push({ name: res.value?.name || derivedName, prefix: job.prefix });
+        } else {
+          failed.push({
+            name: derivedName,
+            prefix: job.prefix,
+            error: res.reason?.message || 'Virtualize failed',
+            kind: 'virtual',
+            sourceFile: job.sourceFile,
+            targetModels,
+            targetPatterns,
+            oppositeModels,
+          });
+        }
+      });
+
+      const total = updates.length + virtualJobs.length;
+      if (failed.length > 0) {
+        setSaveReport({ base: trimmedBase, successful, failed });
         setErrorMessage(
-          `Pool "${trimmedBase}" guardado con errores parciales: fallaron ${report.failed.length} de ${updates.length} cuentas.`
+          `Pool "${trimmedBase}" guardado con errores parciales: fallaron ${failed.length} de ${total} cuentas.`
         );
       } else {
         setSaveReport(null);
-        setSuccessFeedback(`⚡ Pool "${trimmedBase}" creado y guardado con éxito (${updates.length} cuentas configuradas).`);
+        const virtualNote = virtualJobs.length > 0 ? ` (${virtualJobs.length} virtualizada[s])` : '';
+        setSuccessFeedback(`⚡ Pool "${trimmedBase}" creado y guardado con éxito (${total} cuentas${virtualNote}).`);
         setGroupBasePrefix('');
         setSelectedActiveNodeId('');
         setSelectedReserveNodeIds([]);
@@ -404,7 +543,7 @@ export default function GroupManager({
     } finally {
       setIsSubmitting(false);
     }
-  }, [groupBasePrefix, selectedActiveNodeId, selectedReserveNodeIds, nodes, onReloadRequested]);
+  }, [groupBasePrefix, selectedActiveNodeId, selectedReserveNodeIds, nodes, onReloadRequested, isVirtualSource, effectiveFamily]);
 
   // Reintentar solo las cuentas que fallaron en el último guardado
   const handleRetryFailed = useCallback(async () => {
@@ -412,15 +551,41 @@ export default function GroupManager({
     setIsSubmitting(true);
     setErrorMessage('');
     try {
-      const retryUpdates = saveReport.failed.map(({ name, prefix }) => ({ name, prefix }));
-      const report = await saveAuthFilePrefixes(retryUpdates);
-      if (report.failed.length > 0) {
-        setSaveReport((prev) => ({
-          base: prev.base,
-          successful: [...prev.successful, ...report.successful],
-          failed: report.failed,
-        }));
-        setErrorMessage(`Reintento fallido para ${report.failed.length} cuenta(s).`);
+      const results = await Promise.allSettled(
+        saveReport.failed.map((entry) => {
+          if (entry.kind === 'virtual') {
+            return virtualizeAccount({
+              sourceFileName: entry.sourceFile,
+              prefix: entry.prefix,
+              targetModels: entry.targetModels,
+              targetPatterns: entry.targetPatterns,
+              oppositeModels: entry.oppositeModels,
+            });
+          }
+          return saveAuthFilePrefixes([{ name: entry.name, prefix: entry.prefix }]);
+        })
+      );
+
+      const successful = [...saveReport.successful];
+      const failed = [];
+      results.forEach((res, idx) => {
+        const entry = saveReport.failed[idx];
+        if (res.status === 'fulfilled') {
+          if (entry.kind === 'virtual') {
+            successful.push({ name: res.value?.name || entry.name, prefix: entry.prefix });
+          } else if (res.value.failed.length > 0) {
+            failed.push(entry);
+          } else {
+            successful.push({ name: entry.name, prefix: entry.prefix });
+          }
+        } else {
+          failed.push({ ...entry, error: res.reason?.message || entry.error });
+        }
+      });
+
+      if (failed.length > 0) {
+        setSaveReport((prev) => ({ base: prev.base, successful, failed }));
+        setErrorMessage(`Reintento fallido para ${failed.length} cuenta(s).`);
       } else {
         setSaveReport(null);
         setSuccessFeedback(`⚡ Pool "${saveReport.base}" creado y guardado con éxito (reintento completado).`);
@@ -566,7 +731,7 @@ export default function GroupManager({
       {activeTab === 'create' && (
         <div className="group-manager-content">
           <div className="group-builder-col">
-            {freeNodes.length === 0 ? (
+            {freeNodes.length === 0 && !hasAntigravityAccounts ? (
               <div className="group-empty-alert" data-testid="empty-free-nodes-alert">
                 <span className="group-alert-icon">⚠️</span>
                 <h4 className="group-alert-title">No hay cuentas libres disponibles</h4>
@@ -651,6 +816,9 @@ export default function GroupManager({
                   <div className="group-capacity-badge" data-testid="capacity-badge">
                     <span>📊 Cuentas compatibles libres: <strong>{familyCompatibleNodes.length}</strong></span>
                     <span> · Capacidad máxima: <strong>{Math.floor(familyCompatibleNodes.length / 2)}</strong> grupo(s) de rotación (mínimo 2 cuentas/grupo)</span>
+                    {isGeminiPackageFamily && (
+                      <span> · 🔀 Virtualizables del paquete: <strong>{virtualizableSourceNodes.length}</strong></span>
+                    )}
                   </div>
                 )}
 
@@ -673,17 +841,17 @@ export default function GroupManager({
                           ? '-- Selecciona la cuenta principal libre --'
                           : '⚠️ Elige primero la familia de modelos (①)'}
                       </option>
-                      {familyCompatibleNodes.map((n) => {
+                      {leaderCandidates.map(({ node: n, virtual }) => {
                         const email = n.data?.email || n.data?.fileName || n.id;
                         const prov = (n.data?.provider || n.data?.accountType || 'ANTIGRAVITY').toUpperCase();
                         return (
                           <option key={n.id} value={n.id}>
-                            👑 {email} ({prov})
+                            {virtual ? '🔀 ' : '👑 '}{email} ({prov}){virtual ? ' — copia' : ''}
                           </option>
                         );
                       })}
                     </select>
-                    {family && familyCompatibleNodes.length === 0 && (
+                    {family && leaderCandidates.length === 0 && (
                       <div className="group-family-warning" data-testid="no-compatible-accounts-alert">
                         ℹ️ No hay cuentas libres compatibles con <strong>{effectiveFamily ? effectiveFamily.label : 'esta familia'}</strong>. Las cuentas ya asignadas a otros pools aparecen en la pestaña "💥 Disolver / Desagrupar Pools".
                       </div>
@@ -755,7 +923,7 @@ export default function GroupManager({
                   <label className="group-label">
                     Cuentas de Reserva (Mismo Proveedor en Cascada):
                   </label>
-                  {compatibleReserveNodes.length === 0 ? (
+                  {reserveCandidates.length === 0 ? (
                     <div style={{ color: '#64748b', fontSize: 12, padding: 8 }}>
                       {selectedActiveNodeId
                         ? 'No hay más cuentas libres compatibles con esta familia para agregar como reservas.'
@@ -765,7 +933,7 @@ export default function GroupManager({
                     </div>
                   ) : (
                     <div className="group-reserves-container" data-testid="reserves-container">
-                      {compatibleReserveNodes.map((n) => {
+                      {reserveCandidates.map(({ node: n, virtual }) => {
                         const isChecked = selectedReserveNodeIds.includes(n.id);
                         const email = n.data?.email || n.data?.fileName || n.id;
                         const file = n.data?.fileName || '';
@@ -783,7 +951,9 @@ export default function GroupManager({
                               style={{ cursor: 'pointer' }}
                             />
                             <div className="group-reserve-label">
-                              <span className="group-reserve-email">{email}</span>
+                              <span className="group-reserve-email">
+                                {virtual ? '🔀 ' : ''}{email}
+                              </span>
                               <span className="group-reserve-sub">{file}</span>
                             </div>
                             {isChecked && (

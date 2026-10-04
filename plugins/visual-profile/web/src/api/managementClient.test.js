@@ -12,6 +12,7 @@ import {
   sanitizeFileName,
   patchAuthFilePrefix,
   saveAuthFilePrefixes,
+  virtualizeAccount,
   abbreviateEmail,
   extractSafeMaskedEmail,
   maskDisplayIdentifier,
@@ -935,5 +936,103 @@ describe('saveAuthFilePrefixes - Multi-File Staging and Non-Atomic Partial Failu
       expect(files).toHaveLength(1);
       expect(files[0].name).toBe('valid-account.json');
     });
+  });
+});
+
+describe('virtualizeAccount - POST /v0/management/visual-profile/virtualize', () => {
+  it('posts the clone request and returns the created virtual file', async () => {
+    let capturedUrl = null;
+    let capturedOptions = null;
+    const mockFetch = vi.fn().mockImplementation((url, opts) => {
+      capturedUrl = url;
+      capturedOptions = opts;
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          name: 'acc.agy_clau.json',
+          path: '/auth/acc.agy_clau.json',
+          prefix: 'agy_clau',
+        }),
+      });
+    });
+
+    const res = await virtualizeAccount(
+      {
+        sourceFileName: 'acc.json',
+        name: 'acc.agy_clau.json',
+        prefix: 'agy_clau',
+        targetModels: ['claude-sonnet-4-6'],
+        targetPatterns: ['claude', 'gpt'],
+        oppositeModels: ['gemini-3-flash'],
+      },
+      { key: 'secret-key', fetchFn: mockFetch }
+    );
+
+    expect(capturedUrl).toBe('/v0/management/visual-profile/virtualize');
+    expect(capturedOptions.method).toBe('POST');
+    expect(capturedOptions.headers['Authorization']).toBe('Bearer secret-key');
+    expect(capturedOptions.headers['Content-Type']).toBe('application/json');
+    expect(JSON.parse(capturedOptions.body)).toEqual({
+      source_file_name: 'acc.json',
+      name: 'acc.agy_clau.json',
+      prefix: 'agy_clau',
+      target_models: ['claude-sonnet-4-6'],
+      target_patterns: ['claude', 'gpt'],
+      opposite_models: ['gemini-3-flash'],
+    });
+    expect(res).toEqual({
+      name: 'acc.agy_clau.json',
+      path: '/auth/acc.agy_clau.json',
+      prefix: 'agy_clau',
+    });
+  });
+
+  it('derives a default target name when omitted', async () => {
+    let capturedBody = null;
+    const mockFetch = vi.fn().mockImplementation((url, opts) => {
+      capturedBody = JSON.parse(opts.body);
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, name: 'acc.agy_clau.json', prefix: 'agy_clau' }),
+      });
+    });
+
+    await virtualizeAccount(
+      { sourceFileName: 'acc.json', prefix: 'agy_clau' },
+      { key: 'k', fetchFn: mockFetch }
+    );
+
+    expect(capturedBody.name).toBe('acc.agy_clau.json');
+  });
+
+  it('fails closed on missing source or prefix', async () => {
+    await expect(virtualizeAccount({ prefix: 'agy_clau' }, { key: 'k' })).rejects.toThrow(
+      /source/i
+    );
+    await expect(
+      virtualizeAccount({ sourceFileName: 'acc.json' }, { key: 'k' })
+    ).rejects.toThrow(/prefix/i);
+  });
+
+  it('surfaces the plugin error message when ok is false', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: false,
+        error: 'virtualize_failed',
+        message: 'source auth file not found: missing.json',
+      }),
+    });
+
+    await expect(
+      virtualizeAccount(
+        { sourceFileName: 'missing.json', prefix: 'agy_clau' },
+        { key: 'k', fetchFn: mockFetch }
+      )
+    ).rejects.toThrow('source auth file not found: missing.json');
   });
 });

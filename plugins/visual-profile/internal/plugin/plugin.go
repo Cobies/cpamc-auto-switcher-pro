@@ -73,6 +73,13 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 
 	case "management.register":
 		regResponse := map[string]any{
+			"routes": []map[string]any{
+				{
+					"Method":      http.MethodPost,
+					"Path":        virtualizeRoutePath,
+					"Description": "Clona una cuenta física en una credencial virtual con prefijo y exclusiones por familia (multi-prefix)",
+				},
+			},
 			"resources": []map[string]any{
 				{
 					"Path":        "/create-prefixes",
@@ -187,6 +194,24 @@ func HandleManagementHTTP(request []byte) ([]byte, error) {
 	if method == "" {
 		method = http.MethodGet // default when omitted
 	}
+
+	// Virtualize route: POST only (host dispatches it as an authenticated management route).
+	if isVirtualizePath(req.Path) {
+		if method != http.MethodPost {
+			resp := ManagementResponsePayload{
+				StatusCode: http.StatusMethodNotAllowed,
+				Headers: map[string][]string{
+					"Content-Type":           {"application/json; charset=utf-8"},
+					"X-Content-Type-Options": {"nosniff"},
+				},
+				Body: base64.StdEncoding.EncodeToString([]byte(`{"error":"method_not_allowed","message":"method not allowed"}`)),
+			}
+			raw, _ := json.Marshal(resp)
+			return OKEnvelope(raw), nil
+		}
+		return handleVirtualizeHTTP(req)
+	}
+
 	if method != http.MethodGet && method != http.MethodHead {
 		resp := ManagementResponsePayload{
 			StatusCode: http.StatusMethodNotAllowed,

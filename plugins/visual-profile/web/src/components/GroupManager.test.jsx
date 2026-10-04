@@ -30,14 +30,62 @@ describe('GroupManager Component - Dedicated Full Screen Pool & Group Engine', (
     },
   ];
 
-  it('renders the exact high-contrast empty notice when no free accounts are available', () => {
-    render(<GroupManager nodes={mockFullyAssignedNodes} />);
+  it('renders the exact high-contrast empty notice when no free accounts and no antigravity accounts exist', () => {
+    const codexOnlyNodes = [
+      { id: 'cx1', data: { fileName: 'codex-1.json', email: 'c...1@test.com', prefix: 'codex_p1', provider: 'codex' } },
+      { id: 'cx2', data: { fileName: 'codex-2.json', email: 'c...2@test.com', prefix: 'codex_p1_1', provider: 'codex' } },
+    ];
+    render(<GroupManager nodes={codexOnlyNodes} />);
 
     expect(screen.getByTestId('empty-free-nodes-alert')).toBeTruthy();
     expect(screen.getByText('No hay cuentas libres disponibles')).toBeTruthy();
     expect(
       screen.getByText(/Todas las cuentas están asignadas a grupos existentes/i)
     ).toBeTruthy();
+  });
+
+  it('offers assigned antigravity accounts as virtualizable (🔀) candidates for the sibling Gemini subtype', async () => {
+    const pureNodes = [
+      { id: 'acc1', data: { fileName: 'antigravity-acc1.json', email: 'a...1@x.com', prefix: 'agy', provider: 'antigravity' } },
+      { id: 'acc2', data: { fileName: 'antigravity-acc2.json', email: 'a...2@x.com', prefix: 'agy_1', provider: 'antigravity' } },
+    ];
+
+    vi.spyOn(managementClient, 'listModels').mockResolvedValue({
+      models: ['agy/gemini-3.8-flash-high', 'claude-sonnet-4-6'],
+    });
+    const virtualizeSpy = vi
+      .spyOn(managementClient, 'virtualizeAccount')
+      .mockImplementation(({ sourceFileName, prefix }) =>
+        Promise.resolve({ name: `${sourceFileName.replace(/\.json$/, '')}.${prefix}.json`, path: '', prefix })
+      );
+
+    render(<GroupManager nodes={pureNodes} />);
+
+    // Aunque no hay cuentas libres, el builder aparece porque hay antigravity con virtualización posible.
+    fireEvent.click(screen.getByTestId('family-gemini'));
+    fireEvent.click(screen.getByTestId('subfamily-gemini-claude'));
+
+    const selectActive = screen.getByTestId('select-active-account');
+    const optionIds = Array.from(selectActive.options).map((o) => o.value);
+    expect(optionIds).toContain('acc1');
+    expect(optionIds).toContain('acc2');
+
+    fireEvent.change(selectActive, { target: { value: 'acc1' } });
+    fireEvent.change(screen.getByTestId('input-group-base-prefix'), { target: { value: 'agy_clau' } });
+    fireEvent.click(screen.getByTestId('reserve-item-acc2'));
+    fireEvent.click(screen.getByTestId('btn-save-group'));
+
+    await waitFor(() => expect(virtualizeSpy).toHaveBeenCalledTimes(2));
+
+    const firstCall = virtualizeSpy.mock.calls[0][0];
+    expect(firstCall.sourceFileName).toBe('antigravity-acc1.json');
+    expect(firstCall.prefix).toBe('agy_clau');
+    expect(firstCall.targetPatterns).toEqual(['claude', 'gpt']);
+    expect(firstCall.oppositeModels).toContain('gemini-3.8-flash-high');
+
+    const secondCall = virtualizeSpy.mock.calls[1][0];
+    expect(secondCall.sourceFileName).toBe('antigravity-acc2.json');
+    expect(secondCall.prefix).toBe('agy_clau_1');
   });
 
   it('allows structuring a new pool when free accounts exist and generates cascade previews', async () => {

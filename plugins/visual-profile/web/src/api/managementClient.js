@@ -848,3 +848,84 @@ export async function saveAuthFilePrefixes(filesToSave = [], options = {}) {
 
   return { successful, failed };
 }
+
+/**
+ * Derives the default virtual auth-file name for a clone: `<base>.<prefix>.json`.
+ * The file name must remain a safe, path-separator-free identifier.
+ *
+ * @param {string} sourceFileName
+ * @param {string} prefix
+ * @returns {string}
+ */
+export function deriveVirtualAuthName(sourceFileName, prefix) {
+  const base = String(sourceFileName || '').replace(/\.json$/i, '');
+  return `${base}.${prefix}.json`;
+}
+
+/**
+ * Clones a physical auth file into a virtual credential with a different routing
+ * prefix and family-specific model exclusions, using the plugin host bridge.
+ *
+ * SECURITY INVARIANTS:
+ * - Never transmits credentials, tokens, or secrets. Only identifiers and model lists.
+ * - Uses apiFetch (same-origin + authoritative Bearer management key).
+ *
+ * @param {Object} input
+ * @param {string} input.sourceFileName Exact physical auth-file name to clone.
+ * @param {string} input.prefix Routing prefix for the virtual credential.
+ * @param {string} [input.name] Target file name (derived when omitted).
+ * @param {string[]} [input.targetModels] Models the clone should serve.
+ * @param {string[]} [input.oppositeModels] Models the clone must not serve.
+ * @param {string[]} [input.excludedModels] Explicit full exclusion override.
+ * @param {Object} [options]
+ * @returns {Promise<{ name: string, path: string, prefix: string }>}
+ */
+export async function virtualizeAccount(input = {}, options = {}) {
+  const sourceFileName = typeof input.sourceFileName === 'string' ? input.sourceFileName.trim() : '';
+  const prefix = typeof input.prefix === 'string' ? input.prefix.trim() : '';
+  if (!sourceFileName) {
+    throw new Error('Invalid virtualize request: sourceFileName is required');
+  }
+  if (!prefix) {
+    throw new Error('Invalid virtualize request: prefix is required');
+  }
+
+  const name = (typeof input.name === 'string' && input.name.trim())
+    ? input.name.trim()
+    : deriveVirtualAuthName(sourceFileName, prefix);
+
+  const payload = {
+    source_file_name: sourceFileName,
+    name,
+    prefix,
+  };
+  if (Array.isArray(input.targetModels)) {
+    payload.target_models = input.targetModels;
+  }
+  if (Array.isArray(input.targetPatterns)) {
+    payload.target_patterns = input.targetPatterns;
+  }
+  if (Array.isArray(input.oppositeModels)) {
+    payload.opposite_models = input.oppositeModels;
+  }
+  if (Array.isArray(input.excludedModels)) {
+    payload.excluded_models = input.excludedModels;
+  }
+
+  const res = await apiFetch('/v0/management/visual-profile/virtualize', {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await res.json();
+  if (!data || data.ok !== true) {
+    throw new Error(data?.message || 'Virtualize request failed');
+  }
+  return {
+    name: data.name || name,
+    path: data.path || '',
+    prefix: data.prefix || prefix,
+  };
+}
