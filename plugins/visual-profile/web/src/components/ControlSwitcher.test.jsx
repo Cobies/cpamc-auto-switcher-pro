@@ -58,7 +58,7 @@ describe('ControlSwitcher Component - TDD Contract & Reserves List', () => {
     // 1. Debe mostrar los títulos de pools
     expect(await screen.findByText('Gemini 1 (Subagentes & Velocidad)')).toBeTruthy();
     expect(screen.getByText('Gemini 2 (Chat & Interactivo)')).toBeTruthy();
-    expect(screen.getByText('Sonnet (Arquitectura & Razonamiento)')).toBeTruthy();
+    expect(screen.getByText('Claude Sonnet (agy_son)')).toBeTruthy();
 
     // 2. Debe mostrar la cabecera CUENTAS DE RESERVA en cada tarjeta
     const reserveHeaders = screen.getAllByText('CUENTAS DE RESERVA');
@@ -160,6 +160,73 @@ describe('ControlSwitcher Component - TDD Contract & Reserves List', () => {
     expect(textContent.includes('▰') || textContent.includes('▱')).toBe(true);
   });
 
+  it('correctly separates agy_clau, agy, and agy2 pools without cross-contamination', async () => {
+    // Real production pools: agy_clau (4 accounts), agy (2 accounts), agy2 (2 accounts)
+    const mockAuthFiles = [
+      // Pool agy_clau: Claude del Paquete (1 leader + 3 reserves)
+      { name: 'antigravity-clau-infosoytec.json', email: 'inf...tec@gmail.com', note: 'agy_clau', provider: 'antigravity' },
+      { name: 'antigravity-clau-maribelluz.json', email: 'mar...tro@gmail.com', note: 'agy_clau_1', provider: 'antigravity' },
+      { name: 'antigravity-clau-wilsonlavio11.json', email: 'wil...o11@gmail.com', note: 'agy_clau_2', provider: 'antigravity' },
+      { name: 'antigravity-clau-wilsonlavio9.json', email: 'wil...io9@gmail.com', note: 'agy_clau_3', provider: 'antigravity' },
+      // Pool agy: Gemini Puro (1 leader + 1 reserve)
+      { name: 'antigravity-main-maribelluz.json', email: 'mar...tro@gmail.com', note: 'agy', provider: 'antigravity' },
+      { name: 'antigravity-main-infosoytec.json', email: 'inf...tec@gmail.com', note: 'agy_1', provider: 'antigravity' },
+      // Pool agy2: Gemini Puro 2 (1 leader + 1 reserve)
+      { name: 'antigravity-main-wilsonlavio11.json', email: 'wil...o11@gmail.com', note: 'agy2', provider: 'antigravity' },
+      { name: 'antigravity-main-wilsonlavio9.json', email: 'wil...io9@gmail.com', note: 'agy2_1', provider: 'antigravity' },
+    ];
+
+    vi.spyOn(managementClient, 'apiFetch').mockImplementation((endpoint) => {
+      if (endpoint === '/v0/management/auth-files') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ files: mockAuthFiles }),
+        });
+      }
+      if (endpoint.includes('/download')) {
+        const url = new URL(endpoint, 'http://localhost');
+        const name = url.searchParams.get('name');
+        const item = mockAuthFiles.find((f) => f.name === name);
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ prefix: item?.note || '', note: item?.note || '', email: item?.email }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+
+    render(<ControlSwitcher />);
+
+    // Wait for pools to render
+    await waitFor(() => {
+      expect(screen.getAllByText('CUENTAS DE RESERVA').length).toBeGreaterThanOrEqual(3);
+    });
+
+    // 1. Exactly 3 pools must be discovered
+    const reserveHeaders = screen.getAllByText('CUENTAS DE RESERVA');
+    expect(reserveHeaders.length).toBe(3);
+
+    // 2. Pool agy_clau must have exactly 3 reserves (agy_clau_1, _2, _3)
+    expect(screen.getByText('3 EN COLA')).toBeTruthy();
+    expect(screen.getByText('agy_clau_1')).toBeTruthy();
+    expect(screen.getByText('agy_clau_2')).toBeTruthy();
+    expect(screen.getByText('agy_clau_3')).toBeTruthy();
+
+    // 3. Pool agy must have exactly 1 reserve (agy_1) — NOT contaminated with agy_clau accounts
+    expect(screen.getAllByText('1 EN COLA').length).toBe(2); // agy and agy2 each have 1 reserve
+    expect(screen.getByText('agy_1')).toBeTruthy();
+
+    // 4. Pool agy2 must have exactly 1 reserve (agy2_1)
+    expect(screen.getByText('agy2_1')).toBeTruthy();
+
+    // 5. Pool titles must reflect correct families, not generic "Pool DEFAULT" etc.
+    // agy_clau should be recognized as Claude
+    const allText = document.body.textContent;
+    expect(allText).not.toContain('Pool DEFAULT');
+    expect(allText).not.toContain('Pool CLAU');
+    expect(allText).not.toContain('Pool AGY2');
+  });
+
   it('discovers custom pools created without agy_ prefix such as sonet and renders active and reserve accounts', async () => {
     const mockAuthFiles = [
       { name: 'antigravity-son-infosoytec.json', email: 'infosoytec@gmail.com', note: 'sonet', provider: 'antigravity' },
@@ -198,5 +265,164 @@ describe('ControlSwitcher Component - TDD Contract & Reserves List', () => {
     // Las reservas deben estar visibles en cola
     expect(screen.getByText('sonet_1')).toBeTruthy();
     expect(screen.getByText('sonet_2')).toBeTruthy();
+  });
+
+  it('synchronizes dynamically from nodes prop and renders real pools without depending on auth-files prefix attribute', async () => {
+    // Simulated nodes passed from App.jsx (same nodes that GroupManager and PrefixManager use)
+    const mockNodes = [
+      { id: 'c1', data: { fileName: 'antigravity-clau-wilsonlavio9.json', email: 'wil...io9@gmail.com', prefix: 'agy_clau', provider: 'antigravity' } },
+      { id: 'c2', data: { fileName: 'antigravity-clau-infosoytec.json', email: 'inf...tec@gmail.com', prefix: 'agy_clau_1', provider: 'antigravity' } },
+      { id: 'c3', data: { fileName: 'antigravity-clau-maribelluz.json', email: 'mar...tro@gmail.com', prefix: 'agy_clau_2', provider: 'antigravity' } },
+      { id: 'c4', data: { fileName: 'antigravity-clau-wilsonlavio11.json', email: 'wil...o11@gmail.com', prefix: 'agy_clau_3', provider: 'antigravity' } },
+      { id: 'g1', data: { fileName: 'antigravity-main-maribelluz.json', email: 'mar...tro@gmail.com', prefix: 'agy', provider: 'antigravity' } },
+      { id: 'g2', data: { fileName: 'antigravity-main-infosoytec.json', email: 'inf...tec@gmail.com', prefix: 'agy_1', provider: 'antigravity' } },
+      { id: 'g3', data: { fileName: 'antigravity-main-wilsonlavio11.json', email: 'wil...o11@gmail.com', prefix: 'agy2', provider: 'antigravity' } },
+      { id: 'g4', data: { fileName: 'antigravity-main-wilsonlavio9.json', email: 'wil...io9@gmail.com', prefix: 'agy2_1', provider: 'antigravity' } },
+    ];
+
+    // Real CPAMC API returns files WITHOUT prefix or note
+    const bareFilesFromAPI = mockNodes.map((n) => ({
+      name: n.data.fileName,
+      id: n.id,
+      email: n.data.email,
+      provider: n.data.provider,
+      // note and prefix are MISSING in real CPAMC /v0/management/auth-files
+    }));
+
+    vi.spyOn(managementClient, 'apiFetch').mockImplementation((endpoint) => {
+      if (endpoint === '/v0/management/auth-files') {
+        return Promise.resolve({ ok: true, json: async () => ({ files: bareFilesFromAPI }) });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+
+    render(<ControlSwitcher nodes={mockNodes} />);
+
+    // Must discover and render the 3 real pools using nodes prop
+    expect(await screen.findByText('Claude del Paquete (agy_clau)')).toBeTruthy();
+    expect(screen.getByText('Gemini Puro (agy)')).toBeTruthy();
+    expect(screen.getByText('Gemini Puro 2 (agy2)')).toBeTruthy();
+
+    // Verify leader accounts match real state
+    expect(screen.getAllByText('wil...io9@gmail.com').length).toBeGreaterThanOrEqual(1); // Leader of agy_clau and reserve of agy2
+    expect(screen.getByText('3 EN COLA')).toBeTruthy(); // 3 reserves in agy_clau
+  });
+
+  it('paginates pools with previous/next controls when more than 3 pools exist', async () => {
+    // 4 pools: agy, agy2, agy3, agy_clau
+    const mockNodes = [
+      { id: 'p1', data: { fileName: 'p1.json', email: 'g1@test.com', prefix: 'agy', provider: 'antigravity' } },
+      { id: 'p1_r', data: { fileName: 'p1_r.json', email: 'g1r@test.com', prefix: 'agy_1', provider: 'antigravity' } },
+      { id: 'p2', data: { fileName: 'p2.json', email: 'g2@test.com', prefix: 'agy2', provider: 'antigravity' } },
+      { id: 'p2_r', data: { fileName: 'p2_r.json', email: 'g2r@test.com', prefix: 'agy2_1', provider: 'antigravity' } },
+      { id: 'p3', data: { fileName: 'p3.json', email: 'g3@test.com', prefix: 'agy3', provider: 'antigravity' } },
+      { id: 'p3_r', data: { fileName: 'p3_r.json', email: 'g3r@test.com', prefix: 'agy3_1', provider: 'antigravity' } },
+      { id: 'p4', data: { fileName: 'p4.json', email: 'c1@test.com', prefix: 'agy_clau', provider: 'antigravity' } },
+      { id: 'p4_r', data: { fileName: 'p4_r.json', email: 'c1r@test.com', prefix: 'agy_clau_1', provider: 'antigravity' } },
+    ];
+
+    vi.spyOn(managementClient, 'apiFetch').mockImplementation(() => Promise.resolve({ ok: true, json: async () => ({}) }));
+
+    const { fireEvent } = await import('@testing-library/react');
+    render(<ControlSwitcher nodes={mockNodes} />);
+
+    // Page indicator should show "Pág 1 de 2"
+    const pageIndicator = await screen.findByTestId('page-indicator');
+    expect(pageIndicator.textContent).toContain('1 de 2');
+
+    // Next button advances to page 2
+    const nextBtn = screen.getByTestId('btn-next-page');
+    expect(nextBtn.disabled).toBe(false);
+    fireEvent.click(nextBtn);
+
+    // Page 2 indicator
+    expect(screen.getByTestId('page-indicator').textContent).toContain('2 de 2');
+
+    // Previous button goes back to page 1
+    const prevBtn = screen.getByTestId('btn-prev-page');
+    fireEvent.click(prevBtn);
+    expect(screen.getByTestId('page-indicator').textContent).toContain('1 de 2');
+  });
+
+  it('filters pools by family and supports quick search', async () => {
+    const mockNodes = [
+      { id: 'p1', data: { fileName: 'p1.json', email: 'g1@test.com', prefix: 'agy', provider: 'antigravity' } },
+      { id: 'p1_r', data: { fileName: 'p1_r.json', email: 'g1r@test.com', prefix: 'agy_1', provider: 'antigravity' } },
+      { id: 'p2', data: { fileName: 'p2.json', email: 'c1@test.com', prefix: 'agy_clau', provider: 'antigravity' } },
+      { id: 'p2_r', data: { fileName: 'p2_r.json', email: 'c1r@test.com', prefix: 'agy_clau_1', provider: 'antigravity' } },
+    ];
+
+    vi.spyOn(managementClient, 'apiFetch').mockImplementation(() => Promise.resolve({ ok: true, json: async () => ({}) }));
+
+    const { fireEvent } = await import('@testing-library/react');
+    render(<ControlSwitcher nodes={mockNodes} />);
+
+    // Filter Claude: should only show agy_clau
+    const claudeChip = await screen.findByTestId('filter-cs-claude');
+    fireEvent.click(claudeChip);
+    expect(screen.getByText('Claude del Paquete (agy_clau)')).toBeTruthy();
+    expect(screen.queryByText('Gemini Puro (agy)')).toBeNull();
+
+    // Filter Todos: restores all
+    fireEvent.click(screen.getByTestId('filter-cs-all'));
+    expect(screen.getByText('Gemini Puro (agy)')).toBeTruthy();
+    expect(screen.getByText('Claude del Paquete (agy_clau)')).toBeTruthy();
+
+    // Quick search
+    const searchInput = screen.getByTestId('input-search-cs');
+    fireEvent.change(searchInput, { target: { value: 'clau' } });
+    expect(screen.getByText('Claude del Paquete (agy_clau)')).toBeTruthy();
+    expect(screen.queryByText('Gemini Puro (agy)')).toBeNull();
+  });
+
+  it('renders compact spectral gauges (Context 5h and Weekly) for reserve accounts in each card', async () => {
+    const mockNodes = [
+      { id: 'g1', data: { fileName: 'g1.json', email: 'mar...tro@gmail.com', prefix: 'agy', provider: 'antigravity' } },
+      { id: 'g2', data: { fileName: 'g2.json', email: 'inf...tec@gmail.com', prefix: 'agy_1', provider: 'antigravity' } },
+    ];
+
+    vi.spyOn(managementClient, 'apiFetch').mockImplementation(() => Promise.resolve({ ok: true, json: async () => ({}) }));
+
+    render(<ControlSwitcher nodes={mockNodes} />);
+
+    // Active account has spectral gauges
+    expect(await screen.findByTestId('spectral-gauge-5h-default')).toBeTruthy();
+    expect(screen.getByTestId('spectral-gauge-weekly-default')).toBeTruthy();
+
+    // Reserve account (agy_1) MUST also have compact spectral gauges for Context (5h) and Weekly
+    const reserveGauge5h = await screen.findByTestId('spectral-gauge-5h-res-agy_1');
+    const reserveGaugeWeekly = screen.getByTestId('spectral-gauge-weekly-res-agy_1');
+
+    expect(reserveGauge5h).toBeTruthy();
+    expect(reserveGaugeWeekly).toBeTruthy();
+
+    // Must have compact CSS class
+    expect(reserveGauge5h.className).toContain('compact');
+    expect(reserveGaugeWeekly.className).toContain('compact');
+
+    // Both glyphs ▰ or ▱ must be rendered in reserve gauge
+    expect(reserveGauge5h.textContent).toMatch(/[▰▱]/);
+    expect(reserveGaugeWeekly.textContent).toMatch(/[▰▱]/);
+  });
+
+  it('differentiates agy_son and agy_opus pools with accurate titles and 5.5 model badges', async () => {
+    const mockNodes = [
+      { id: 's1', data: { fileName: 'son1.json', email: 'son@test.com', prefix: 'agy_son', provider: 'antigravity' } },
+      { id: 's1_r', data: { fileName: 'son1_r.json', email: 'son_r@test.com', prefix: 'agy_son_1', provider: 'antigravity' } },
+      { id: 'o1', data: { fileName: 'op1.json', email: 'opus@test.com', prefix: 'agy_opus', provider: 'antigravity' } },
+      { id: 'o1_r', data: { fileName: 'op1_r.json', email: 'opus_r@test.com', prefix: 'agy_opus_1', provider: 'antigravity' } },
+    ];
+
+    vi.spyOn(managementClient, 'apiFetch').mockImplementation(() => Promise.resolve({ ok: true, json: async () => ({}) }));
+
+    render(<ControlSwitcher nodes={mockNodes} />);
+
+    // agy_son should show Claude Sonnet title and model target
+    expect(await screen.findByText('Claude Sonnet (agy_son)')).toBeTruthy();
+    expect(screen.getByText(/claude-sonnet-4-6|claude-sonnet-5-5-high/i)).toBeTruthy();
+
+    // agy_opus should show Claude Opus title and model target including 5.5 High
+    expect(screen.getByText('Claude Opus (agy_opus)')).toBeTruthy();
+    expect(screen.getByText(/claude-opus-4-6-thinking|claude-opus-5-5-high/i)).toBeTruthy();
   });
 });

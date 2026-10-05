@@ -16,15 +16,35 @@ const MODEL_FAMILIES = {
         icon: '🔷',
         hintPrefix: 'agy',
         quota: 'Gemini Models',
-        note: 'Vigila cuota de "Gemini Models" (3.7 y 3.8 comparten el mismo balde).',
+        targetPatterns: ['gemini'],
+        note: 'Vigila cuota de "Gemini Models" (3.7 y 3.8 comparten el mismo balde). Convención: agy, agy2, agy3...',
+      },
+      sonnet: {
+        key: 'sonnet',
+        label: 'Claude Sonnet',
+        icon: '🔶',
+        hintPrefix: 'agy_son',
+        quota: 'Claude and GPT models',
+        targetPatterns: ['sonnet'],
+        note: 'Pool dedicado para código y tareas ágiles con claude-sonnet-4-6 y claude-sonnet-5-5-high. Convención: agy_son, agy_son2...',
+      },
+      opus: {
+        key: 'opus',
+        label: 'Claude Opus',
+        icon: '🟣',
+        hintPrefix: 'agy_opus',
+        quota: 'Claude and GPT models',
+        targetPatterns: ['opus'],
+        note: 'Pool de razonamiento profundo con claude-opus-4-6-thinking y claude-opus-5-5-high. Convención: agy_opus, agy_opus2...',
       },
       claude: {
         key: 'claude',
         label: 'Claude del Paquete',
-        icon: '🔶',
+        icon: '🎭',
         hintPrefix: 'agy_clau',
         quota: 'Claude and GPT models',
-        note: 'Vigila cuota de "Claude and GPT models" de las cuentas del paquete Gemini.',
+        targetPatterns: ['claude', 'gpt'],
+        note: 'Pool multipropósito que rota tanto Sonnet como Opus bajo la misma cuota. Convención: agy_clau, agy_clau2...',
       },
     },
   },
@@ -34,7 +54,7 @@ const MODEL_FAMILIES = {
     hintPrefix: 'clau',
     provider: 'antigravity',
     quota: 'Claude and GPT models',
-    note: 'Cuentas asignadas para vigilar cuota de Claude/GPT.',
+    note: 'Cuentas asignadas para vigilar cuota de Claude/GPT. Convención: clau, clau2...',
   },
   codex: {
     label: 'Codex (ChatGPT)',
@@ -42,7 +62,7 @@ const MODEL_FAMILIES = {
     hintPrefix: 'codex',
     provider: 'codex',
     quota: 'Codex',
-    note: 'Cuentas individuales Codex / OpenAI.',
+    note: 'Cuentas individuales Codex / OpenAI. Convención: codex, codex2...',
   },
 };
 
@@ -50,6 +70,8 @@ const MODEL_FAMILIES = {
 // origen al virtualizar aunque el catálogo no los liste (p.ej. excluidos).
 const FAMILY_TARGET_PATTERNS = {
   gemini_pure: ['gemini'],
+  gemini_sonnet: ['sonnet'],
+  gemini_opus: ['opus'],
   gemini_claude: ['claude', 'gpt'],
   claude: ['claude', 'gpt'],
   codex: ['codex'],
@@ -71,9 +93,18 @@ function isPoolDescendant(poolBase, prefix) {
 // agy_clau* / clau* / son* -> solo claude/gpt
 // agy* / g* -> solo gemini
 // codex* -> solo codex
-function matchesFamilyModel(base, modelId) {
+function matchesFamilyModel(base, modelId, exclude55 = false) {
   const id = String(modelId || '').toLowerCase();
   const b = String(base || '').toLowerCase();
+  if (exclude55 && (id.includes('5-5') || id.includes('5.5'))) {
+    return false;
+  }
+  if (b.startsWith('agy_opus')) {
+    return id.includes('opus');
+  }
+  if (b.startsWith('agy_son')) {
+    return id.includes('sonnet');
+  }
   if (b.startsWith('agy_clau') || b.startsWith('clau') || b.startsWith('son')) {
     return id.includes('claude') || /^gpt/.test(id.replace(/^[a-z0-9_-]+\//, ''));
   }
@@ -132,6 +163,8 @@ export default function GroupManager({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [family, setFamily] = useState(null); // 'gemini' | 'claude' | 'codex' | null (libre)
   const [geminiSubtype, setGeminiSubtype] = useState('pure'); // 'pure' (agy) | 'claude' (agy_clau)
+  const [excludeVersion55, setExcludeVersion55] = useState(false);
+  const [disableIsolation, setDisableIsolation] = useState(false);
   const [saveReport, setSaveReport] = useState(null); // { base, successful, failed }
   const [modelRoutes, setModelRoutes] = useState(null); // { base, routes: [] }
   const [copiedRoute, setCopiedRoute] = useState('');
@@ -188,14 +221,23 @@ export default function GroupManager({
   );
 
   const isGeminiPackageFamily = !!effectiveFamily && (
-    effectiveFamily.key === 'gemini_pure' || effectiveFamily.key === 'gemini_claude'
+    effectiveFamily.key.startsWith('gemini_')
   );
 
   // ¿El prefijo corresponde al sub-tipo Gemini objetivo (mismo paquete)?
   const prefixMatchesEffectiveFamily = useCallback((prefix) => {
     const p = (prefix || '').trim();
     if (!effectiveFamily) return false;
-    if (effectiveFamily.key === 'gemini_pure') return /^agy/.test(p) && !p.startsWith('agy_clau');
+    if (effectiveFamily.key === 'gemini_pure') {
+      return (
+        (/^agy\d*(_\d+)?$/.test(p) || p.startsWith('g')) &&
+        !p.startsWith('agy_clau') &&
+        !p.startsWith('agy_son') &&
+        !p.startsWith('agy_opus')
+      );
+    }
+    if (effectiveFamily.key === 'gemini_sonnet') return p.startsWith('agy_son');
+    if (effectiveFamily.key === 'gemini_opus') return p.startsWith('agy_opus');
     if (effectiveFamily.key === 'gemini_claude') return p.startsWith('agy_clau');
     return p.startsWith(effectiveFamily.hintPrefix);
   }, [effectiveFamily]);
@@ -205,16 +247,22 @@ export default function GroupManager({
   // identidad física aún no tenga una credencial de la familia objetivo.
   const virtualizableSourceNodes = useMemo(() => {
     if (!isGeminiPackageFamily) return [];
-    const oppositeTest = effectiveFamily.key === 'gemini_pure'
-      ? (p) => p.startsWith('agy_clau')
-      : (p) => /^agy/.test(p) && !p.startsWith('agy_clau');
+    // Las fuentes virtualizables son cuentas antigravity asignadas a familias gemini válidas
+    // (prefijos agy_clau, agy_son, agy_opus, agy, g...) que no coincidan con la familia objetivo
+    const oppositeTest = (p) => {
+      const isKnownGeminiFamily =
+        p.startsWith('agy') || p.startsWith('g');
+      return isKnownGeminiFamily && !prefixMatchesEffectiveFamily(p);
+    };
     const targetEmails = new Set(
       nodes
         .filter((n) => prefixMatchesEffectiveFamily(n.data?.prefix))
         .map((n) => n.data?.email)
         .filter(Boolean)
     );
+    const freeIds = new Set(freeNodes.map((n) => n.id));
     return nodes.filter((n) => {
+      if (freeIds.has(n.id)) return false;
       const prov = (n.data?.provider || n.data?.accountType || '').toLowerCase();
       if (prov !== 'antigravity') return false;
       const p = (n.data?.prefix || '').trim();
@@ -222,7 +270,7 @@ export default function GroupManager({
       const email = n.data?.email;
       return email ? !targetEmails.has(email) : false;
     });
-  }, [isGeminiPackageFamily, effectiveFamily, nodes, prefixMatchesEffectiveFamily]);
+  }, [isGeminiPackageFamily, effectiveFamily, nodes, prefixMatchesEffectiveFamily, freeNodes]);
 
   const isVirtualSource = useCallback(
     (node) => !!node && virtualizableSourceNodes.some((n) => n.id === node.id),
@@ -289,10 +337,55 @@ export default function GroupManager({
     if (!effectiveFamily || !trimmed) return null;
     const hint = effectiveFamily.hintPrefix;
 
-    if (effectiveFamily.key === 'gemini_pure' && trimmed.toLowerCase().startsWith('agy_clau')) {
+    // VALIDACIÓN 1: El prefijo base de un pool NUNCA debe terminar en _<número>
+    // porque ese formato es exclusivo de cuentas de reserva (e.g. agy_1 es reserva de agy, no un pool).
+    if (/_\d+$/.test(trimmed)) {
+      const match = trimmed.match(/^(.*)_(\d+)$/);
+      const suggested = match ? `${match[1]}${match[2]}` : trimmed.replace(/_/g, '');
       return {
         hint,
-        message: 'Has seleccionado Gemini Puro, pero el prefijo inicia con "agy_clau" (reservado para Claude del Paquete).',
+        message: `El formato "_<número>" está reservado para cuentas de reserva. Para un nuevo pool usa "${suggested}" en vez de "${trimmed}".`,
+      };
+    }
+
+    // VALIDACIÓN 2: Distinguir subtipos del paquete Gemini
+    if (effectiveFamily.key === 'gemini_pure' && (trimmed.toLowerCase().startsWith('agy_clau') || trimmed.toLowerCase().startsWith('agy_son') || trimmed.toLowerCase().startsWith('agy_opus'))) {
+      return {
+        hint,
+        message: 'Has seleccionado Gemini Puro, pero el prefijo inicia con un subtipo de Claude (agy_son/agy_opus/agy_clau). Usa "agy", "agy2", "agy3"...',
+      };
+    }
+
+    if (effectiveFamily.key === 'gemini_sonnet' && !trimmed.toLowerCase().startsWith('agy_son')) {
+      return {
+        hint,
+        message: 'Para Claude Sonnet del Paquete, el prefijo debe iniciar con "agy_son" (ej. agy_son, agy_son2...).',
+      };
+    }
+
+    if (effectiveFamily.key === 'gemini_opus' && !trimmed.toLowerCase().startsWith('agy_opus')) {
+      return {
+        hint,
+        message: 'Para Claude Opus del Paquete, el prefijo debe iniciar con "agy_opus" (ej. agy_opus, agy_opus2...).',
+      };
+    }
+
+    if (effectiveFamily.key === 'gemini_claude' && !trimmed.toLowerCase().startsWith('agy_clau')) {
+      return {
+        hint,
+        message: 'Para Claude Multipropósito, el prefijo debe iniciar con "agy_clau" (ej. agy_clau, agy_clau2...).',
+      };
+    }
+
+    // VALIDACIÓN 3: Evitar colisión si el prefijo ya existe en otra cuenta activa
+    const existingPoolPrefixes = new Set(
+      nodes.map((n) => (n?.data?.prefix || '').trim()).filter(Boolean)
+    );
+    const currentActiveNodePrefix = (nodes.find((n) => n.id === selectedActiveNodeId)?.data?.prefix || '').trim();
+    if (existingPoolPrefixes.has(trimmed) && trimmed !== currentActiveNodePrefix) {
+      return {
+        hint,
+        message: `El prefijo "${trimmed}" ya está asignado a otra cuenta. Elige el siguiente libre (ej. ${suggestNextBasePrefix(nodes, hint)}).`,
       };
     }
 
@@ -306,7 +399,7 @@ export default function GroupManager({
       hint,
       message: `La convención exige un prefijo que empiece con "${hint}" para vigilar la cuota de "${effectiveFamily.quota}". Con "${trimmed}" el switcher evaluará el peor caso de todas las familias.`,
     };
-  }, [effectiveFamily, groupBasePrefix]);
+  }, [effectiveFamily, groupBasePrefix, nodes, selectedActiveNodeId]);
 
   const handleSelectFamily = useCallback((famKey) => {
     if (family !== famKey) {
@@ -364,7 +457,8 @@ export default function GroupManager({
     if (chosenNode && isVirtualSource(chosenNode)) {
       // Cuenta de la familia opuesta del paquete Gemini: se clonará, así que el
       // prefijo destino es el de la familia objetivo, no el suyo actual.
-      if (effectiveFamily) {
+      // Solo sugerir si el usuario aún no ha escrito un prefijo manualmente.
+      if (effectiveFamily && !groupBasePrefix.trim()) {
         setGroupBasePrefix(suggestNextBasePrefix(nodes, effectiveFamily.hintPrefix));
       }
       return;
@@ -464,8 +558,17 @@ export default function GroupManager({
             .map(toBaseModelId)
             .filter(Boolean)
             .forEach((id) => {
-              if (matchesFamilyModel(trimmedBase, id)) targetSet.add(id);
-              else oppositeSet.add(id);
+              if (disableIsolation) {
+                if (excludeVersion55 && (id.includes('5-5') || id.includes('5.5'))) {
+                  oppositeSet.add(id);
+                } else {
+                  targetSet.add(id);
+                }
+              } else if (matchesFamilyModel(trimmedBase, id, excludeVersion55)) {
+                targetSet.add(id);
+              } else {
+                oppositeSet.add(id);
+              }
             });
           targetModels = [...targetSet];
           oppositeModels = [...oppositeSet];
@@ -528,7 +631,7 @@ export default function GroupManager({
           const { models } = await listModels();
           setModelRoutes({
             base: trimmedBase,
-            routes: models.filter((id) => id.startsWith(`${trimmedBase}/`) && matchesFamilyModel(trimmedBase, id)),
+            routes: models.filter((id) => id.startsWith(`${trimmedBase}/`) && matchesFamilyModel(trimmedBase, id, excludeVersion55)),
           });
         } catch {
           setModelRoutes(null);
@@ -543,7 +646,7 @@ export default function GroupManager({
     } finally {
       setIsSubmitting(false);
     }
-  }, [groupBasePrefix, selectedActiveNodeId, selectedReserveNodeIds, nodes, onReloadRequested, isVirtualSource, effectiveFamily]);
+  }, [groupBasePrefix, selectedActiveNodeId, selectedReserveNodeIds, nodes, onReloadRequested, isVirtualSource, effectiveFamily, excludeVersion55, disableIsolation]);
 
   // Reintentar solo las cuentas que fallaron en el último guardado
   const handleRetryFailed = useCallback(async () => {
@@ -770,7 +873,7 @@ export default function GroupManager({
                         <span className="group-family-icon">{fam.icon}</span>
                         <span className="group-family-label">{fam.label}</span>
                         <span className="group-family-hint">
-                          {key === 'gemini' ? 'Gemini / Claude Paquete' : `prefijo ${fam.hintPrefix}*`}
+                          {key === 'gemini' ? 'Gemini: agy* · Claude: agy_son*, agy_opus*, agy_clau*' : `prefijo ${fam.hintPrefix}*`}
                         </span>
                       </button>
                     ))}
@@ -791,7 +894,25 @@ export default function GroupManager({
                           data-testid="subfamily-gemini-pure"
                         >
                           <span className="group-subfamily-label">🔷 Gemini Puro</span>
-                          <span className="group-subfamily-hint">Prefijo: agy / agy2 · Cuota: Gemini</span>
+                          <span className="group-subfamily-hint">Prefijo: agy, agy2... · Cuota: Gemini Models</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`group-subfamily-chip ${geminiSubtype === 'sonnet' ? 'active' : ''}`}
+                          onClick={() => handleSelectGeminiSubtype('sonnet')}
+                          data-testid="subfamily-gemini-sonnet"
+                        >
+                          <span className="group-subfamily-label">🔶 Claude Sonnet</span>
+                          <span className="group-subfamily-hint">Prefijo: agy_son... · claude-sonnet 4.6 & 5.5</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`group-subfamily-chip ${geminiSubtype === 'opus' ? 'active' : ''}`}
+                          onClick={() => handleSelectGeminiSubtype('opus')}
+                          data-testid="subfamily-gemini-opus"
+                        >
+                          <span className="group-subfamily-label">🟣 Claude Opus</span>
+                          <span className="group-subfamily-hint">Prefijo: agy_opus... · claude-opus 4.6 & 5.5 High</span>
                         </button>
                         <button
                           type="button"
@@ -799,28 +920,76 @@ export default function GroupManager({
                           onClick={() => handleSelectGeminiSubtype('claude')}
                           data-testid="subfamily-gemini-claude"
                         >
-                          <span className="group-subfamily-label">🔶 Claude del Paquete</span>
-                          <span className="group-subfamily-hint">Prefijo: agy_clau / agy_clau2 · Cuota: Claude/GPT</span>
+                          <span className="group-subfamily-label">🎭 Multipropósito</span>
+                          <span className="group-subfamily-hint">Prefijo: agy_clau... · Cuota: Claude & GPT</span>
                         </button>
                       </div>
                     </div>
                   )}
 
                   {effectiveFamily && effectiveFamily.note && (
-                    <p className="group-family-note">ℹ️ {effectiveFamily.note}</p>
+                    <p className="group-family-note" data-testid="group-family-note">
+                      ℹ️ {excludeVersion55 && (effectiveFamily.key.includes('claude') || effectiveFamily.key.includes('sonnet') || effectiveFamily.key.includes('opus'))
+                        ? effectiveFamily.note.replace(/(claude-[a-z]+-5-5[a-z-]*)/gi, '$1 (versión 5.5 excluida)')
+                        : effectiveFamily.note}
+                    </p>
+                  )}
+
+                  {/* ⚙️ Opciones de Filtrado de Modelos (Casillas Contextuales) */}
+                  {family && (
+                    <div
+                      className="group-model-policy-card"
+                      data-testid="model-policy-card"
+                      style={{
+                        background: 'rgba(15, 23, 42, 0.65)',
+                        border: '1px solid rgba(148, 163, 184, 0.2)',
+                        borderRadius: 8,
+                        padding: '10px 14px',
+                        marginTop: 10,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 8,
+                      }}
+                    >
+                      <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        ⚙️ Opciones de Filtrado de Modelos en el Pool:
+                      </div>
+                      {/* Casilla 5.5 solo visible para familias de Claude donde existe dicha versión */}
+                      {effectiveFamily && (effectiveFamily.key.includes('claude') || effectiveFamily.key.includes('sonnet') || effectiveFamily.key.includes('opus')) && (
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#e2e8f0', cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            data-testid="checkbox-exclude-55"
+                            checked={excludeVersion55}
+                            onChange={(e) => setExcludeVersion55(e.target.checked)}
+                          />
+                          <span>Excluir versiones 5.5 (Mantener solo versión 4.6 / Estable sin duplicidad)</span>
+                        </label>
+                      )}
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#e2e8f0', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          data-testid="checkbox-disable-isolation"
+                          checked={disableIsolation}
+                          onChange={(e) => setDisableIsolation(e.target.checked)}
+                        />
+                        <span>Desactivar aislamiento (Modo Comodín / Servir todas las familias sin bloqueo)</span>
+                      </label>
+                    </div>
                   )}
                 </div>
 
-                {/* Badge de Capacidad en Tiempo Real */}
-                {family && (
-                  <div className="group-capacity-badge" data-testid="capacity-badge">
-                    <span>📊 Cuentas compatibles libres: <strong>{familyCompatibleNodes.length}</strong></span>
-                    <span> · Capacidad máxima: <strong>{Math.floor(familyCompatibleNodes.length / 2)}</strong> grupo(s) de rotación (mínimo 2 cuentas/grupo)</span>
-                    {isGeminiPackageFamily && (
-                      <span> · 🔀 Virtualizables del paquete: <strong>{virtualizableSourceNodes.length}</strong></span>
-                    )}
-                  </div>
-                )}
+                {/* Badge de Capacidad en Tiempo Real (Unifica Libres + Virtualizables) */}
+                {family && (() => {
+                  const totalEligible = familyCompatibleNodes.length + (isGeminiPackageFamily ? virtualizableSourceNodes.length : 0);
+                  const maxGroups = Math.floor(totalEligible / 2);
+                  return (
+                    <div className="group-capacity-badge" data-testid="capacity-badge">
+                      <span>📊 Cuentas aptas: <strong>{totalEligible}</strong> ({familyCompatibleNodes.length} libres{isGeminiPackageFamily ? ` · 🔀 Virtualizables: ${virtualizableSourceNodes.length}` : ''})</span>
+                      <span> · Capacidad máxima: <strong>{maxGroups}</strong> grupo(s) de rotación (mínimo 2 cuentas/grupo)</span>
+                    </div>
+                  );
+                })()}
 
                 {/* ② Cuenta Principal + ③ Prefijo Base (lado a lado) */}
                 <div className="group-inline-row">
@@ -864,7 +1033,11 @@ export default function GroupManager({
                     <input
                       type="text"
                       className="group-input"
-                      placeholder="ej. agy, agy_clau, agy_clau2"
+                      placeholder={
+                        effectiveFamily
+                          ? `ej. ${effectiveFamily.hintPrefix}, ${effectiveFamily.hintPrefix}2`
+                          : "ej. agy, agy2, agy_clau, codex"
+                      }
                       value={groupBasePrefix}
                       onChange={(e) => {
                         setGroupBasePrefix(e.target.value);
@@ -879,39 +1052,44 @@ export default function GroupManager({
                     )}
                     <div className="group-prefix-chips">
                       <span style={{ fontSize: 11, color: '#64748b', alignSelf: 'center' }}>Sugerencias:</span>
-                      {effectiveFamily && effectiveFamily.hintPrefix === 'agy' && (
-                        <>
-                          <button type="button" className="group-prefix-chip" onClick={() => setGroupBasePrefix(suggestNextBasePrefix(nodes, 'agy'))}>
-                            {suggestNextBasePrefix(nodes, 'agy')}
-                          </button>
-                          <button type="button" className="group-prefix-chip" onClick={() => setGroupBasePrefix('agy2')}>agy2</button>
-                        </>
-                      )}
-                      {effectiveFamily && effectiveFamily.hintPrefix === 'agy_clau' && (
-                        <>
-                          <button type="button" className="group-prefix-chip" onClick={() => setGroupBasePrefix(suggestNextBasePrefix(nodes, 'agy_clau'))}>
-                            {suggestNextBasePrefix(nodes, 'agy_clau')}
-                          </button>
-                          <button type="button" className="group-prefix-chip" onClick={() => setGroupBasePrefix('agy_clau2')}>agy_clau2</button>
-                        </>
-                      )}
-                      {effectiveFamily && effectiveFamily.hintPrefix === 'clau' && (
-                        <>
-                          <button type="button" className="group-prefix-chip" onClick={() => setGroupBasePrefix(suggestNextBasePrefix(nodes, 'clau'))}>
-                            {suggestNextBasePrefix(nodes, 'clau')}
-                          </button>
-                          <button type="button" className="group-prefix-chip" onClick={() => setGroupBasePrefix('clau2')}>clau2</button>
-                        </>
-                      )}
-                      {effectiveFamily && effectiveFamily.hintPrefix === 'codex' && (
-                        <>
-                          <button type="button" className="group-prefix-chip" onClick={() => setGroupBasePrefix('codex_pool')}>codex_pool</button>
-                        </>
+                      {effectiveFamily && (
+                        <button
+                          type="button"
+                          className="group-prefix-chip"
+                          onClick={() => setGroupBasePrefix(suggestNextBasePrefix(nodes, effectiveFamily.hintPrefix))}
+                        >
+                          {suggestNextBasePrefix(nodes, effectiveFamily.hintPrefix)} (próximo libre)
+                        </button>
                       )}
                       {!family && (
                         <>
-                          <button type="button" className="group-prefix-chip" onClick={() => setGroupBasePrefix('agy')}>agy</button>
-                          <button type="button" className="group-prefix-chip" onClick={() => setGroupBasePrefix('agy_clau')}>agy_clau</button>
+                          <button
+                            type="button"
+                            className="group-prefix-chip"
+                            onClick={() => {
+                              handleSelectFamily('gemini');
+                              handleSelectGeminiSubtype('pure');
+                            }}
+                          >
+                            🔷 agy (Gemini)
+                          </button>
+                          <button
+                            type="button"
+                            className="group-prefix-chip"
+                            onClick={() => {
+                              handleSelectFamily('gemini');
+                              handleSelectGeminiSubtype('claude');
+                            }}
+                          >
+                            🔶 agy_clau (Claude)
+                          </button>
+                          <button
+                            type="button"
+                            className="group-prefix-chip"
+                            onClick={() => handleSelectFamily('codex')}
+                          >
+                            🧩 codex
+                          </button>
                         </>
                       )}
                     </div>

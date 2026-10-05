@@ -582,6 +582,200 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
     expect(screen.getByTestId('input-group-base-prefix').value).toBe('agy_clau2');
   });
 
+  it('provides model policy checkboxes to exclude 5.5 versions or disable isolation (wildcard mode)', async () => {
+    let capturedVirtualizePayload = null;
+    vi.spyOn(managementClient, 'saveAuthFilePrefixes').mockResolvedValue({
+      successful: [{ name: 'free1.json', prefix: 'agy_son' }],
+      failed: [],
+    });
+    vi.spyOn(managementClient, 'virtualizeAccount').mockImplementation((payload) => {
+      capturedVirtualizePayload = payload;
+      return Promise.resolve({ name: 'virtual.json', prefix: payload.prefix });
+    });
+    vi.spyOn(managementClient, 'listModels').mockResolvedValue({
+      models: [
+        'claude-sonnet-4-6',
+        'claude-sonnet-5-5-high',
+        'claude-opus-4-6-thinking',
+        'claude-opus-5-5-high',
+        'gemini-3.8-flash-high',
+      ],
+    });
+
+    // Nodo ocupado de otra familia para forzar virtualización como reserva
+    const testNodes = [
+      { id: 'leader', data: { fileName: 'leader.json', email: 'leader@test.com', prefix: '', provider: 'antigravity' } },
+      { id: 'occup', data: { fileName: 'occup.json', email: 'occup@test.com', prefix: 'agy', provider: 'antigravity' } },
+    ];
+
+    render(<GroupManager nodes={testNodes} />);
+
+    fireEvent.click(screen.getByTestId('family-gemini'));
+    fireEvent.click(screen.getByTestId('subfamily-gemini-sonnet'));
+
+    // 1. Ambas casillas deben existir y estar desmarcadas por defecto
+    const chk55 = screen.getByTestId('checkbox-exclude-55');
+    const chkIso = screen.getByTestId('checkbox-disable-isolation');
+    expect(chk55.checked).toBe(false);
+    expect(chkIso.checked).toBe(false);
+
+    // 2. Marcar "Excluir versiones 5.5"
+    fireEvent.click(chk55);
+    expect(chk55.checked).toBe(true);
+
+    fireEvent.change(screen.getByTestId('select-active-account'), { target: { value: 'leader' } });
+    fireEvent.click(screen.getByTestId('reserve-item-occup')); // cuenta virtualizable
+
+    fireEvent.click(screen.getByTestId('btn-save-group'));
+
+    await waitFor(() => {
+      expect(capturedVirtualizePayload).not.toBeNull();
+    });
+
+    // Con excludeVersion55=true, claude-sonnet-5-5-high DEBE estar en oppositeModels (excluido)
+    expect(capturedVirtualizePayload.targetModels).toContain('claude-sonnet-4-6');
+    expect(capturedVirtualizePayload.oppositeModels).toContain('claude-sonnet-5-5-high');
+    expect(capturedVirtualizePayload.oppositeModels).toContain('gemini-3.8-flash-high');
+  });
+
+  it('allows disabling isolation for wildcard multipurpose pools (serving all families)', async () => {
+    let capturedVirtualizePayload = null;
+    vi.spyOn(managementClient, 'saveAuthFilePrefixes').mockResolvedValue({
+      successful: [{ name: 'free1.json', prefix: 'agy_son' }],
+      failed: [],
+    });
+    vi.spyOn(managementClient, 'virtualizeAccount').mockImplementation((payload) => {
+      capturedVirtualizePayload = payload;
+      return Promise.resolve({ name: 'virtual.json', prefix: payload.prefix });
+    });
+    vi.spyOn(managementClient, 'listModels').mockResolvedValue({
+      models: [
+        'claude-sonnet-4-6',
+        'claude-sonnet-5-5-high',
+        'claude-opus-4-6-thinking',
+        'claude-opus-5-5-high',
+        'gemini-3.8-flash-high',
+      ],
+    });
+
+    const testNodes = [
+      { id: 'leader', data: { fileName: 'leader.json', email: 'leader@test.com', prefix: '', provider: 'antigravity' } },
+      { id: 'occup', data: { fileName: 'occup.json', email: 'occup@test.com', prefix: 'agy', provider: 'antigravity' } },
+    ];
+
+    render(<GroupManager nodes={testNodes} />);
+
+    fireEvent.click(screen.getByTestId('family-gemini'));
+    fireEvent.click(screen.getByTestId('subfamily-gemini-sonnet'));
+
+    // Check "Desactivar aislamiento (Modo Comodín)"
+    const chkIso = screen.getByTestId('checkbox-disable-isolation');
+    fireEvent.click(chkIso);
+    expect(chkIso.checked).toBe(true);
+
+    fireEvent.change(screen.getByTestId('select-active-account'), { target: { value: 'leader' } });
+    fireEvent.click(screen.getByTestId('reserve-item-occup')); // cuenta virtualizable
+
+    fireEvent.click(screen.getByTestId('btn-save-group'));
+
+    await waitFor(() => {
+      expect(capturedVirtualizePayload).not.toBeNull();
+    });
+
+    // In wildcard mode (disableIsolation=true), oppositeModels is empty, all models are in targetModels
+    expect(capturedVirtualizePayload.targetModels).toContain('claude-sonnet-4-6');
+    expect(capturedVirtualizePayload.targetModels).toContain('claude-opus-4-6-thinking');
+    expect(capturedVirtualizePayload.targetModels).toContain('gemini-3.8-flash-high');
+    expect(capturedVirtualizePayload.oppositeModels.length).toBe(0);
+  });
+
+  it('unifies capacity calculation combining free and virtualizable accounts with accurate group count', () => {
+    // 0 cuentas libres físicas, pero 4 cuentas Antigravity ocupadas virtualizables
+    const occupiedNodes = [
+      { id: 'a1', data: { fileName: 'a1.json', email: 'a1@test.com', prefix: 'agy', provider: 'antigravity' } },
+      { id: 'a2', data: { fileName: 'a2.json', email: 'a2@test.com', prefix: 'agy_1', provider: 'antigravity' } },
+      { id: 'a3', data: { fileName: 'a3.json', email: 'a3@test.com', prefix: 'agy2', provider: 'antigravity' } },
+      { id: 'a4', data: { fileName: 'a4.json', email: 'a4@test.com', prefix: 'agy2_1', provider: 'antigravity' } },
+    ];
+
+    render(<GroupManager nodes={occupiedNodes} />);
+
+    fireEvent.click(screen.getByTestId('family-gemini'));
+    fireEvent.click(screen.getByTestId('subfamily-gemini-opus'));
+
+    const capacityBadge = screen.getByTestId('capacity-badge');
+    // Debe reportar capacidad real > 0 (4 virtualizables = 2 grupos de rotación)
+    expect(capacityBadge.textContent).toContain('Capacidad máxima: 2');
+    expect(capacityBadge.textContent).toContain('Virtualizables: 4');
+  });
+
+  it('preserves user typed prefix when selecting a virtual source account (no input clobbering)', () => {
+    const occupiedNodes = [
+      { id: 'a1', data: { fileName: 'a1.json', email: 'a1@test.com', prefix: 'agy', provider: 'antigravity' } },
+      { id: 'a2', data: { fileName: 'a2.json', email: 'a2@test.com', prefix: 'agy_1', provider: 'antigravity' } },
+    ];
+
+    render(<GroupManager nodes={occupiedNodes} />);
+
+    fireEvent.click(screen.getByTestId('family-gemini'));
+    fireEvent.click(screen.getByTestId('subfamily-gemini-opus'));
+
+    // Usuario escribe su propio prefijo deseado
+    const prefixInput = screen.getByTestId('input-group-base-prefix');
+    fireEvent.change(prefixInput, { target: { value: 'mi_opus_custom' } });
+    expect(prefixInput.value).toBe('mi_opus_custom');
+
+    // Luego selecciona cuenta líder virtual
+    fireEvent.change(screen.getByTestId('select-active-account'), { target: { value: 'a1' } });
+
+    // NO debe machacar el input si ya tenía texto
+    expect(screen.getByTestId('input-group-base-prefix').value).toBe('mi_opus_custom');
+  });
+
+  it('hides 5.5 exclusion checkbox on Gemini Puro and displays dynamic reactive note on Claude', () => {
+    render(<GroupManager nodes={baseNodes} />);
+
+    fireEvent.click(screen.getByTestId('family-gemini'));
+
+    // 1. En Gemini Puro: NO debe mostrar checkbox 5.5
+    fireEvent.click(screen.getByTestId('subfamily-gemini-pure'));
+    expect(screen.queryByTestId('checkbox-exclude-55')).toBeNull();
+
+    // 2. En Claude Opus: SÍ debe mostrar checkbox 5.5
+    fireEvent.click(screen.getByTestId('subfamily-gemini-opus'));
+    const chk55 = screen.getByTestId('checkbox-exclude-55');
+    expect(chk55).toBeTruthy();
+
+    // Nota antes de marcar
+    expect(screen.getByTestId('group-family-note').textContent).toContain('claude-opus-5-5-high');
+
+    // Al marcar checkbox 5.5: nota reacciona dinámicamente
+    fireEvent.click(chk55);
+    expect(screen.getByTestId('group-family-note').textContent).toContain('(versión 5.5 excluida)');
+  });
+
+  it('supports specialized sonnet and opus subtypes in Antigravity package with dedicated models including 5.5 versions', () => {
+    render(<GroupManager nodes={baseNodes} />);
+
+    fireEvent.click(screen.getByTestId('family-gemini'));
+    expect(screen.getByTestId('subfamily-gemini-sonnet')).toBeTruthy();
+    expect(screen.getByTestId('subfamily-gemini-opus')).toBeTruthy();
+
+    // Select Claude Sonnet -> suggests agy_son
+    fireEvent.click(screen.getByTestId('subfamily-gemini-sonnet'));
+    expect(screen.getByTestId('input-group-base-prefix').value).toBe('agy_son');
+
+    // Note should highlight Sonnet 4.6 & 5.5
+    expect(screen.getAllByText(/claude-sonnet/i).length).toBeGreaterThanOrEqual(1);
+
+    // Select Claude Opus -> suggests agy_opus
+    fireEvent.click(screen.getByTestId('subfamily-gemini-opus'));
+    expect(screen.getByTestId('input-group-base-prefix').value).toBe('agy_opus');
+
+    // Note should highlight Opus 4.6 Thinking & Opus 5.5 High
+    expect(screen.getAllByText(/claude-opus/i).length).toBeGreaterThanOrEqual(1);
+  });
+
   it('enforces strict minimum 2 accounts rule (1 leader + >=1 reserve) with visual warnings', () => {
     render(<GroupManager nodes={baseNodes} />);
 

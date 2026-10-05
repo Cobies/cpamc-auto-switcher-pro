@@ -4,8 +4,8 @@ import '../PrefixManager.css';
 
 /**
  * Helper para clasificar el rol del prefijo según la convención de Auto Switcher:
- * - Root / Principal (ej: agy_g1, agy_g2, agy_son)
- * - Child / Reserva (ej: agy_g1_1, agy_g1_2)
+ * - Root / Principal (ej: agy, agy2, agy_clau, codex)
+ * - Child / Reserva (ej: agy_1, agy2_1, agy_clau_1, codex_1)
  * - Salvavidas / Fijo (nv, ocgo)
  * - Libre / Sin Asignar
  */
@@ -89,10 +89,26 @@ export default function PrefixManager({ nodes = [], onReloadRequested }) {
       // 2. Filtro por categoría / familia
       if (filterCategory === 'all') return true;
       if (filterCategory === 'gemini') {
-        return prefix.includes('g1') || prefix.includes('g2') || prefix.includes('g3') || prefix.includes('gemini');
+        // Gemini puro: agy, agy2, agy_1, agy2_1, g1, g2, g3, gemini
+        // Exclude agy_clau (Claude del paquete)
+        return (
+          prefix.includes('g1') || prefix.includes('g2') || prefix.includes('g3') || prefix.includes('gemini') ||
+          /^agy\d*$/.test(prefix) || /^agy\d*_\d+$/.test(prefix)
+        );
       }
       if (filterCategory === 'claude') {
-        return prefix.includes('son') || prefix.includes('claude');
+        return (
+          prefix.includes('son') ||
+          prefix.includes('claude') ||
+          prefix.includes('clau') ||
+          prefix.includes('opus')
+        );
+      }
+      if (filterCategory === 'agy_clau') {
+        return (
+          prefix.startsWith('agy_clau') ||
+          fileName.includes('agy_clau')
+        );
       }
       if (filterCategory === 'codex') {
         return prov === 'codex' || prefix.includes('codex');
@@ -180,8 +196,8 @@ export default function PrefixManager({ nodes = [], onReloadRequested }) {
         </div>
 
         <div className="pm-guide-box">
-          <div>• <strong>Cuenta Líder (Root):</strong> Invocación directa <code>cpamc/{'{prefijo}'}/...</code> (ej: <code>agy_g1</code>)</div>
-          <div>• <strong>Cuenta Reserva (Child):</strong> Rotación automática con sufijo <code>cpamc/{'{prefijo}_{N}'}/...</code> (ej: <code>agy_g1_1</code>)</div>
+          <div>• <strong>Cuenta Líder (Root):</strong> Invocación directa <code>cpamc/{'{prefijo}'}/...</code> (ej: <code>agy</code>, <code>agy2</code>, <code>agy_clau</code>, <code>codex</code>)</div>
+          <div>• <strong>Cuenta Reserva (Child):</strong> Rotación automática con sufijo <code>cpamc/{'{prefijo}_{N}'}/...</code> (ej: <code>agy_1</code>, <code>agy2_1</code>, <code>agy_clau_1</code>)</div>
         </div>
       </div>
 
@@ -235,6 +251,14 @@ export default function PrefixManager({ nodes = [], onReloadRequested }) {
               data-testid="filter-chip-claude"
             >
               🟣 Claude
+            </button>
+            <button
+              type="button"
+              className={`pm-filter-chip ${filterCategory === 'agy_clau' ? 'active' : ''}`}
+              onClick={() => setFilterCategory('agy_clau')}
+              data-testid="filter-chip-agy-clau"
+            >
+              🎭 agy_clau
             </button>
             <button
               type="button"
@@ -321,7 +345,7 @@ export default function PrefixManager({ nodes = [], onReloadRequested }) {
                         type="text"
                         value={currentVal}
                         onChange={(e) => handleDraftChange(n.id, e.target.value)}
-                        placeholder="e.g. agy_g1_1"
+                        placeholder="e.g. agy, agy_1, agy_clau, agy_clau_1"
                         className={`pm-prefix-input ${isCollision ? 'collision' : ''} ${isDirty ? 'dirty' : ''}`}
                         data-testid={`input-prefix-${n.id}`}
                       />

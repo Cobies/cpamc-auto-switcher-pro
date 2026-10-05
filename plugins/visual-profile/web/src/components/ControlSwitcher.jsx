@@ -21,7 +21,7 @@ const CONTEXT_LABEL_COLOR = 'rgb(92, 184, 199)'; // Cian pastel [92, 184, 199]
 /**
  * Componente Barra Espectral TrueColor de 8 celdas con glifos ▰ y ▱
  */
-export function SpectralGauge({ percentage = 0, label = 'Context', testId = 'spectral-gauge' }) {
+export function SpectralGauge({ percentage = 0, label = 'Context', compact = false, testId = 'spectral-gauge' }) {
   const clamped = Math.max(0, Math.min(100, Number(percentage) || 0));
   // 8 celdas: cada celda representa 12.5%
   const filledCells = Math.min(8, Math.round((clamped / 100) * 8));
@@ -55,7 +55,7 @@ export function SpectralGauge({ percentage = 0, label = 'Context', testId = 'spe
   }
 
   return (
-    <div className="cs-spectral-gauge" data-testid={testId}>
+    <div className={`cs-spectral-gauge ${compact ? 'compact' : ''}`} data-testid={testId}>
       {label && (
         <span className="cs-gauge-label" style={{ color: CONTEXT_LABEL_COLOR }}>
           {label}
@@ -73,13 +73,20 @@ export function SpectralGauge({ percentage = 0, label = 'Context', testId = 'spe
  * ControlSwitcher: CPAMC · Centro de Control de Infraestructura IA
  * Réplica idéntica y Pixel-Perfect según la especificación visual (tres.jpg)
  */
-export default function ControlSwitcher({ onReloadRequested }) {
+export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
   const [checkOutput, setCheckOutput] = useState('');
   const [actionError, setActionError] = useState('');
   const [rawFiles, setRawFiles] = useState([]);
   const [quotasMap, setQuotasMap] = useState({});
+
+  // Controles dinámicos de Paginación, Filtrado y Búsqueda
+  const [searchQuery, setSearchQuery] = useState('');
+  const [familyFilter, setFamilyFilter] = useState('all'); // all | gemini | claude | codex | warning
+  const [sortBy, setSortBy] = useState('urgency'); // urgency | hierarchy | availability | alphabetical
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 3;
 
   // Helper para ofuscar emails al estilo mar...tro@gmail.com
   const obfuscateEmail = (email) => {
@@ -127,12 +134,27 @@ export default function ControlSwitcher({ onReloadRequested }) {
         worstWeekly = Math.max(0, Math.min(100, Number(rl.secondary_window.used_percent)));
       }
     } else {
-      // Antigravity (Google Cloud Code)
+      // Antigravity (Google Cloud Code): Aislar cuotas por convención de familia
+      // - agy, agy2, agy_1, g1, g2... -> Solo vigila "Gemini Models"
+      // - agy_clau, agy_son, agy_opus, son, clau... -> Solo vigila "Claude and GPT models"
+      const cleanPrefix = (prefix || '').trim().toLowerCase();
+      const isClaudeFamily =
+        cleanPrefix.startsWith('agy_clau') ||
+        cleanPrefix.startsWith('agy_son') ||
+        cleanPrefix.startsWith('agy_opus') ||
+        cleanPrefix.startsWith('clau') ||
+        cleanPrefix.startsWith('son') ||
+        cleanPrefix.startsWith('opus') ||
+        prof.startsWith('clau') ||
+        prof.startsWith('son') ||
+        prof.startsWith('opus');
+      const isGeminiFamily = !isClaudeFamily && (/^agy\d*(_\d+)?$/.test(cleanPrefix) || prof.startsWith('g') || prof === 'default');
+
       const groups = payload?.groups || [];
       for (const group of groups) {
         const grpName = (group.displayName || '').toLowerCase();
-        if (prof.startsWith('g') && !grpName.includes('gemini')) continue;
-        if (prof.startsWith('son') && !grpName.includes('claude') && !grpName.includes('gpt')) continue;
+        if (isGeminiFamily && !grpName.includes('gemini')) continue;
+        if (isClaudeFamily && !grpName.includes('claude') && !grpName.includes('gpt')) continue;
 
         const buckets = group.buckets || [];
         for (const b of buckets) {
@@ -164,6 +186,25 @@ export default function ControlSwitcher({ onReloadRequested }) {
     };
   };
 
+  // Cuentas unificadas: usa `nodes` si están disponibles (fuente de verdad en App.jsx),
+  // o cae en `rawFiles` enriquecidos con su prefijo descargado.
+  const effectiveFiles = useMemo(() => {
+    if (Array.isArray(nodes) && nodes.length > 0) {
+      return nodes
+        .filter((n) => n?.data?.prefix && !n.data.prefix.startsWith('unlinked_'))
+        .map((n) => ({
+          name: n.data?.fileName || n.id,
+          id: n.id,
+          prefix: (n.data?.prefix || '').trim(),
+          note: (n.data?.prefix || '').trim(),
+          email: n.data?.email || n.data?.account || n.data?.fileName || n.id,
+          provider: (n.data?.provider || n.data?.accountType || 'antigravity').toLowerCase(),
+          disabled: false,
+        }));
+    }
+    return rawFiles;
+  }, [nodes, rawFiles]);
+
   // Carga las cuentas y sus cuotas en tiempo real
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -173,21 +214,21 @@ export default function ControlSwitcher({ onReloadRequested }) {
       const res = await apiFetch('/v0/management/auth-files');
       const data = await res.json();
       const files = Array.isArray(data?.files) ? data.files : [];
-      setRawFiles(files);
 
       // 2. Descargar prefijos de archivos válidos (omitiendo subcarpetas con slashes)
       const validFiles = files.filter(
         (f) => f.name && !f.name.includes('/') && !f.name.includes('\\') && !f.disabled
       );
 
-      // 3. Consultar cuotas para cada archivo
+      // 3. Consultar cuotas para cada archivo Y enriquecer con el prefijo descargado
       const newQuotas = {};
-      await Promise.allSettled(
+      const enrichedFiles = await Promise.all(
         validFiles.map(async (f) => {
+          let prefix = (f.note || f.prefix || '').trim();
           try {
             const dlRes = await apiFetch(`/v0/management/auth-files/download?name=${encodeURIComponent(f.name)}`);
             const dlData = await dlRes.json();
-            const prefix = (dlData?.prefix || f.note || '').trim();
+            prefix = (dlData?.prefix || f.note || f.prefix || '').trim();
 
             const isCodex = (f.provider || '').toLowerCase() === 'codex';
             const chatgptId = dlData?.chatgpt_account_id || dlData?.account_id || '';
@@ -235,9 +276,15 @@ export default function ControlSwitcher({ onReloadRequested }) {
           } catch {
             // Continúa con las demás
           }
+          return {
+            ...f,
+            prefix,
+            note: prefix,
+          };
         })
       );
 
+      setRawFiles(enrichedFiles);
       setQuotasMap(newQuotas);
     } catch (err) {
       setActionError(err.message || 'Error cargando datos de infraestructura');
@@ -252,9 +299,9 @@ export default function ControlSwitcher({ onReloadRequested }) {
     return () => clearInterval(interval);
   }, [loadData]);
 
-  // Estructuración de los 3 Pools Canónicos (g1, g2, son) con sus reservas completas
-  const pools = useMemo(() => {
-    const valid = rawFiles.filter(
+  // Estructuración de los Pools con sus reservas completas
+  const allPools = useMemo(() => {
+    const valid = effectiveFiles.filter(
       (f) =>
         f.name &&
         !f.name.includes('/') &&
@@ -262,7 +309,7 @@ export default function ControlSwitcher({ onReloadRequested }) {
         ['antigravity', 'codex'].includes((f.provider || '').toLowerCase())
     );
 
-    // Definición canónica de perfiles predefinidos
+    // Definición canónica de perfiles predefinidos (legacy g1 / g2)
     const canonicalPools = {
       g1: {
         profile: 'g1',
@@ -280,14 +327,16 @@ export default function ControlSwitcher({ onReloadRequested }) {
       },
       son: {
         profile: 'son',
-        title: 'Sonnet (Arquitectura & Razonamiento)',
-        modelTarget: 'claude-sonnet-4-6',
-        dotColor: '#a855f7',
+        title: 'Claude Sonnet (agy_son)',
+        modelTarget: 'claude-sonnet-4-6 / 5.5 High',
+        dotColor: '#f59e0b',
         activePrefix: 'agy_son',
       },
     };
 
-    // Extracción dinámica de todos los perfiles presentes en las cuentas
+    // Extracción dinámica de todos los perfiles presentes en las cuentas.
+    // Usa el prefijo activo completo como clave de pool para evitar
+    // contaminación cruzada (e.g. "agy" vs "agy_clau").
     const discoveredProfiles = new Map();
 
     valid.forEach((f) => {
@@ -295,12 +344,17 @@ export default function ControlSwitcher({ onReloadRequested }) {
       if (!pref) return;
 
       const isCodex = (f.provider || '').toLowerCase() === 'codex';
-      const base = isCodex ? 'codex' : 'agy';
 
       // Extraer el prefijo activo base del pool (removiendo sufijo _N si es una reserva)
       const reserveMatch = pref.match(/^(.*)_(\d+)$/);
       const activePref = reserveMatch ? reserveMatch[1] : pref;
 
+      // Clave única de pool: el activePref completo (no descomponer en base+prof)
+      const poolKey = activePref;
+      if (discoveredProfiles.has(poolKey)) return;
+
+      // Detectar perfil canónico (agy_g1, agy_g2, agy_son)
+      const base = isCodex ? 'codex' : 'agy';
       let prof = '';
       if (activePref === base) {
         prof = 'default';
@@ -309,51 +363,65 @@ export default function ControlSwitcher({ onReloadRequested }) {
       } else {
         prof = activePref;
       }
-
       if (!prof) return;
 
-      const poolKey = `${base}::${prof}`;
-      if (!discoveredProfiles.has(poolKey)) {
-        if (canonicalPools[prof] && activePref === `${base}_${prof}`) {
-          discoveredProfiles.set(poolKey, {
-            ...canonicalPools[prof],
-            provider: f.provider,
-            basePrefix: base,
-            activePrefix: activePref,
-            key: poolKey,
-          });
-        } else {
-          // Pool dinámico personalizado
-          let title = `Pool ${prof.toUpperCase()}`;
-          let modelTarget = 'auto';
-          let dotColor = '#58a6ff';
+      if (canonicalPools[prof] && activePref === `${base}_${prof}`) {
+        discoveredProfiles.set(poolKey, {
+          ...canonicalPools[prof],
+          provider: f.provider,
+          basePrefix: base,
+          activePrefix: activePref,
+          key: poolKey,
+        });
+      } else {
+        // Pool dinámico personalizado con reconocimiento de familia
+        let title = `Pool ${prof.toUpperCase()}`;
+        let modelTarget = 'auto';
+        let dotColor = '#58a6ff';
 
-          if (isCodex) {
-            title = `Codex (${prof.toUpperCase()})`;
-            modelTarget = 'gpt-5.6-codex';
-            dotColor = '#79c0ff';
-          } else if (prof.startsWith('g')) {
-            const num = prof.slice(1);
-            title = `Gemini ${num || prof.toUpperCase()}`;
-            modelTarget = 'gemini-3.8-flash-high';
-            dotColor = 'var(--dot-emerald, #34d399)';
-          } else if (prof.startsWith('son')) {
-            title = `Claude Sonnet (${prof})`;
-            modelTarget = 'claude-sonnet-4-6';
-            dotColor = '#a855f7';
-          }
-
-          discoveredProfiles.set(poolKey, {
-            profile: prof,
-            title,
-            modelTarget,
-            dotColor,
-            activePrefix: activePref,
-            provider: f.provider,
-            basePrefix: base,
-            key: poolKey,
-          });
+        if (isCodex) {
+          title = `Codex (${prof.toUpperCase()})`;
+          modelTarget = 'gpt-5.6-codex';
+          dotColor = '#79c0ff';
+        } else if (activePref.startsWith('agy_opus') || prof.startsWith('opus')) {
+          title = `Claude Opus (${activePref})`;
+          modelTarget = 'claude-opus-4-6-thinking / 5.5 High';
+          dotColor = '#c084fc';
+        } else if (activePref === 'agy_son' || prof === 'son') {
+          title = 'Sonnet (Arquitectura & Razonamiento)';
+          modelTarget = 'claude-sonnet-4-6 / 5.5 High';
+          dotColor = '#f59e0b';
+        } else if (activePref.startsWith('agy_son') || prof.startsWith('son')) {
+          title = `Claude Sonnet (${activePref})`;
+          modelTarget = 'claude-sonnet-4-6 / 5.5 High';
+          dotColor = '#f59e0b';
+        } else if (activePref.startsWith('agy_clau') || prof.startsWith('clau')) {
+          title = `Claude del Paquete (${activePref})`;
+          modelTarget = 'claude-sonnet-4-6';
+          dotColor = '#a855f7';
+        } else if (prof.startsWith('g')) {
+          const num = prof.slice(1);
+          title = `Gemini ${num || prof.toUpperCase()}`;
+          modelTarget = 'gemini-3.8-flash-high';
+          dotColor = 'var(--dot-emerald, #34d399)';
+        } else if (prof === 'default' || /^agy\d*$/.test(activePref)) {
+          // Direct agy or agy2, agy3... pools: Gemini puro
+          const suffix = activePref === 'agy' ? '' : ` ${activePref.slice(3)}`;
+          title = `Gemini Puro${suffix} (${activePref})`;
+          modelTarget = 'gemini-3.8-flash-high';
+          dotColor = 'var(--dot-emerald, #34d399)';
         }
+
+        discoveredProfiles.set(poolKey, {
+          profile: prof,
+          title,
+          modelTarget,
+          dotColor,
+          activePrefix: activePref,
+          provider: f.provider,
+          basePrefix: base,
+          key: poolKey,
+        });
       }
     });
 
@@ -375,10 +443,15 @@ export default function ControlSwitcher({ onReloadRequested }) {
     }
 
     const result = poolDefs.map((def) => {
-      // Filtrar archivos pertenecientes a este perfil
+      // Filtrar archivos pertenecientes a este perfil.
+      // CRITICAL: Solo incluir reservas cuyo sufijo tras activePrefix_ sea numérico,
+      // para evitar que "agy" absorba cuentas de "agy_clau" (sufijo alfabético).
       const matchingFiles = valid.filter((f) => {
         const pref = (f.note || f.prefix || '').trim();
-        return pref === def.activePrefix || pref.startsWith(`${def.activePrefix}_`);
+        if (pref === def.activePrefix) return true;
+        if (!pref.startsWith(`${def.activePrefix}_`)) return false;
+        const suffix = pref.slice(def.activePrefix.length + 1);
+        return /^\d/.test(suffix);
       });
 
       // Encontrar la activa: exactamente el prefijo activo agy_g1 / agy_g2 / agy_son / custom
@@ -387,11 +460,13 @@ export default function ControlSwitcher({ onReloadRequested }) {
         return pref === def.activePrefix;
       });
 
-      // Reservas: empiezan con <activePrefix>_
+      // Reservas: empiezan con <activePrefix>_ y tienen sufijo numérico
       const reserveFiles = matchingFiles
         .filter((f) => {
           const pref = (f.note || f.prefix || '').trim();
-          return pref.startsWith(`${def.activePrefix}_`);
+          if (!pref.startsWith(`${def.activePrefix}_`)) return false;
+          const suffix = pref.slice(def.activePrefix.length + 1);
+          return /^\d/.test(suffix);
         })
         .map((f) => {
           const pref = (f.note || f.prefix || '').trim();
@@ -477,7 +552,134 @@ export default function ControlSwitcher({ onReloadRequested }) {
     });
 
     return result;
-  }, [rawFiles, quotasMap]);
+  }, [effectiveFiles, quotasMap]);
+
+  // Filtrado y Ordenamiento Dinámico de los Pools
+  const filteredAndSortedPools = useMemo(() => {
+    let result = allPools.filter((p) => {
+      // 1. Filtro por búsqueda de texto
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const matchTitle = (p.title || '').toLowerCase().includes(q);
+        const matchPrefix = (p.activePrefix || '').toLowerCase().includes(q);
+        const matchActiveEmail = (p.activeAccount?.email || '').toLowerCase().includes(q);
+        const matchReserve = (p.reserves || []).some(
+          (r) => (r.email || '').toLowerCase().includes(q) || (r.prefix || '').toLowerCase().includes(q)
+        );
+        if (!matchTitle && !matchPrefix && !matchActiveEmail && !matchReserve) {
+          return false;
+        }
+      }
+
+      // 2. Filtro por familia
+      if (familyFilter === 'all') return true;
+      if (familyFilter === 'gemini') {
+        const isClau =
+          p.title?.toLowerCase().includes('claude') ||
+          p.title?.toLowerCase().includes('sonnet') ||
+          p.title?.toLowerCase().includes('opus') ||
+          p.activePrefix?.startsWith('agy_clau') ||
+          p.activePrefix?.startsWith('agy_son') ||
+          p.activePrefix?.startsWith('agy_opus') ||
+          p.activePrefix?.startsWith('clau') ||
+          p.activePrefix?.startsWith('son') ||
+          p.activePrefix?.startsWith('opus');
+        return !isClau && (
+          p.title?.toLowerCase().includes('gemini') ||
+          p.activePrefix?.startsWith('g') ||
+          /^agy\d*$/.test(p.activePrefix || '')
+        );
+      }
+      if (familyFilter === 'claude') {
+        return (
+          p.title?.toLowerCase().includes('claude') ||
+          p.title?.toLowerCase().includes('sonnet') ||
+          p.title?.toLowerCase().includes('opus') ||
+          p.activePrefix?.startsWith('agy_clau') ||
+          p.activePrefix?.startsWith('agy_son') ||
+          p.activePrefix?.startsWith('agy_opus') ||
+          p.activePrefix?.startsWith('clau') ||
+          p.activePrefix?.startsWith('son') ||
+          p.activePrefix?.startsWith('opus')
+        );
+      }
+      if (familyFilter === 'codex') {
+        return p.provider === 'codex' || p.title?.toLowerCase().includes('codex');
+      }
+      if (familyFilter === 'warning') {
+        return p.status === 'WARNING' || p.status === 'EXHAUSTED' || (p.activeAccount?.minAvailable ?? 100) <= 20;
+      }
+      return true;
+    });
+
+    // 3. Ordenamiento
+    result.sort((a, b) => {
+      if (sortBy === 'urgency') {
+        const statusWeight = { EXHAUSTED: 0, WARNING: 1, HEALTHY: 2 };
+        const wA = statusWeight[a.status] ?? 2;
+        const wB = statusWeight[b.status] ?? 2;
+        if (wA !== wB) return wA - wB;
+        return (a.activeAccount?.minAvailable ?? 100) - (b.activeAccount?.minAvailable ?? 100);
+      }
+      if (sortBy === 'availability') {
+        return (b.activeAccount?.minAvailable ?? 0) - (a.activeAccount?.minAvailable ?? 0);
+      }
+      if (sortBy === 'alphabetical') {
+        return (a.title || '').localeCompare(b.title || '');
+      }
+      if (sortBy === 'hierarchy') {
+        const prefA = (a.activePrefix || '').toLowerCase();
+        const prefB = (b.activePrefix || '').toLowerCase();
+        return prefA.localeCompare(prefB);
+      }
+      return 0;
+    });
+
+    return result;
+  }, [allPools, searchQuery, familyFilter, sortBy]);
+
+  // Conteos por familia para los chips
+  const familyCounts = useMemo(() => {
+    let gemini = 0;
+    let claude = 0;
+    let codex = 0;
+    let warning = 0;
+    allPools.forEach((p) => {
+      const isClau =
+        p.title?.toLowerCase().includes('claude') ||
+        p.title?.toLowerCase().includes('sonnet') ||
+        p.title?.toLowerCase().includes('opus') ||
+        p.activePrefix?.startsWith('agy_clau') ||
+        p.activePrefix?.startsWith('agy_son') ||
+        p.activePrefix?.startsWith('agy_opus') ||
+        p.activePrefix?.startsWith('clau') ||
+        p.activePrefix?.startsWith('son') ||
+        p.activePrefix?.startsWith('opus');
+      const isGem =
+        !isClau &&
+        (p.title?.toLowerCase().includes('gemini') ||
+          p.activePrefix?.startsWith('g') ||
+          /^agy\d*$/.test(p.activePrefix || ''));
+      const isCod = p.provider === 'codex' || p.title?.toLowerCase().includes('codex');
+
+      if (isGem) gemini++;
+      if (isClau) claude++;
+      if (isCod) codex++;
+      if (p.status === 'WARNING' || p.status === 'EXHAUSTED' || (p.activeAccount?.minAvailable ?? 100) <= 20) {
+        warning++;
+      }
+    });
+    return { all: allPools.length, gemini, claude, codex, warning };
+  }, [allPools]);
+
+  // Paginación segmentada (3 pools por página)
+  const totalPages = Math.max(1, Math.ceil(filteredAndSortedPools.length / pageSize));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+
+  const displayedPools = useMemo(() => {
+    const startIdx = (safeCurrentPage - 1) * pageSize;
+    return filteredAndSortedPools.slice(startIdx, startIdx + pageSize);
+  }, [filteredAndSortedPools, safeCurrentPage, pageSize]);
 
   // Chequeo forzado de cuotas
   const handleTriggerForceCheck = async () => {
@@ -554,9 +756,130 @@ export default function ControlSwitcher({ onReloadRequested }) {
         </div>
       )}
 
-      {/* 2. Grid de 3 Pools Canónicos (Gemini 1, Gemini 2, Sonnet) */}
+      {/* 2. Barra de Control Dinámico, Búsqueda, Filtros y Paginación */}
+      <div className="cs-toolbar">
+        {/* Lado Izquierdo: Buscador y Chips por Familia */}
+        <div className="cs-toolbar-left">
+          <div className="cs-search-wrap">
+            <span className="cs-search-icon">🔍</span>
+            <input
+              type="text"
+              placeholder="Buscar pool, prefijo o correo..."
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="cs-search-input"
+              data-testid="input-search-cs"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="cs-search-clear"
+                title="Limpiar búsqueda"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          <div className="cs-filter-chips">
+            <button
+              type="button"
+              className={`cs-filter-chip ${familyFilter === 'all' ? 'active' : ''}`}
+              onClick={() => { setFamilyFilter('all'); setCurrentPage(1); }}
+              data-testid="filter-cs-all"
+            >
+              🌐 Todos ({familyCounts.all})
+            </button>
+            <button
+              type="button"
+              className={`cs-filter-chip ${familyFilter === 'gemini' ? 'active' : ''}`}
+              onClick={() => { setFamilyFilter('gemini'); setCurrentPage(1); }}
+              data-testid="filter-cs-gemini"
+            >
+              🔷 Gemini ({familyCounts.gemini})
+            </button>
+            <button
+              type="button"
+              className={`cs-filter-chip ${familyFilter === 'claude' ? 'active' : ''}`}
+              onClick={() => { setFamilyFilter('claude'); setCurrentPage(1); }}
+              data-testid="filter-cs-claude"
+            >
+              🔶 Claude ({familyCounts.claude})
+            </button>
+            <button
+              type="button"
+              className={`cs-filter-chip ${familyFilter === 'codex' ? 'active' : ''}`}
+              onClick={() => { setFamilyFilter('codex'); setCurrentPage(1); }}
+              data-testid="filter-cs-codex"
+            >
+              🧩 Codex ({familyCounts.codex})
+            </button>
+            {familyCounts.warning > 0 && (
+              <button
+                type="button"
+                className={`cs-filter-chip alert ${familyFilter === 'warning' ? 'active' : ''}`}
+                onClick={() => { setFamilyFilter('warning'); setCurrentPage(1); }}
+                data-testid="filter-cs-warning"
+              >
+                ⚠️ Alerta ({familyCounts.warning})
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Lado Derecho: Selector de Orden y Controles de Paginación */}
+        <div className="cs-toolbar-right">
+          <div className="cs-sort-wrap">
+            <label className="cs-sort-label">Ordenar:</label>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className="cs-sort-select"
+              data-testid="select-sort-cs"
+            >
+              <option value="urgency">⚡ Mayor Urgencia / Menor Cuota</option>
+              <option value="hierarchy">👑 Familia y Jerarquía</option>
+              <option value="availability">📊 Mayor Disponibilidad</option>
+              <option value="alphabetical">🔤 Alfabético (A-Z)</option>
+            </select>
+          </div>
+
+          <div className="cs-pagination-wrap">
+            <button
+              type="button"
+              className="cs-btn-page"
+              disabled={safeCurrentPage <= 1}
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              data-testid="btn-prev-page"
+              title="Página anterior"
+            >
+              ◀
+            </button>
+            <span className="cs-page-indicator" data-testid="page-indicator">
+              Pág <strong>{safeCurrentPage}</strong> de <strong>{totalPages}</strong>
+              <span className="cs-page-count-badge">({filteredAndSortedPools.length} pools)</span>
+            </span>
+            <button
+              type="button"
+              className="cs-btn-page"
+              disabled={safeCurrentPage >= totalPages}
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              data-testid="btn-next-page"
+              title="Página siguiente"
+            >
+              ▶
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* 3. Grid de Pools Segmentados */}
       <div className="cs-pools-grid">
-        {pools.map((pool) => {
+        {displayedPools.map((pool) => {
           const isExhausted = pool.status === 'EXHAUSTED';
           const isWarning = pool.status === 'WARNING';
           const badgeClass = isExhausted
@@ -680,6 +1003,22 @@ export default function ControlSwitcher({ onReloadRequested }) {
                             </span>
                           )}
                         </div>
+
+                        {/* Gauges espectrales compactos para Context (5h) y Weekly */}
+                        <div className="cs-reserve-gauges">
+                          <SpectralGauge
+                            percentage={res.quota?.fiveHourConsumed ?? 0}
+                            label="Context"
+                            compact={true}
+                            testId={`spectral-gauge-5h-res-${res.prefix}`}
+                          />
+                          <SpectralGauge
+                            percentage={res.quota?.weeklyConsumed ?? 0}
+                            label="Weekly"
+                            compact={true}
+                            testId={`spectral-gauge-weekly-res-${res.prefix}`}
+                          />
+                        </div>
                       </div>
                       <div className="cs-reserve-status">
                         <span
@@ -710,9 +1049,23 @@ export default function ControlSwitcher({ onReloadRequested }) {
             </div>
           );
         })}
+        {displayedPools.length === 0 && (
+          <div className="cs-empty-pools-alert">
+            <span style={{ fontSize: 24 }}>🔍</span>
+            <h4>No se encontraron pools que coincidan</h4>
+            <p>Prueba ajustando el filtro de familia o limpiando el texto de búsqueda.</p>
+            <button
+              type="button"
+              className="cs-btn-clear-filters"
+              onClick={() => { setSearchQuery(''); setFamilyFilter('all'); setCurrentPage(1); }}
+            >
+              Restablecer Filtros
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* 3. Flota de Especialistas y Salvavidas Permanentes */}
+      {/* 4. Flota de Especialistas y Salvavidas Permanentes */}
       <div className="cs-specialists-section">
         <div className="cs-specialists-head">
           <div className="cs-specialists-title-row">

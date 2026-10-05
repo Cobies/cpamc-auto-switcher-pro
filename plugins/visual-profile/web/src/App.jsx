@@ -376,7 +376,7 @@ export default function App() {
 
         {activeTab === 'switcher' && (
           <div style={{ width: '100%', height: '100%', overflowY: 'auto' }}>
-            <ControlSwitcher onReloadRequested={loadProfiles} />
+            <ControlSwitcher nodes={graphData.nodes} onReloadRequested={loadProfiles} />
           </div>
         )}
 
