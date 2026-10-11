@@ -7,7 +7,7 @@ import (
 	"path"
 	"strings"
 
-	"visual-profile/internal/web"
+	"auto-switcher-pro/internal/web"
 )
 
 // DefaultProfilesBasePath defines the standard management resource path for the Visual Profile UI.

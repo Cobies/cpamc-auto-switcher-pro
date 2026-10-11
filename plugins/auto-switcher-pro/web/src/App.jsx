@@ -1,50 +1,123 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import HomeCenter from './components/HomeCenter';
 import ProfileGraph from './components/ProfileGraph';
 import ControlSwitcher from './components/ControlSwitcher';
 import PulseTokens from './components/PulseTokens';
 import PrefixManager from './components/PrefixManager';
 import GroupManager from './components/GroupManager';
+import AutoAuthFiles from './components/AutoAuthFiles';
+import Maintenance from './components/Maintenance';
+import QuickGuideModal from './components/QuickGuideModal';
+import logoImg from './assets/auto-switcher-pro-logo.png';
+import { triggerCPAMCSidebarRefresh } from './utils/syncSidebar';
 import {
   getManagementKey,
   loadAuthFilesWithPrefixes,
   buildGraphFromAuthFiles,
+  scanSystemHealth,
+  updateManagementConsole,
 } from './api/managementClient';
 import './App.css';
 import './ControlSwitcher.css';
 
 export default function App() {
+  const resolveTabFromLocation = () => {
+    if (typeof window === 'undefined' || !window.location) return 'home';
+
+    const hash = (window.location.hash || '').toLowerCase();
+    if (hash.includes('tab-home') || hash.includes('tab=home') || hash === '#home') {
+      return 'home';
+    }
+    if (hash.includes('tab-create-prefixes') || hash.includes('create-prefixes')) {
+      return 'create-prefixes';
+    }
+    if (hash.includes('tab-create-groups') || hash.includes('create-groups') || hash.includes('groups')) {
+      return 'create-groups';
+    }
+    if (hash.includes('tab-control-switcher') || hash.includes('switcher')) {
+      return 'switcher';
+    }
+    if (hash.includes('tab-auto-auth-files') || hash.includes('auto-auth-files') || hash.includes('auth-files')) {
+      return 'auto-auth-files';
+    }
+    if (hash.includes('tab-pulse-tokens') || hash.includes('pulse-tokens') || hash.includes('tokens')) {
+      return 'tokens';
+    }
+    if (hash.includes('tab-maintenance') || hash.includes('maintenance')) {
+      return 'maintenance';
+    }
+    if (hash.includes('tab-quick-guide') || hash.includes('quick-guide') || hash.includes('guide')) {
+      return 'quick-guide';
+    }
+    if (hash.includes('tab-profiles')) {
+      return 'profiles';
+    }
+
+    const pathname = (window.location.pathname || '').toLowerCase();
+    if (pathname.includes('home') || pathname.includes('center') || pathname.endsWith('/')) {
+      return 'home';
+    }
+    if (pathname.includes('create-prefixes')) {
+      return 'create-prefixes';
+    }
+    if (pathname.includes('create-groups') || pathname.includes('groups')) {
+      return 'create-groups';
+    }
+    if (pathname.includes('auto-auth-files') || pathname.includes('auth-files')) {
+      return 'auto-auth-files';
+    }
+    if (pathname.includes('control-switcher')) {
+      return 'switcher';
+    }
+    if (pathname.includes('pulse-tokens') || pathname.includes('tokens')) {
+      return 'tokens';
+    }
+    if (pathname.includes('maintenance')) {
+      return 'maintenance';
+    }
+    if (pathname.includes('quick-guide') || pathname.includes('guide')) {
+      return 'quick-guide';
+    }
+    if (pathname.includes('profiles')) {
+      return 'profiles';
+    }
+    return 'home';
+  };
+
   const initialTab = (() => {
-    if (typeof window !== 'undefined' && window.location && window.location.pathname) {
-      if (window.location.pathname.includes('create-prefixes')) {
-        return 'create-prefixes';
-      }
-      if (window.location.pathname.includes('create-groups') || window.location.pathname.includes('groups')) {
-        return 'create-groups';
-      }
-      if (window.location.pathname.includes('profiles')) {
-        return 'profiles';
-      }
-      if (window.location.pathname.includes('control-switcher')) {
-        return 'switcher';
-      }
-      if (window.location.pathname.includes('pulse-tokens') || window.location.pathname.includes('tokens')) {
-        return 'tokens';
-      }
+    // Si estamos en entorno de testing (Vitest / JSDOM), mantenemos 'profiles' como base de tests heredados
+    if (typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'test') {
+      return 'profiles';
     }
     if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.MODE === 'test') {
       return 'profiles';
     }
-    return 'create-prefixes'; // Iniciar por defecto en el gestor de prefijos
+
+    return resolveTabFromLocation();
   })();
 
-  const [activeTab, setActiveTab] = useState(initialTab); // 'create-prefixes' | 'create-groups' | 'switcher' | 'profiles' | 'tokens'
+  const [activeTab, setActiveTab] = useState(initialTab); // 'home' | 'create-prefixes' | 'create-groups' | 'switcher' | 'profiles' | 'tokens' | 'auto-auth-files' | 'maintenance' | 'quick-guide'
   const [status, setStatus] = useState('loading'); // 'loading' | 'unauthenticated' | 'ready' | 'error' | 'demo'
   const [errorMessage, setErrorMessage] = useState('');
   const [graphData, setGraphData] = useState({ nodes: [], edges: [] });
   const [datasetVersion, setDatasetVersion] = useState(0);
   const [actionFeedback, setActionFeedback] = useState('');
   const [checkingForce, setCheckingForce] = useState(false);
+  const [isGuideOpen, setIsGuideOpen] = useState(false);
+  const [consoleToastVersion, setConsoleToastVersion] = useState(null);
+  const consoleCheckExecutedRef = useRef(false);
   const graphRef = useRef(null);
+
+  // Escuchar cambios de hash en la barra de direcciones de CPAMC
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleHashChange = () => {
+      const nextTab = resolveTabFromLocation();
+      setActiveTab(nextTab);
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
 
   const loadProfiles = useCallback(async () => {
     const key = getManagementKey();
@@ -101,9 +174,72 @@ export default function App() {
     }
   }, [loadProfiles]);
 
+  const CPAMC_MENU_REVISION = '2026.10.11.1';
+
   useEffect(() => {
     loadProfiles();
+
+    // Auto-sync CPAMC sidebar when menu revision changes
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const currentRev = window.localStorage.getItem('cpamc_menu_revision');
+      if (currentRev !== CPAMC_MENU_REVISION) {
+        triggerCPAMCSidebarRefresh();
+        window.localStorage.setItem('cpamc_menu_revision', CPAMC_MENU_REVISION);
+      }
+    }
   }, [loadProfiles]);
+
+  // MINI-002: Startup Cooldown & Background Auto-Update Orchestration
+  useEffect(() => {
+    if (consoleCheckExecutedRef.current) return;
+    const key = getManagementKey();
+    if (!key) return;
+
+    if (typeof window === 'undefined' || !window.localStorage) return;
+
+    const autoUpdateSetting = window.localStorage.getItem('auto_update_console_on_boot');
+    if (autoUpdateSetting === 'false') return;
+
+    const COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6 hours (21,600,000 ms)
+    const lastCheck = window.localStorage.getItem('last_console_check_ts');
+    if (lastCheck) {
+      const elapsed = Date.now() - Number(lastCheck);
+      if (Number.isFinite(elapsed) && elapsed < COOLDOWN_MS) {
+        return;
+      }
+    }
+
+    consoleCheckExecutedRef.current = true;
+
+    const runBackgroundUpdate = async () => {
+      try {
+        window.localStorage.setItem('last_console_check_ts', Date.now().toString());
+        const res = await scanSystemHealth();
+        if (res?.console_update_available && res?.console_latest_github) {
+          await updateManagementConsole();
+          setConsoleToastVersion(res.console_latest_github);
+        }
+      } catch (err) {
+        // Non-blocking: catch and log without disrupting application bootstrap or profile loading
+        console.warn('Background console update check failed:', err);
+      }
+    };
+
+    runBackgroundUpdate();
+  }, [status]);
+
+  // MINI-003: 12-Second Auto-Dismissing Toast Notification Timer
+  useEffect(() => {
+    if (!consoleToastVersion) return;
+
+    const timer = setTimeout(() => {
+      setConsoleToastVersion(null);
+    }, 12000);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [consoleToastVersion]);
 
   const handleUseDemo = useCallback(() => {
     setStatus('demo');
@@ -140,19 +276,20 @@ export default function App() {
 
   return (
     <div className="app-layout">
-      {/* Header Unificado */}
-      <header className="app-header">
-        {/* Lado Izquierdo: Identidad, Submenús y Acciones Estructurales */}
-        <div className="header-left-cluster">
-          <div className="header-brand">
-            <div className="brand-icon">⚡</div>
-            <div>
-              <h1 className="brand-title">AUTO SWITCHER PRO</h1>
-              <p className="brand-subtitle">
-                Centro Integral de Control de Infraestructura IA
-              </p>
+      {/* Header Unificado (Oculto en Inicio & Bienvenida para máxima limpieza visual) */}
+      {activeTab !== 'home' && (
+        <header className="app-header">
+          {/* Lado Izquierdo: Identidad, Submenús y Acciones Estructurales */}
+          <div className="header-left-cluster">
+            <div className="header-brand">
+              <img src={logoImg} alt="Auto Switcher Pro Logo" className="brand-logo-img" />
+              <div>
+                <h1 className="brand-title">AUTO SWITCHER PRO</h1>
+                <p className="brand-subtitle">
+                  Centro Integral de Control de Infraestructura IA
+                </p>
+              </div>
             </div>
-          </div>
 
           <div className="header-divider" />
 
@@ -160,25 +297,27 @@ export default function App() {
           <div className="header-tabs-nav" style={{ display: 'flex', gap: '6px', padding: '4px', background: 'rgba(2, 6, 23, 0.8)', borderRadius: '10px', border: '1px solid rgba(51, 65, 85, 0.6)' }}>
             <button
               type="button"
-              onClick={() => setActiveTab('create-prefixes')}
+              onClick={() => setActiveTab('home')}
               style={{
                 padding: '6px 12px',
                 borderRadius: '6px',
                 fontSize: '11px',
                 fontWeight: 700,
                 cursor: 'pointer',
-                border: activeTab === 'create-prefixes' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
-                background: activeTab === 'create-prefixes' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
-                color: activeTab === 'create-prefixes' ? '#f3e8ff' : '#94a3b8',
+                border: activeTab === 'home' ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid transparent',
+                background: activeTab === 'home' ? 'rgba(56, 189, 248, 0.35)' : 'transparent',
+                color: activeTab === 'home' ? '#e0f2fe' : '#94a3b8',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
               }}
-              data-testid="tab-create-prefixes"
+              data-testid="tab-home"
             >
-              <span>⚡</span>
-              <span>Crear Prefijos</span>
+              <span>🏠</span>
+              <span>Inicio & Info</span>
             </button>
+
+            {/* 1. Crear Group/Pefiles */}
             <button
               type="button"
               onClick={() => setActiveTab('create-groups')}
@@ -200,6 +339,31 @@ export default function App() {
               <span>🛠️</span>
               <span>Crear Group/Pefiles</span>
             </button>
+
+            {/* 2. Auto Auth Files */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('auto-auth-files')}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                border: activeTab === 'auto-auth-files' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
+                background: activeTab === 'auto-auth-files' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
+                color: activeTab === 'auto-auth-files' ? '#f3e8ff' : '#94a3b8',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+              data-testid="tab-auto-auth-files"
+            >
+              <span>🗂️</span>
+              <span>Auto Auth Files</span>
+            </button>
+
+            {/* 3. Control Switcher */}
             <button
               type="button"
               onClick={() => setActiveTab('switcher')}
@@ -221,6 +385,8 @@ export default function App() {
               <span>♊</span>
               <span>Control Switcher</span>
             </button>
+
+            {/* 4. Visual Profile */}
             <button
               type="button"
               onClick={() => setActiveTab('profiles')}
@@ -242,6 +408,8 @@ export default function App() {
               <span>🔵</span>
               <span>Visual Profile</span>
             </button>
+
+            {/* 5. Pulse Tokens */}
             <button
               type="button"
               onClick={() => setActiveTab('tokens')}
@@ -263,6 +431,75 @@ export default function App() {
               <span>🏷️</span>
               <span>Pulse Tokens</span>
             </button>
+
+            {/* 6. Directorio Cuentas */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('create-prefixes')}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                border: activeTab === 'create-prefixes' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
+                background: activeTab === 'create-prefixes' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
+                color: activeTab === 'create-prefixes' ? '#f3e8ff' : '#94a3b8',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+              data-testid="tab-create-prefixes"
+            >
+              <span>📋</span>
+              <span>Directorio Cuentas</span>
+            </button>
+
+            {/* 7. CPAMC Salud & Mantenimiento */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('maintenance')}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                border: activeTab === 'maintenance' ? '1px solid rgba(16, 185, 129, 0.5)' : '1px solid transparent',
+                background: activeTab === 'maintenance' ? 'rgba(16, 185, 129, 0.25)' : 'transparent',
+                color: activeTab === 'maintenance' ? '#a7f3d0' : '#94a3b8',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+              data-testid="tab-maintenance"
+            >
+              <span>🩺</span>
+              <span>Salud & Mant.</span>
+            </button>
+
+            {/* 8. Guía Rápida */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('quick-guide')}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                border: activeTab === 'quick-guide' ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid transparent',
+                background: activeTab === 'quick-guide' ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
+                color: activeTab === 'quick-guide' ? '#7dd3fc' : '#94a3b8',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+              data-testid="tab-quick-guide"
+            >
+              <span>❓</span>
+              <span>Guía Rápida</span>
+            </button>
           </div>
 
           <div className="header-divider" />
@@ -274,10 +511,10 @@ export default function App() {
               className="btn-header-manage"
               onClick={handleHeaderOpenPrefixes}
               data-testid="btn-header-manage-prefixes"
-              title="Abre la tabla de gestión de prefijos y cuentas"
+              title="Abre el directorio de consulta e inspección de cuentas y prefijos"
             >
-              <span>🏷️</span>
-              <span>Gestionar Prefijos ({graphData?.nodes?.length || 14})</span>
+              <span>📋</span>
+              <span>Directorio ({graphData?.nodes?.length || 14})</span>
             </button>
 
             <button
@@ -295,6 +532,30 @@ export default function App() {
 
         {/* Lado Derecho: Utilidades de Telemetría y Estado C-ABI */}
         <div className="header-right-meta">
+          <button
+            type="button"
+            className="btn btn-outline"
+            onClick={() => setIsGuideOpen(true)}
+            data-testid="btn-open-quick-guide"
+            title="Abrir Guía Rápida & Manual de Usuario"
+            style={{
+              padding: '5px 10px',
+              fontSize: '11px',
+              fontWeight: 700,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'rgba(56, 189, 248, 0.15)',
+              color: '#38bdf8',
+              border: '1px solid rgba(56, 189, 248, 0.4)',
+              borderRadius: '6px',
+              cursor: 'pointer',
+            }}
+          >
+            <span>❓</span>
+            <span>Guía Rápida</span>
+          </button>
+
           <button
             type="button"
             className="btn-header-force"
@@ -321,7 +582,9 @@ export default function App() {
           <div className="header-meta">
             <span className="badge-status">C-ABI v1</span>
             <span className="badge-route">
-              {activeTab === 'create-prefixes'
+              {activeTab === 'home'
+                ? '/center'
+                : activeTab === 'create-prefixes'
                 ? '/create-prefixes'
                 : activeTab === 'create-groups'
                 ? '/create-groups'
@@ -329,11 +592,18 @@ export default function App() {
                 ? '/control-switcher'
                 : activeTab === 'tokens'
                 ? '/pulse-tokens'
+                : activeTab === 'auto-auth-files'
+                ? '/auto-auth-files'
+                : activeTab === 'maintenance'
+                ? '/maintenance'
+                : activeTab === 'quick-guide'
+                ? '/quick-guide'
                 : '/profiles'}
             </span>
           </div>
         </div>
       </header>
+      )}
 
       {/* Feedback Toast si se dispara acción global */}
       {actionFeedback && (
@@ -357,6 +627,12 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="app-main">
+        {activeTab === 'home' && (
+          <div style={{ width: '100%', height: '100%', overflowY: 'auto' }}>
+            <HomeCenter onNavigateTab={setActiveTab} />
+          </div>
+        )}
+
         {activeTab === 'create-prefixes' && (
           <div style={{ width: '100%', height: '100%', overflowY: 'auto' }}>
             <PrefixManager nodes={graphData.nodes} onReloadRequested={loadProfiles} />
@@ -383,6 +659,24 @@ export default function App() {
         {activeTab === 'tokens' && (
           <div style={{ width: '100%', height: '100%', overflowY: 'auto' }}>
             <PulseTokens />
+          </div>
+        )}
+
+        {activeTab === 'auto-auth-files' && (
+          <div style={{ width: '100%', height: '100%', overflowY: 'auto' }}>
+            <AutoAuthFiles nodes={graphData.nodes} onReloadRequested={loadProfiles} />
+          </div>
+        )}
+
+        {activeTab === 'maintenance' && (
+          <div style={{ width: '100%', height: '100%', overflowY: 'auto' }}>
+            <Maintenance onReloadRequested={loadProfiles} />
+          </div>
+        )}
+
+        {activeTab === 'quick-guide' && (
+          <div style={{ width: '100%', height: '100%', overflowY: 'auto' }}>
+            <QuickGuideModal isOpen={true} onClose={() => setActiveTab('create-groups')} embedded={true} />
           </div>
         )}
 
@@ -490,7 +784,35 @@ export default function App() {
             )}
           </>
         )}
+
+        {/* Quick Guide Modal Mount */}
+        <QuickGuideModal
+          isOpen={isGuideOpen}
+          onClose={() => setIsGuideOpen(false)}
+        />
       </main>
+
+      {/* MINI-003: Floating Auto-Dismiss Toast for Console Auto-Update */}
+      {consoleToastVersion && (
+        <div
+          className="console-update-toast"
+          data-testid="toast-auto-update-console"
+          role="status"
+        >
+          <span className="console-update-toast-msg">
+            ⚡ AUTO SWITCHER PRO: Consola de Gestión actualizada automáticamente a la versión {consoleToastVersion} (Oficial)
+          </span>
+          <button
+            type="button"
+            className="btn-close-console-toast"
+            onClick={() => setConsoleToastVersion(null)}
+            data-testid="btn-close-console-toast"
+            aria-label="Cerrar notificación"
+          >
+            ×
+          </button>
+        </div>
+      )}
     </div>
   );
 }

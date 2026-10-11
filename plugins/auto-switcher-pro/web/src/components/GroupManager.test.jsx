@@ -44,7 +44,7 @@ describe('GroupManager Component - Dedicated Full Screen Pool & Group Engine', (
     ).toBeTruthy();
   });
 
-  it('offers assigned antigravity accounts as virtualizable (🔀) candidates for the sibling Gemini subtype', async () => {
+  it('offers assigned antigravity accounts as candidates for in-place re-assignment to the sibling Gemini subtype', async () => {
     const pureNodes = [
       { id: 'acc1', data: { fileName: 'antigravity-acc1.json', email: 'a...1@x.com', prefix: 'agy', provider: 'antigravity' } },
       { id: 'acc2', data: { fileName: 'antigravity-acc2.json', email: 'a...2@x.com', prefix: 'agy_1', provider: 'antigravity' } },
@@ -53,15 +53,23 @@ describe('GroupManager Component - Dedicated Full Screen Pool & Group Engine', (
     vi.spyOn(managementClient, 'listModels').mockResolvedValue({
       models: ['agy/gemini-3.8-flash-high', 'claude-sonnet-4-6'],
     });
-    const virtualizeSpy = vi
-      .spyOn(managementClient, 'virtualizeAccount')
-      .mockImplementation(({ sourceFileName, prefix }) =>
-        Promise.resolve({ name: `${sourceFileName.replace(/\.json$/, '')}.${prefix}.json`, path: '', prefix })
-      );
+    const patchPrefixesSpy = vi
+      .spyOn(managementClient, 'saveAuthFilePrefixes')
+      .mockResolvedValue({
+        successful: [],
+        failed: [],
+      });
+    vi.spyOn(managementClient, 'patchAuthFileExclusions').mockResolvedValue({ ok: true });
+    const savePoolSpy = vi
+      .spyOn(managementClient, 'savePool')
+      .mockResolvedValue({
+        ok: true,
+        pool: { id: 'pool-1', base_prefix: 'agy_clau' },
+        message: 'Pool agy_clau saved',
+      });
 
     render(<GroupManager nodes={pureNodes} />);
 
-    // Aunque no hay cuentas libres, el builder aparece porque hay antigravity con virtualización posible.
     fireEvent.click(screen.getByTestId('family-gemini'));
     fireEvent.click(screen.getByTestId('subfamily-gemini-claude'));
 
@@ -75,17 +83,13 @@ describe('GroupManager Component - Dedicated Full Screen Pool & Group Engine', (
     fireEvent.click(screen.getByTestId('reserve-item-acc2'));
     fireEvent.click(screen.getByTestId('btn-save-group'));
 
-    await waitFor(() => expect(virtualizeSpy).toHaveBeenCalledTimes(2));
+    // Los pools se guardan en el registro del plugin (savePool), sin clonar archivos físicos en disco
+    await waitFor(() => expect(savePoolSpy).toHaveBeenCalledTimes(1));
 
-    const firstCall = virtualizeSpy.mock.calls[0][0];
-    expect(firstCall.sourceFileName).toBe('antigravity-acc1.json');
-    expect(firstCall.prefix).toBe('agy_clau');
-    expect(firstCall.targetPatterns).toEqual(['claude', 'gpt']);
-    expect(firstCall.oppositeModels).toContain('gemini-3.8-flash-high');
-
-    const secondCall = virtualizeSpy.mock.calls[1][0];
-    expect(secondCall.sourceFileName).toBe('antigravity-acc2.json');
-    expect(secondCall.prefix).toBe('agy_clau_1');
+    const savedPool = savePoolSpy.mock.calls[0][0];
+    expect(savedPool.base_prefix).toBe('agy_clau');
+    expect(savedPool.leader_auth).toBe('antigravity-acc1.json');
+    expect(savedPool.reserves).toContain('antigravity-acc2.json');
   });
 
   it('allows structuring a new pool when free accounts exist and generates cascade previews', async () => {
@@ -442,9 +446,13 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
       </React.StrictMode>
     );
 
-    // Sin cuentas libres antigravity: el formulario aparece pero con aviso explícito
+    // Sin cuentas gemini libres: solo la tarjeta Gemini LIBRE del master claude (modelo 2N)
+    // se ofrece como candidata virtualizable; la de a1 ya está asignada a [g1].
     fireEvent.click(screen.getByTestId('family-gemini'));
-    expect(screen.getByTestId('no-compatible-accounts-alert')).toBeTruthy();
+    expect(screen.queryByTestId('no-compatible-accounts-alert')).toBeNull();
+    const optionIds = Array.from(screen.getByTestId('select-active-account').options).map((o) => o.value);
+    expect(optionIds).toContain('a2');
+    expect(optionIds).not.toContain('a1');
     expect(screen.queryByTestId('btn-save-group').disabled).toBe(true);
 
     // Y no hay errores de consola reales
@@ -583,14 +591,19 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
   });
 
   it('provides model policy checkboxes to exclude 5.5 versions or disable isolation (wildcard mode)', async () => {
-    let capturedVirtualizePayload = null;
+    let capturedExclusions = [];
     vi.spyOn(managementClient, 'saveAuthFilePrefixes').mockResolvedValue({
-      successful: [{ name: 'free1.json', prefix: 'agy_son' }],
+      successful: [{ name: 'leader.json', prefix: 'agy_son' }],
       failed: [],
     });
-    vi.spyOn(managementClient, 'virtualizeAccount').mockImplementation((payload) => {
-      capturedVirtualizePayload = payload;
-      return Promise.resolve({ name: 'virtual.json', prefix: payload.prefix });
+    vi.spyOn(managementClient, 'patchAuthFileExclusions').mockImplementation((fileName, oppositeModels) => {
+      capturedExclusions = oppositeModels;
+      return Promise.resolve({ ok: true });
+    });
+    const savePoolSpy = vi.spyOn(managementClient, 'savePool').mockResolvedValue({
+      ok: true,
+      pool: { id: 'pool-1', base_prefix: 'agy_son' },
+      message: 'Pool agy_son saved',
     });
     vi.spyOn(managementClient, 'listModels').mockResolvedValue({
       models: [
@@ -602,7 +615,6 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
       ],
     });
 
-    // Nodo ocupado de otra familia para forzar virtualización como reserva
     const testNodes = [
       { id: 'leader', data: { fileName: 'leader.json', email: 'leader@test.com', prefix: '', provider: 'antigravity' } },
       { id: 'occup', data: { fileName: 'occup.json', email: 'occup@test.com', prefix: 'agy', provider: 'antigravity' } },
@@ -613,40 +625,50 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
     fireEvent.click(screen.getByTestId('family-gemini'));
     fireEvent.click(screen.getByTestId('subfamily-gemini-sonnet'));
 
-    // 1. Ambas casillas deben existir y estar desmarcadas por defecto
     const chk55 = screen.getByTestId('checkbox-exclude-55');
     const chkIso = screen.getByTestId('checkbox-disable-isolation');
     expect(chk55.checked).toBe(false);
     expect(chkIso.checked).toBe(false);
 
-    // 2. Marcar "Excluir versiones 5.5"
     fireEvent.click(chk55);
     expect(chk55.checked).toBe(true);
 
     fireEvent.change(screen.getByTestId('select-active-account'), { target: { value: 'leader' } });
-    fireEvent.click(screen.getByTestId('reserve-item-occup')); // cuenta virtualizable
+    fireEvent.click(screen.getByTestId('reserve-item-occup'));
 
     fireEvent.click(screen.getByTestId('btn-save-group'));
 
     await waitFor(() => {
-      expect(capturedVirtualizePayload).not.toBeNull();
+      expect(capturedExclusions.length).toBeGreaterThan(0);
     });
 
-    // Con excludeVersion55=true, claude-sonnet-5-5-high DEBE estar en oppositeModels (excluido)
-    expect(capturedVirtualizePayload.targetModels).toContain('claude-sonnet-4-6');
-    expect(capturedVirtualizePayload.oppositeModels).toContain('claude-sonnet-5-5-high');
-    expect(capturedVirtualizePayload.oppositeModels).toContain('gemini-3.8-flash-high');
+    // Con excludeVersion55=true, claude-sonnet-5-5-high DEBE estar excluido en el parche del master libre
+    expect(capturedExclusions).toContain('claude-sonnet-5-5-high');
+    expect(capturedExclusions).toContain('gemini-3.8-flash-high');
+    expect(capturedExclusions).not.toContain('claude-sonnet-4-6');
+
+    // Y la definición del pool en el registro del plugin guarda la política con exclusión de 5.5
+    await waitFor(() => expect(savePoolSpy).toHaveBeenCalledTimes(1));
+    const savedPool = savePoolSpy.mock.calls[0][0];
+    expect(savedPool.base_prefix).toBe('agy_son');
+    expect(savedPool.policy.exclude_55).toBe(true);
+    expect(savedPool.policy.excluded_models).toContain('claude-sonnet-5-5-high');
   });
 
   it('allows disabling isolation for wildcard multipurpose pools (serving all families)', async () => {
-    let capturedVirtualizePayload = null;
+    let capturedExclusions = null;
     vi.spyOn(managementClient, 'saveAuthFilePrefixes').mockResolvedValue({
-      successful: [{ name: 'free1.json', prefix: 'agy_son' }],
+      successful: [{ name: 'leader.json', prefix: 'agy_son' }],
       failed: [],
     });
-    vi.spyOn(managementClient, 'virtualizeAccount').mockImplementation((payload) => {
-      capturedVirtualizePayload = payload;
-      return Promise.resolve({ name: 'virtual.json', prefix: payload.prefix });
+    vi.spyOn(managementClient, 'patchAuthFileExclusions').mockImplementation((fileName, oppositeModels) => {
+      capturedExclusions = oppositeModels;
+      return Promise.resolve({ ok: true });
+    });
+    const savePoolSpy = vi.spyOn(managementClient, 'savePool').mockResolvedValue({
+      ok: true,
+      pool: { id: 'pool-1', base_prefix: 'agy_son' },
+      message: 'Pool agy_son saved',
     });
     vi.spyOn(managementClient, 'listModels').mockResolvedValue({
       models: [
@@ -668,29 +690,31 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
     fireEvent.click(screen.getByTestId('family-gemini'));
     fireEvent.click(screen.getByTestId('subfamily-gemini-sonnet'));
 
-    // Check "Desactivar aislamiento (Modo Comodín)"
     const chkIso = screen.getByTestId('checkbox-disable-isolation');
     fireEvent.click(chkIso);
     expect(chkIso.checked).toBe(true);
 
     fireEvent.change(screen.getByTestId('select-active-account'), { target: { value: 'leader' } });
-    fireEvent.click(screen.getByTestId('reserve-item-occup')); // cuenta virtualizable
+    fireEvent.click(screen.getByTestId('reserve-item-occup'));
 
     fireEvent.click(screen.getByTestId('btn-save-group'));
 
     await waitFor(() => {
-      expect(capturedVirtualizePayload).not.toBeNull();
+      expect(screen.getByText(/creado y guardado con éxito/i)).toBeTruthy();
     });
 
-    // In wildcard mode (disableIsolation=true), oppositeModels is empty, all models are in targetModels
-    expect(capturedVirtualizePayload.targetModels).toContain('claude-sonnet-4-6');
-    expect(capturedVirtualizePayload.targetModels).toContain('claude-opus-4-6-thinking');
-    expect(capturedVirtualizePayload.targetModels).toContain('gemini-3.8-flash-high');
-    expect(capturedVirtualizePayload.oppositeModels.length).toBe(0);
+    // In wildcard mode (disableIsolation=true) las exclusiones se LIMPIAN ([]):
+    // la cuenta sirve todas las familias sin bloqueo
+    expect(capturedExclusions).toEqual([]);
+
+    // Y el registro del pool guarda disable_isolation: true con lista vacía de exclusiones
+    await waitFor(() => expect(savePoolSpy).toHaveBeenCalledTimes(1));
+    const savedPool = savePoolSpy.mock.calls[0][0];
+    expect(savedPool.policy.disable_isolation).toBe(true);
+    expect(savedPool.policy.excluded_models).toEqual([]);
   });
 
-  it('unifies capacity calculation combining free and virtualizable accounts with accurate group count', () => {
-    // 0 cuentas libres físicas, pero 4 cuentas Antigravity ocupadas virtualizables
+  it('unifies capacity calculation combining free and available accounts with accurate group count', () => {
     const occupiedNodes = [
       { id: 'a1', data: { fileName: 'a1.json', email: 'a1@test.com', prefix: 'agy', provider: 'antigravity' } },
       { id: 'a2', data: { fileName: 'a2.json', email: 'a2@test.com', prefix: 'agy_1', provider: 'antigravity' } },
@@ -704,9 +728,8 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
     fireEvent.click(screen.getByTestId('subfamily-gemini-opus'));
 
     const capacityBadge = screen.getByTestId('capacity-badge');
-    // Debe reportar capacidad real > 0 (4 virtualizables = 2 grupos de rotación)
     expect(capacityBadge.textContent).toContain('Capacidad máxima: 2');
-    expect(capacityBadge.textContent).toContain('Virtualizables: 4');
+    expect(capacityBadge.textContent).toContain('4');
   });
 
   it('preserves user typed prefix when selecting a virtual source account (no input clobbering)', () => {
@@ -832,5 +855,323 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
     expect(patchSpy).not.toHaveBeenCalledWith(expect.arrayContaining([
       expect.objectContaining({ name: 'cl1.json' })
     ]));
+  });
+
+  it('dissolving pool with 2 master and 2 virtual accounts deletes virtual files from disk and resets master accounts', async () => {
+    const mixedPoolNodes = [
+      { id: 'm1', data: { fileName: 'antigravity-m1@gmail.com.json', email: 'm1@gmail.com', prefix: 'agy_mix', provider: 'antigravity' } },
+      { id: 'm2', data: { fileName: 'antigravity-m2@gmail.com.json', email: 'm2@gmail.com', prefix: 'agy_mix_1', provider: 'antigravity' } },
+      { id: 'v1', data: { fileName: 'antigravity-m1@gmail.com.agy_mix_2.json', email: 'm1@gmail.com', prefix: 'agy_mix_2', provider: 'antigravity' } },
+      { id: 'v2', data: { fileName: 'antigravity-m2@gmail.com.agy_mix_3.json', email: 'm2@gmail.com', prefix: 'agy_mix_3', provider: 'antigravity' } },
+    ];
+
+    const patchSpy = vi.spyOn(managementClient, 'saveAuthFilePrefixes').mockResolvedValue({
+      successful: [{ name: 'antigravity-m1@gmail.com.json', prefix: '' }, { name: 'antigravity-m2@gmail.com.json', prefix: '' }],
+      failed: [],
+    });
+    const deleteSpy = vi.spyOn(managementClient, 'deleteAuthFile').mockResolvedValue({ ok: true });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(<GroupManager nodes={mixedPoolNodes} />);
+    fireEvent.click(screen.getByTestId('tab-disolver-pools'));
+    fireEvent.click(screen.getByTestId('btn-dissolve-pool-agy_mix'));
+
+    await waitFor(() => {
+      expect(deleteSpy).toHaveBeenCalledWith('antigravity-m1@gmail.com.agy_mix_2.json');
+      expect(deleteSpy).toHaveBeenCalledWith('antigravity-m2@gmail.com.agy_mix_3.json');
+      expect(patchSpy).toHaveBeenCalledWith([
+        { name: 'antigravity-m1@gmail.com.json', prefix: '' },
+        { name: 'antigravity-m2@gmail.com.json', prefix: '' },
+      ]);
+    });
+  });
+
+  it('MINI-003 acceptance: for 4 master accounts, Gemini and Claude dropdowns show strictly 4 candidates with zero duplicates', () => {
+    // 4 physical master accounts
+    const fourMasters = [
+      { id: 'm1', data: { fileName: 'antigravity-u1@gmail.com.json', email: 'u1@gmail.com', prefix: '', provider: 'antigravity' } },
+      { id: 'm2', data: { fileName: 'antigravity-u2@gmail.com.json', email: 'u2@gmail.com', prefix: '', provider: 'antigravity' } },
+      { id: 'm3', data: { fileName: 'antigravity-u3@gmail.com.json', email: 'u3@gmail.com', prefix: '', provider: 'antigravity' } },
+      { id: 'm4', data: { fileName: 'antigravity-u4@gmail.com.json', email: 'u4@gmail.com', prefix: '', provider: 'antigravity' } },
+    ];
+
+    const { rerender } = render(<GroupManager nodes={fourMasters} />);
+
+    // 1. When selecting Gemini (gemini_pure)
+    fireEvent.click(screen.getByTestId('family-gemini'));
+    fireEvent.click(screen.getByTestId('subfamily-gemini-pure'));
+
+    const geminiSelect = screen.getByTestId('select-active-account');
+    const geminiOptions = Array.from(geminiSelect.options).filter((o) => o.value !== '');
+    // Exactly 4 candidates (m1, m2, m3, m4)
+    expect(geminiOptions).toHaveLength(4);
+    expect(geminiOptions.map((o) => o.value)).toEqual(['m1', 'm2', 'm3', 'm4']);
+
+    // 2. When selecting Claude (gemini_opus / sonnet)
+    fireEvent.click(screen.getByTestId('subfamily-gemini-opus'));
+
+    const claudeSelect = screen.getByTestId('select-active-account');
+    const claudeOptions = Array.from(claudeSelect.options).filter((o) => o.value !== '');
+    // Exactly 4 candidates (1 per physical master account)
+    expect(claudeOptions).toHaveLength(4);
+    expect(claudeOptions.map((o) => o.value)).toEqual(['m1', 'm2', 'm3', 'm4']);
+
+    // 3. Even with 4 derived virtual files already on disk (8 total files in CPAMC)
+    const nodes8 = [
+      ...fourMasters,
+      { id: 'v1', data: { fileName: 'antigravity-u1@gmail.com.agy_son.json', email: 'u1@gmail.com', prefix: '', provider: 'antigravity' } },
+      { id: 'v2', data: { fileName: 'antigravity-u2@gmail.com.agy_son_1.json', email: 'u2@gmail.com', prefix: '', provider: 'antigravity' } },
+      { id: 'v3', data: { fileName: 'antigravity-u3@gmail.com.agy_son_2.json', email: 'u3@gmail.com', prefix: '', provider: 'antigravity' } },
+      { id: 'v4', data: { fileName: 'antigravity-u4@gmail.com.agy_son_3.json', email: 'u4@gmail.com', prefix: '', provider: 'antigravity' } },
+    ];
+
+    rerender(<GroupManager nodes={nodes8} />);
+
+    // In Gemini: Virtual Claude files are completely hidden
+    fireEvent.click(screen.getByTestId('subfamily-gemini-pure'));
+    const gemini8Options = Array.from(screen.getByTestId('select-active-account').options).filter((o) => o.value !== '');
+    expect(gemini8Options).toHaveLength(4);
+    expect(gemini8Options.some((o) => o.value.startsWith('v'))).toBe(false);
+
+    // In Claude: all 4 claude cards are now assigned to agy_son virtuals → zero free candidates
+    fireEvent.click(screen.getByTestId('subfamily-gemini-opus'));
+    const claude8Options = Array.from(screen.getByTestId('select-active-account').options).filter((o) => o.value !== '');
+    expect(claude8Options).toHaveLength(0);
+    expect(claude8Options.some((o) => o.value.startsWith('v'))).toBe(false);
+    expect(screen.getByTestId('no-compatible-accounts-alert')).toBeTruthy();
+  });
+});
+
+describe('GroupManager - PoolRegistry como fuente única de verdad', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const mastersWithoutPrefix = [
+    { id: 'm1', data: { fileName: 'antigravity-infosoytec@gmail.com.json', email: 'inf...tec@gmail.com', prefix: '', provider: 'antigravity' } },
+    { id: 'm2', data: { fileName: 'antigravity-maribelluzbonitaaquinocastro@gmail.com.json', email: 'mar...tro@gmail.com', prefix: '', provider: 'antigravity' } },
+    { id: 'm3', data: { fileName: 'antigravity-wilsonlavio11@gmail.com.json', email: 'wil...io11@gmail.com', prefix: '', provider: 'antigravity' } },
+    { id: 'm4', data: { fileName: 'antigravity-wilsonlavio9@gmail.com.json', email: 'wil...io9@gmail.com', prefix: '', provider: 'antigravity' } },
+  ];
+
+  const registryClauPool = [
+    {
+      family: 'claude',
+      base_prefix: 'clau',
+      leader_auth: 'antigravity-infosoytec@gmail.com.json',
+      reserves: [
+        'antigravity-maribelluzbonitaaquinocastro@gmail.com.json',
+        'antigravity-wilsonlavio11@gmail.com.json',
+        'antigravity-wilsonlavio9@gmail.com.json',
+      ],
+      policy: { disable_isolation: false, exclude_55: false },
+    },
+  ];
+
+  it('shows registry pools in the Dissolve tab even when disk prefixes are empty (registry is source of truth)', async () => {
+    vi.spyOn(managementClient, 'listPools').mockResolvedValue({
+      ok: true,
+      pools: registryClauPool,
+      count: 1,
+    });
+
+    render(<GroupManager nodes={mastersWithoutPrefix} />);
+
+    fireEvent.click(screen.getByTestId('tab-disolver-pools'));
+
+    // Esperar a que el registro se sincronice y mostrar 1 pool en Disolver
+    await waitFor(() => {
+      expect(screen.getByTestId('pool-card-clau')).toBeTruthy();
+    });
+    expect(screen.getByText(/Disolver \/ Desagrupar Pools \(1\)/)).toBeTruthy();
+  });
+
+  it('excludes registry pool members from free candidates (prevents duplicate assignment)', async () => {
+    vi.spyOn(managementClient, 'listPools').mockResolvedValue({
+      ok: true,
+      pools: registryClauPool,
+      count: 1,
+    });
+
+    render(<GroupManager nodes={mastersWithoutPrefix} />);
+
+    // Las 4 cuentas son miembros del pool clau registrado → cero candidatos libres
+    await waitFor(() => {
+      expect(screen.getByText(/Disolver \/ Desagrupar Pools \(1\)/)).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId('family-claude'));
+    const options = Array.from(screen.getByTestId('select-active-account').options).filter((o) => o.value !== '');
+    expect(options).toHaveLength(0);
+    expect(screen.getByTestId('no-compatible-accounts-alert')).toBeTruthy();
+  });
+
+  it('degrades gracefully to disk-derived pools when the registry is unreachable', async () => {
+    vi.spyOn(managementClient, 'listPools').mockRejectedValue(
+      new Error('Management key not found.')
+    );
+
+    const legacyNodes = mastersWithoutPrefix.map((n, idx) => ({
+      ...n,
+      data: { ...n.data, prefix: idx === 0 ? 'legacy' : `legacy_${idx}` },
+    }));
+
+    render(<GroupManager nodes={legacyNodes} />);
+
+    fireEvent.click(screen.getByTestId('tab-disolver-pools'));
+
+    // Sin registro: el pool legacy derivado de prefijos en disco sigue visible
+    await waitFor(() => {
+      expect(screen.getByTestId('pool-card-legacy')).toBeTruthy();
+    });
+  });
+});
+
+describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const mastersWithoutPrefix = [
+    { id: 'm1', data: { fileName: 'antigravity-infosoytec@gmail.com.json', email: 'inf...tec@gmail.com', prefix: '', provider: 'antigravity' } },
+    { id: 'm2', data: { fileName: 'antigravity-maribelluzbonitaaquinocastro@gmail.com.json', email: 'mar...tro@gmail.com', prefix: '', provider: 'antigravity' } },
+    { id: 'm3', data: { fileName: 'antigravity-wilsonlavio11@gmail.com.json', email: 'wil...io11@gmail.com', prefix: '', provider: 'antigravity' } },
+    { id: 'm4', data: { fileName: 'antigravity-wilsonlavio9@gmail.com.json', email: 'wil...io9@gmail.com', prefix: '', provider: 'antigravity' } },
+  ];
+
+  const geminiPooledNodes = mastersWithoutPrefix.map((n, idx) => ({
+    ...n,
+    data: { ...n.data, prefix: idx === 0 ? 'agy' : `agy_${idx}` },
+  }));
+
+  const registryGeminiPool = [{
+    family: 'gemini_pure',
+    base_prefix: 'agy',
+    leader_auth: 'antigravity-infosoytec@gmail.com.json',
+    reserves: [
+      'antigravity-maribelluzbonitaaquinocastro@gmail.com.json',
+      'antigravity-wilsonlavio11@gmail.com.json',
+      'antigravity-wilsonlavio9@gmail.com.json',
+    ],
+    policy: {
+      disable_isolation: false,
+      exclude_55: false,
+      target_models: ['gemini-3-flash', 'gemini-3.8-flash-high'],
+    },
+  }];
+
+  const registryClaudePool = [{
+    family: 'claude',
+    base_prefix: 'clau',
+    leader_auth: 'antigravity-infosoytec@gmail.com.json',
+    reserves: [
+      'antigravity-maribelluzbonitaaquinocastro@gmail.com.json',
+      'antigravity-wilsonlavio11@gmail.com.json',
+      'antigravity-wilsonlavio9@gmail.com.json',
+    ],
+    policy: { disable_isolation: false, exclude_55: false },
+  }];
+
+  it('builds a second-family pool with accounts already serving another family (2N) without cloning or overwriting prefixes', async () => {
+    vi.spyOn(managementClient, 'listPools').mockResolvedValue({
+      ok: true, pools: registryGeminiPool, count: 1,
+    });
+    // Catálogo base: 3 targets de familias (2 gemini del pool existente + 1 claude nuevo) + 1 junk
+    vi.spyOn(managementClient, 'listModels').mockResolvedValue({
+      models: ['agy/gemini-3-flash', 'agy/gemini-3.8-flash-high', 'clau/claude-sonnet-4-6', 'agy/junk-model-1'],
+    });
+    const savePoolSpy = vi.spyOn(managementClient, 'savePool').mockResolvedValue({
+      ok: true, pool: { base_prefix: 'clau' }, message: 'Pool clau saved',
+    });
+    const patchPrefixesSpy = vi.spyOn(managementClient, 'saveAuthFilePrefixes').mockResolvedValue({ successful: [], failed: [] });
+    const patchExclusionsSpy = vi.spyOn(managementClient, 'patchAuthFileExclusions').mockResolvedValue({ ok: true });
+    const virtualizeSpy = vi.spyOn(managementClient, 'virtualizeAccount').mockResolvedValue({ name: 'x.json', prefix: 'clau' });
+
+    render(<GroupManager nodes={geminiPooledNodes} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Disolver \/ Desagrupar Pools \(1\)/)).toBeTruthy();
+    });
+
+    // Familia Claude: los masters del pool Gemini DEBEN aparecer como candidatos (2N)
+    fireEvent.click(screen.getByTestId('family-claude'));
+    await waitFor(() => {
+      const opts = Array.from(screen.getByTestId('select-active-account').options).filter((o) => o.value !== '');
+      expect(opts.length).toBe(4);
+    });
+
+    fireEvent.change(screen.getByTestId('select-active-account'), { target: { value: 'm1' } });
+    fireEvent.click(screen.getByTestId('reserve-item-m2'));
+    fireEvent.change(screen.getByTestId('input-group-base-prefix'), { target: { value: 'clau' } });
+    fireEvent.click(screen.getByTestId('btn-save-group'));
+
+    await waitFor(() => expect(savePoolSpy).toHaveBeenCalledTimes(1));
+    const payload = savePoolSpy.mock.calls[0][0];
+    expect(payload.family).toBe('claude');
+    expect(payload.base_prefix).toBe('clau');
+    expect(payload.leader_auth).toBe('antigravity-infosoytec@gmail.com.json');
+    expect(payload.reserves).toContain('antigravity-maribelluzbonitaaquinocastro@gmail.com.json');
+
+    // Zero clones / zero prefix overwrite: la familia Gemini en disco queda intacta
+    expect(virtualizeSpy).not.toHaveBeenCalled();
+    expect(patchPrefixesSpy).not.toHaveBeenCalled();
+
+    // [F2] Exclusiones union-aware: excluido = catálogo base − unión de targets de
+    // todos los pools de la cuenta (gemini del pool agy + claude del nuevo pool clau).
+    // Solo el modelo junk queda excluido; los targets de ambas familias sobreviven.
+    await waitFor(() => expect(patchExclusionsSpy).toHaveBeenCalled());
+    const patchedFiles = patchExclusionsSpy.mock.calls.map((c) => c[0]).sort();
+    expect(patchedFiles).toEqual([
+      'antigravity-infosoytec@gmail.com.json',
+      'antigravity-maribelluzbonitaaquinocastro@gmail.com.json',
+    ]);
+    patchExclusionsSpy.mock.calls.forEach(([, exclusions]) => {
+      expect(exclusions).toEqual(['junk-model-1']);
+    });
+  });
+
+  it('still blocks accounts already in a same-family registered pool (gemini side)', async () => {
+    vi.spyOn(managementClient, 'listPools').mockResolvedValue({
+      ok: true, pools: registryGeminiPool, count: 1,
+    });
+
+    render(<GroupManager nodes={mastersWithoutPrefix} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Disolver \/ Desagrupar Pools \(1\)/)).toBeTruthy();
+    });
+
+    // Familia Gemini (puro por defecto): los 4 masters ya están en el pool agy → 0 candidatos
+    fireEvent.click(screen.getByTestId('family-gemini'));
+    await waitFor(() => {
+      const opts = Array.from(screen.getByTestId('select-active-account').options).filter((o) => o.value !== '');
+      expect(opts.length).toBe(0);
+    });
+    expect(screen.getByTestId('no-compatible-accounts-alert')).toBeTruthy();
+  });
+
+  it('dissolving a registry-only second-family pool does not touch other-family disk prefixes', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.spyOn(managementClient, 'listPools').mockResolvedValue({
+      ok: true, pools: registryClaudePool, count: 1,
+    });
+    const dissolveSpy = vi.spyOn(managementClient, 'dissolvePool').mockResolvedValue({ ok: true });
+    const patchPrefixesSpy = vi.spyOn(managementClient, 'saveAuthFilePrefixes').mockResolvedValue({ successful: [], failed: [] });
+    const deleteSpy = vi.spyOn(managementClient, 'deleteAuthFile').mockResolvedValue({ ok: true });
+
+    render(<GroupManager nodes={geminiPooledNodes} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Disolver \/ Desagrupar Pools \(1\)/)).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId('tab-disolver-pools'));
+    fireEvent.click(screen.getByTestId('btn-dissolve-pool-clau'));
+
+    await waitFor(() => expect(dissolveSpy).toHaveBeenCalledWith('clau'));
+
+    // Los prefijos agy* del pool Gemini quedan intactos (solo se libera la membresía claude)
+    expect(patchPrefixesSpy).not.toHaveBeenCalled();
+    expect(deleteSpy).not.toHaveBeenCalled();
   });
 });

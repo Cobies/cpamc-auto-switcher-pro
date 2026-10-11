@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"visual-profile/internal/plugin"
-	"visual-profile/internal/version"
-	"visual-profile/internal/web"
+	"auto-switcher-pro/internal/plugin"
+	"auto-switcher-pro/internal/version"
+	"auto-switcher-pro/internal/web"
 )
 
 func TestPluginMetadataAndRegistration(t *testing.T) {

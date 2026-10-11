@@ -1,6 +1,27 @@
-import React, { useState, useMemo, useCallback } from 'react';
-import { saveAuthFilePrefixes, listModels, virtualizeAccount, deriveVirtualAuthName } from '../api/managementClient';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import {
+  saveAuthFilePrefixes,
+  listModels,
+  listPools,
+  patchAuthFileExclusions,
+  classifyAuthAccount,
+  deleteAuthFile,
+  buildManagedPoolCards,
+  savePool,
+  dissolvePool,
+} from '../api/managementClient';
 import '../GroupManager.css';
+
+// Rol de cuota de un pool del registro (coherente con targetFamilyRole / buildManagedPoolCards):
+// gemini_pure → 'gemini'; gemini_sonnet/gemini_opus/gemini_claude/claude → 'claude'; codex → 'codex'
+const poolFamilyRole = (family) => {
+  const f = (family || '').trim();
+  if (!f) return null;
+  if (f === 'gemini_pure' || f.startsWith('gemini_pure')) return 'gemini';
+  if (f === 'codex' || f.startsWith('codex')) return 'codex';
+  if (f === 'gemini_sonnet' || f === 'gemini_opus' || f === 'gemini_claude' || f === 'claude') return 'claude';
+  return f;
+};
 
 // Familias principales soportadas por la convención de cuota del switcher (internal/quota/quota.go)
 const MODEL_FAMILIES = {
@@ -168,14 +189,91 @@ export default function GroupManager({
   const [saveReport, setSaveReport] = useState(null); // { base, successful, failed }
   const [modelRoutes, setModelRoutes] = useState(null); // { base, routes: [] }
   const [copiedRoute, setCopiedRoute] = useState('');
+  // [registeredPools] Pools registrados en el plugin PoolRegistry (fuente única de verdad).
+  // Se resincroniza en cada reload de nodos (tras crear/disolver un pool).
+  const [registeredPools, setRegisteredPools] = useState([]);
+  const [catalogModels, setCatalogModels] = useState([]);
 
-  // Identificar cuentas verdaderamente libres (sin prefijo asignado o huérfanas)
+  useEffect(() => {
+    let mounted = true;
+    listModels()
+      .then((res) => {
+        if (mounted && Array.isArray(res?.models)) {
+          setCatalogModels(res.models);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // Evalúa si las cuentas de Antigravity conectadas o el catálogo soportan modelos Claude
+  const hasClaudeInAntigravity = useMemo(() => {
+    const hasExistingClaudePrefixes = nodes.some((n) => {
+      const p = (n.data?.prefix || '').toLowerCase();
+      return p.startsWith('agy_son') || p.startsWith('agy_opus') || p.startsWith('agy_clau');
+    });
+    if (hasExistingClaudePrefixes) return true;
+
+    if (!catalogModels || catalogModels.length === 0) return true;
+
+    return catalogModels.some((m) => {
+      const lower = String(m || '').toLowerCase();
+      return lower.includes('claude') || lower.includes('sonnet') || lower.includes('opus');
+    });
+  }, [nodes, catalogModels]);
+
+  useEffect(() => {
+    let cancelled = false;
+    listPools()
+      .then((res) => {
+        if (!cancelled) setRegisteredPools(Array.isArray(res?.pools) ? res.pools : []);
+      })
+      .catch(() => {
+        // Registro no disponible: degradar a pools derivados de prefijos en disco
+        if (!cancelled) setRegisteredPools([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [nodes]);
+
+  // Archivos miembros de pools registrados (cualquier familia) — para freeNodes
+  const registryMemberFileNames = useMemo(() => {
+    const members = new Set();
+    registeredPools.forEach((pool) => {
+      if (pool.leader_auth) members.add(pool.leader_auth);
+      (Array.isArray(pool.reserves) ? pool.reserves : []).forEach((auth) => members.add(auth));
+    });
+    return members;
+  }, [registeredPools]);
+
+  // [2N] Miembros de pools registrados agrupados por rol de cuota: una cuenta física
+  // puede servir a 'gemini' Y a 'claude' a la vez, pero solo a UN pool por rol
+  const registryMembersByRole = useMemo(() => {
+    const byRole = new Map();
+    registeredPools.forEach((pool) => {
+      const role = poolFamilyRole(pool.family);
+      if (!role) return;
+      if (!byRole.has(role)) byRole.set(role, new Set());
+      const members = byRole.get(role);
+      if (pool.leader_auth) members.add(pool.leader_auth);
+      (Array.isArray(pool.reserves) ? pool.reserves : []).forEach((auth) => members.add(auth));
+    });
+    return byRole;
+  }, [registeredPools]);
+
+  // Identificar cuentas verdaderamente libres: sin prefijo asignado o huérfanas,
+  // y que NO sean miembros de un pool registrado (el registro es la verdad autoritativa)
   const freeNodes = useMemo(() => {
     return nodes.filter((n) => {
+      const fileName = n.data?.fileName || n.name || n.id || '';
+      if (registryMemberFileNames.has(fileName)) return false;
       const pref = (n.data?.prefix || '').trim();
       return pref === '' || pref.startsWith('unlinked_');
     });
-  }, [nodes]);
+  }, [nodes, registryMemberFileNames]);
 
   // Resolución de familia efectiva (gestiona la jerarquía de sub-tipos de Gemini)
   const effectiveFamily = useMemo(() => {
@@ -202,27 +300,27 @@ export default function GroupManager({
     };
   }, [family, geminiSubtype]);
 
-  // Cuentas compatibles con la familia seleccionada.
-  const familyCompatibleNodes = useMemo(() => {
-    if (!effectiveFamily) return [];
-    const famProvider = effectiveFamily.provider;
-    return freeNodes.filter((n) => {
-      const prov = (n.data?.provider || n.data?.accountType || '').toLowerCase();
-      return prov === famProvider;
-    });
-  }, [effectiveFamily, freeNodes]);
-
-  // Cuentas de reserva compatibles: mismas reglas de familia y SIEMPRE excluye
-  // la cuenta principal actual, de modo que al cambiarla la anterior reaparezca
-  // abajo como candidata y la vigente nunca se ofrezca como su propia reserva.
-  const hasAntigravityAccounts = useMemo(
-    () => nodes.some((n) => (n.data?.provider || n.data?.accountType || '').toLowerCase() === 'antigravity'),
-    [nodes]
-  );
-
   const isGeminiPackageFamily = !!effectiveFamily && (
     effectiveFamily.key.startsWith('gemini_')
   );
+
+  // 1. Managed pool cards abstraction (N -> 2N scalable model sincronizado con Auto Auth Files)
+  const managedCards = useMemo(() => buildManagedPoolCards(nodes), [nodes]);
+
+  // Rol de familia objetivo según la selección (gemini vs claude)
+  const targetFamilyRole = useMemo(() => {
+    if (!effectiveFamily) return null;
+    if (effectiveFamily.key === 'gemini_pure') return 'gemini';
+    if (
+      effectiveFamily.key === 'gemini_sonnet' ||
+      effectiveFamily.key === 'gemini_opus' ||
+      effectiveFamily.key === 'gemini_claude' ||
+      effectiveFamily.key === 'claude'
+    ) {
+      return 'claude';
+    }
+    return null;
+  }, [effectiveFamily]);
 
   // ¿El prefijo corresponde al sub-tipo Gemini objetivo (mismo paquete)?
   const prefixMatchesEffectiveFamily = useCallback((prefix) => {
@@ -242,66 +340,151 @@ export default function GroupManager({
     return p.startsWith(effectiveFamily.hintPrefix);
   }, [effectiveFamily]);
 
-  // Cuentas del paquete Gemini ya asignadas al sub-tipo OPUESTO que pueden
-  // clonarse (virtualizarse) hacia la familia objetivo, siempre que su
-  // identidad física aún no tenga una credencial de la familia objetivo.
-  const virtualizableSourceNodes = useMemo(() => {
-    if (!isGeminiPackageFamily) return [];
-    // Las fuentes virtualizables son cuentas antigravity asignadas a familias gemini válidas
-    // (prefijos agy_clau, agy_son, agy_opus, agy, g...) que no coincidan con la familia objetivo
-    const oppositeTest = (p) => {
-      const isKnownGeminiFamily =
-        p.startsWith('agy') || p.startsWith('g');
-      return isKnownGeminiFamily && !prefixMatchesEffectiveFamily(p);
-    };
-    const targetEmails = new Set(
-      nodes
-        .filter((n) => prefixMatchesEffectiveFamily(n.data?.prefix))
-        .map((n) => n.data?.email)
-        .filter(Boolean)
-    );
-    const freeIds = new Set(freeNodes.map((n) => n.id));
-    return nodes.filter((n) => {
-      if (freeIds.has(n.id)) return false;
-      const prov = (n.data?.provider || n.data?.accountType || '').toLowerCase();
-      if (prov !== 'antigravity') return false;
-      const p = (n.data?.prefix || '').trim();
-      if (!oppositeTest(p)) return false;
-      const email = n.data?.email;
-      return email ? !targetEmails.has(email) : false;
-    });
-  }, [isGeminiPackageFamily, effectiveFamily, nodes, prefixMatchesEffectiveFamily, freeNodes]);
+  // Cuentas del rol objetivo sincronizadas directamente con Auto Auth Files
+  const targetRoleCards = useMemo(() => {
+    if (!targetFamilyRole) return [];
+    return managedCards.filter((c) => c.familyRole === targetFamilyRole);
+  }, [managedCards, targetFamilyRole]);
 
+  // Cuentas libres en el rol objetivo
+  const freeCardsInTargetRole = useMemo(() => {
+    return targetRoleCards.filter((c) => !c.assignedPrefix || c.assignedPrefix.startsWith('unlinked_'));
+  }, [targetRoleCards]);
+
+  // ¿El nodo requiere clonación virtual? (master que sirve a la familia opuesta)
   const isVirtualSource = useCallback(
-    (node) => !!node && virtualizableSourceNodes.some((n) => n.id === node.id),
-    [virtualizableSourceNodes]
+    (node) => {
+      if (!node || !targetFamilyRole) return false;
+      const classification = classifyAuthAccount(node);
+      if (classification.isVirtual) return false; // ya es credencial derivada: se parchea
+      const pref = (node.data?.prefix || '').trim();
+      if (!pref || pref.startsWith('unlinked_')) return false; // master libre: parche in-place
+      const isClaudePref =
+        pref.startsWith('agy_son') || pref.startsWith('agy_opus') ||
+        pref.startsWith('agy_clau') || pref.startsWith('clau') || pref.startsWith('son');
+      const isGeminiPref = (pref.startsWith('agy') || pref.startsWith('g')) && !isClaudePref;
+      if (targetFamilyRole === 'claude') return isGeminiPref; // master gemini → clonar para Claude
+      if (targetFamilyRole === 'gemini') return isClaudePref; // master claude → clonar para Gemini
+      return false;
+    },
+    [targetFamilyRole]
   );
 
-  // Candidatos unificados: cuentas libres + cuentas virtualizables del paquete Gemini.
-  const leaderCandidates = useMemo(() => ([
-    ...familyCompatibleNodes.map((node) => ({ node, virtual: false })),
-    ...virtualizableSourceNodes.map((node) => ({ node, virtual: true })),
-  ]), [familyCompatibleNodes, virtualizableSourceNodes]);
+  // Candidatos para líder: SOLO tarjetas LIBRES del rol objetivo (modelo 2N de Auto Auth Files)
+  const leaderCandidates = useMemo(() => {
+    if (!effectiveFamily) return [];
+    const famProvider = effectiveFamily.provider;
 
+    if (famProvider !== 'antigravity') {
+      return nodes
+        .filter((n) => {
+          const prov = (n.data?.provider || n.data?.accountType || '').toLowerCase();
+          if (prov !== famProvider) return false;
+          const pref = (n.data?.prefix || '').trim();
+          return !pref || pref.startsWith('unlinked_');
+        })
+        .map((node) => ({ node, virtual: false }));
+    }
+
+    return freeCardsInTargetRole.map((card) => {
+      // Buscar el nodo en el grafo que respalda a esta tarjeta
+      let backingNode = null;
+      if (card.virtualFileName) {
+        backingNode = nodes.find(
+          (n) => n.data?.fileName === card.virtualFileName || n.id === card.virtualFileName
+        );
+      }
+      if (!backingNode && card.masterFileName) {
+        backingNode = nodes.find(
+          (n) => n.data?.fileName === card.masterFileName || n.id === card.masterFileName
+        );
+      }
+
+      const node = backingNode || {
+        id: card.virtualFileName || card.masterFileName,
+        data: {
+          fileName: card.virtualFileName || card.masterFileName,
+          email: card.maskedEmail,
+          prefix: card.assignedPrefix,
+          provider: 'antigravity',
+        },
+      };
+
+      const needsVirtualize = isVirtualSource(node);
+      return { node, card, virtual: needsVirtualize };
+    }).filter(({ node }) => {
+      // [2N] Los miembros de un pool registrado de la MISMA familia-rol NO son candidatos
+      // libres; estar en el pool Gemini NO impide armar el pool Claude con la misma cuenta
+      const fileName = node.data?.fileName || node.name || node.id || '';
+      const sameRoleMembers = registryMembersByRole.get(targetFamilyRole);
+      return !(sameRoleMembers && sameRoleMembers.has(fileName));
+    });
+  }, [effectiveFamily, nodes, freeCardsInTargetRole, isVirtualSource, registryMembersByRole, targetFamilyRole]);
+
+  // Cuentas de reserva compatibles: excluyen la cuenta líder seleccionada
   const reserveCandidates = useMemo(() => {
     if (!effectiveFamily || !selectedActiveNodeId) return [];
-    const leaderEmail = nodes.find((n) => n.id === selectedActiveNodeId)?.data?.email;
-    return leaderCandidates.filter(
-      ({ node }) => node.id !== selectedActiveNodeId && (!leaderEmail || node.data?.email !== leaderEmail)
-    );
+    const activeNode = nodes.find((n) => n.id === selectedActiveNodeId);
+    const leaderEmail = activeNode?.data?.email || activeNode?.id;
+
+    return leaderCandidates.filter(({ node }) => {
+      const email = node.data?.email || node.id;
+      return node.id !== selectedActiveNodeId && (!leaderEmail || email !== leaderEmail);
+    });
   }, [effectiveFamily, selectedActiveNodeId, leaderCandidates, nodes]);
 
-  // Mapear pools existentes en el sistema agrupados por prefijo base
+  const hasAntigravityAccounts = useMemo(
+    () => nodes.some((n) => (n.data?.provider || n.data?.accountType || '').toLowerCase() === 'antigravity'),
+    [nodes]
+  );
+
+  // Mapear pools existentes en el sistema agrupados por prefijo base.
+  // FUENTE ÚNICA DE VERDAD: el registro del plugin (PoolRegistry). Los pools derivados
+  // de prefijos en disco se incluyen solo si el registro no los cubre (pools legacy).
   const existingPools = useMemo(() => {
     const poolsMap = new Map();
+
+    // 1) Pools registrados en el plugin (GroupManager = único generador)
+    registeredPools.forEach((pool) => {
+      const basePrefix = (pool.base_prefix || '').trim();
+      if (!basePrefix || poolsMap.has(basePrefix)) return;
+
+      const findNode = (authFileName) =>
+        nodes.find((n) => (n.data?.fileName || n.name || n.id) === authFileName) || null;
+
+      const root = pool.leader_auth ? findNode(pool.leader_auth) : null;
+      const reserves = (Array.isArray(pool.reserves) ? pool.reserves : [])
+        .map((auth, idx) => {
+          const rNode = findNode(auth);
+          return rNode
+            ? { node: rNode, prefix: `${basePrefix}_${idx + 1}`, reserveIndex: idx + 1 }
+            : null;
+        })
+        .filter(Boolean);
+
+      // Si el pool no tiene ninguna cuenta física viva en nodes (fueron borradas en CPAMC),
+      // descartar para evitar pools huérfanos/zombies y liberar el prefijo inmediatamente.
+      if (!root && reserves.length === 0) {
+        return;
+      }
+
+      poolsMap.set(basePrefix, { basePrefix, root, reserves });
+    });
+
+    // 2) Pools legacy detectados solo por prefijos en disco (no cubiertos por el registro)
+    const registryCovered = new Set(
+      registeredPools.map((p) => (p.base_prefix || '').trim()).filter(Boolean)
+    );
 
     nodes.forEach((node) => {
       const pref = (node.data?.prefix || '').trim();
       if (!pref || pref.startsWith('unlinked_')) return;
 
-      // Detectar si es reserva (_N) o raíz
       const reserveMatch = pref.match(/^(.*)_(\d+)$/);
       const baseKey = reserveMatch ? reserveMatch[1] : pref;
+      // Los pools cubiertos por el registro son autoritativos: no mezclar miembros del disco
+      if (registryCovered.has(baseKey)) return;
+
       const isReserve = !!reserveMatch;
 
       if (!poolsMap.has(baseKey)) {
@@ -329,7 +512,7 @@ export default function GroupManager({
       p.reserves.sort((a, b) => a.reserveIndex - b.reserveIndex);
       return p;
     });
-  }, [nodes]);
+  }, [nodes, registeredPools]);
 
   // Advertencia de convención de familia (agy* / agy_clau* / clau* / codex*) sobre el nombre del pool
   const familyMismatch = useMemo(() => {
@@ -345,6 +528,14 @@ export default function GroupManager({
       return {
         hint,
         message: `El formato "_<número>" está reservado para cuentas de reserva. Para un nuevo pool usa "${suggested}" en vez de "${trimmed}".`,
+      };
+    }
+
+    // VALIDACIÓN 1B: Caracteres seguros (alineado con safePrefixPattern en el backend Go)
+    if (!/^[a-zA-Z0-9_-]+$/.test(trimmed)) {
+      return {
+        hint,
+        message: 'El prefijo contiene caracteres inválidos. Solo se permiten caracteres alfanuméricos, guiones (-) y guiones bajos (_).',
       };
     }
 
@@ -452,21 +643,18 @@ export default function GroupManager({
     setSelectedReserveNodeIds([]);
     setErrorMessage('');
 
-    const chosenNode = nodes.find((n) => n.id === nodeId);
-    const chosenPref = (chosenNode?.data?.prefix || '').trim();
-    if (chosenNode && isVirtualSource(chosenNode)) {
-      // Cuenta de la familia opuesta del paquete Gemini: se clonará, así que el
-      // prefijo destino es el de la familia objetivo, no el suyo actual.
-      // Solo sugerir si el usuario aún no ha escrito un prefijo manualmente.
-      if (effectiveFamily && !groupBasePrefix.trim()) {
-        setGroupBasePrefix(suggestNextBasePrefix(nodes, effectiveFamily.hintPrefix));
-      }
+    // Si el usuario ya ha escrito un prefijo manualmente en el input, no sobreescribirlo
+    if (groupBasePrefix.trim()) {
       return;
     }
-    if (chosenPref && !chosenPref.startsWith('unlinked_')) {
-      // Cargar el prefijo ya asignado en el auth-file de la cuenta seleccionada
+
+    const chosenNode = nodes.find((n) => n.id === nodeId);
+    const chosenPref = (chosenNode?.data?.prefix || '').trim();
+
+    if (chosenPref && !chosenPref.startsWith('unlinked_') && prefixMatchesEffectiveFamily(chosenPref)) {
+      // Cargar el prefijo ya asignado en el auth-file solo si coincide con la familia activa
       setGroupBasePrefix(chosenPref);
-    } else if (!groupBasePrefix.trim()) {
+    } else {
       // Sugerencia según familia elegida (o codex por defecto), sin colisión
       const hint = effectiveFamily ? effectiveFamily.hintPrefix : null;
       if (chosenNode) {
@@ -480,7 +668,7 @@ export default function GroupManager({
         setGroupBasePrefix(suggestNextBasePrefix(nodes, hint));
       }
     }
-  }, [nodes, groupBasePrefix, effectiveFamily, isVirtualSource]);
+  }, [nodes, groupBasePrefix, effectiveFamily, prefixMatchesEffectiveFamily]);
 
   const handleToggleReserve = useCallback((nodeId) => {
     setSelectedReserveNodeIds((prev) =>
@@ -516,11 +704,21 @@ export default function GroupManager({
 
     const updates = [];
     const virtualJobs = [];
+    const registryOnlyFiles = [];
     const queueAssignment = (node, prefix) => {
+      const fileName = node.data?.fileName || node.name;
+      if (!fileName) return;
+      // [2N] Una cuenta que ya pertenece a un pool registrado NO se toca en disco
+      // (ni clon virtual ni parche de prefijo: preserva la otra familia). Su membresía
+      // a esta nueva familia queda definida exclusivamente en el registro del plugin.
+      if (registryMemberFileNames.has(fileName)) {
+        registryOnlyFiles.push(fileName);
+        return;
+      }
       if (isVirtualSource(node)) {
-        virtualJobs.push({ sourceFile: node.data.fileName, prefix, email: node.data.email });
+        virtualJobs.push({ sourceFile: fileName, prefix, email: node.data?.email });
       } else {
-        updates.push({ name: node.data.fileName, prefix });
+        updates.push({ name: fileName, prefix });
       }
     };
 
@@ -528,7 +726,7 @@ export default function GroupManager({
     const assignedPrefixes = new Set();
     selectedReserveNodeIds.forEach((resId) => {
       const resNode = nodes.find((n) => n.id === resId);
-      if (resNode && resNode.data?.fileName) {
+      if (resNode && (resNode.data?.fileName || resNode.name)) {
         const reserveNum = nextReserveNumber(nodes, trimmedBase, assignedPrefixes);
         const reservePrefix = `${trimmedBase}_${reserveNum}`;
         assignedPrefixes.add(reservePrefix);
@@ -541,80 +739,144 @@ export default function GroupManager({
     try {
       let targetModels = [];
       let oppositeModels = [];
-      if (virtualJobs.length > 0) {
-        try {
-          const { models } = await listModels();
-          const knownPrefixes = new Set(
-            nodes.map((n) => (n.data?.prefix || '').trim()).filter(Boolean)
-          );
-          const toBaseModelId = (id) => {
-            const slash = id.indexOf('/');
-            if (slash > 0 && knownPrefixes.has(id.slice(0, slash))) return id.slice(slash + 1);
-            return id;
-          };
-          const targetSet = new Set();
-          const oppositeSet = new Set();
-          models
-            .map(toBaseModelId)
-            .filter(Boolean)
-            .forEach((id) => {
-              if (disableIsolation) {
-                if (excludeVersion55 && (id.includes('5-5') || id.includes('5.5'))) {
-                  oppositeSet.add(id);
-                } else {
-                  targetSet.add(id);
-                }
-              } else if (matchesFamilyModel(trimmedBase, id, excludeVersion55)) {
-                targetSet.add(id);
-              } else {
+      let allBaseModels = [];
+      try {
+        const { models } = await listModels();
+        const knownPrefixes = new Set(
+          nodes.map((n) => (n.data?.prefix || '').trim()).filter(Boolean)
+        );
+        const toBaseModelId = (id) => {
+          let cur = (id || '').trim();
+          while (cur.includes('/')) {
+            cur = cur.slice(cur.indexOf('/') + 1);
+          }
+          return cur;
+        };
+        // [Homologación Antigravity] Filtrar únicamente modelos que pertenezcan a Antigravity (gemini, claude, etc.)
+        // para NUNCA inyectar modelos ajenos (NVIDIA, OpenCode, GLM, Grok, etc.) en credenciales de Google
+        const isAntigravityModel = (id) => {
+          const lower = (id || '').toLowerCase();
+          return lower.includes('gemini') || lower.includes('claude') || lower.includes('sonnet') || lower.includes('opus') || lower.includes('haiku');
+        };
+
+        const targetSet = new Set();
+        const oppositeSet = new Set();
+        models
+          .map(toBaseModelId)
+          .filter(Boolean)
+          .filter(isAntigravityModel)
+          .forEach((id) => {
+            if (disableIsolation) {
+              if (excludeVersion55 && (id.includes('5-5') || id.includes('5.5'))) {
                 oppositeSet.add(id);
+              } else {
+                targetSet.add(id);
               }
-            });
-          targetModels = [...targetSet];
-          oppositeModels = [...oppositeSet];
-        } catch (err) {
-          setErrorMessage(`No se pudo leer el catálogo de modelos para virtualizar: ${err.message}`);
-          return;
-        }
+            } else if (matchesFamilyModel(trimmedBase, id, excludeVersion55)) {
+              targetSet.add(id);
+            } else {
+              oppositeSet.add(id);
+            }
+          });
+        targetModels = [...targetSet];
+        oppositeModels = [...oppositeSet];
+        allBaseModels = [...new Set(models.map(toBaseModelId).filter(Boolean))];
+      } catch {
+        // Model listing is non-blocking
       }
 
-      const targetPatterns = FAMILY_TARGET_PATTERNS[effectiveFamily?.key] || [];
+      // [2N] Exclusiones union-aware: excluido = catálogo base − unión de los targets
+      // de TODOS los pools a los que pertenece cada cuenta asignada. Para cuentas
+      // solo en este pool equivale a la lista opuesta de la familia (legacy).
+      const computeUnionExclusions = async (files, newPoolTargets) => {
+        const exclusionsByFile = new Map();
+        let existingPools = [];
+        try {
+          const res = await listPools();
+          existingPools = Array.isArray(res?.pools) ? res.pools : [];
+        } catch {
+          // Registro no disponible: tratar todas como cuentas de un solo pool
+        }
+        const poolsByFile = new Map();
+        existingPools.forEach((p) => {
+          if (!p || !p.base_prefix) return;
+          if (String(p.base_prefix).toLowerCase() === trimmedBase.toLowerCase()) return;
+          const members = [p.leader_auth, ...(Array.isArray(p.reserves) ? p.reserves : [])].filter(Boolean);
+          members.forEach((file) => {
+            const list = poolsByFile.get(file) || [];
+            list.push(p);
+            poolsByFile.set(file, list);
+          });
+        });
+        files.forEach((file) => {
+          if (disableIsolation) {
+            exclusionsByFile.set(file, []);
+            return;
+          }
+          const union = new Set(newPoolTargets || []);
+          (poolsByFile.get(file) || []).forEach((p) => {
+            (p.policy?.target_models || []).forEach((m) => union.add(m));
+          });
+          exclusionsByFile.set(file, allBaseModels.filter((m) => !union.has(m)));
+        });
+        return exclusionsByFile;
+      };
+
+      // In-place patch of prefixes for non-virtual accounts
       const patchReport = updates.length > 0
         ? await saveAuthFilePrefixes(updates)
         : { successful: [], failed: [] };
 
-      const virtualResults = await Promise.allSettled(
-        virtualJobs.map((job) => virtualizeAccount({
-          sourceFileName: job.sourceFile,
-          prefix: job.prefix,
-          targetModels,
-          targetPatterns,
-          oppositeModels,
-        }))
-      );
+      // Guardar definición de pool en el registro del plugin PRIMERO: el watcher de
+      // archivos dispara re-registro (model.for_auth) que ya debe ver este pool.
+      const poolPayload = {
+        family: effectiveFamily?.key || 'gemini_pure',
+        base_prefix: trimmedBase,
+        leader_auth: activeNode.data?.fileName || activeNode.name,
+        leader_email: activeNode.data?.email || '',
+        reserves: selectedReserveNodeIds.map((resId) => {
+          const rNode = nodes.find((n) => n.id === resId);
+          return rNode?.data?.fileName || rNode?.name || '';
+        }).filter(Boolean),
+        policy: {
+          disable_isolation: Boolean(disableIsolation),
+          exclude_55: Boolean(excludeVersion55),
+          target_models: targetModels,
+          excluded_models: oppositeModels,
+        },
+      };
 
-      const successful = [...patchReport.successful];
+      try {
+        await savePool(poolPayload);
+      } catch (poolErr) {
+        console.warn('savePool error in registry:', poolErr);
+      }
+
+      // [2N] Parche de exclusiones union-aware para TODAS las cuentas asignadas:
+      // excluido = catálogo base − unión de los target_models de TODOS los pools a los
+      // que pertenece la cuenta (así una cuenta que sirve Gemini + Claude en paralelo
+      // no ve sus modelos filtrados por la exclusión de la otra familia).
+      // Para cuentas solo en este pool equivale a la lista opuesta de la familia (legacy).
+      const assignedFiles = [
+        ...updates.map((item) => item.name),
+        ...registryOnlyFiles,
+      ].filter(Boolean);
+      if (assignedFiles.length > 0) {
+        const unionExclusionsByFile = await computeUnionExclusions(assignedFiles, targetModels);
+        await Promise.allSettled(
+          assignedFiles.map((file) =>
+            patchAuthFileExclusions(file, unionExclusionsByFile.get(file) || [])
+          )
+        );
+      }
+
+      const successful = [
+        ...patchReport.successful,
+        ...virtualJobs.map((j) => ({ name: j.sourceFile, prefix: j.prefix })),
+      ];
       const failed = patchReport.failed.map((f) => ({ ...f, kind: 'patch' }));
-      virtualResults.forEach((res, idx) => {
-        const job = virtualJobs[idx];
-        const derivedName = deriveVirtualAuthName(job.sourceFile, job.prefix);
-        if (res.status === 'fulfilled') {
-          successful.push({ name: res.value?.name || derivedName, prefix: job.prefix });
-        } else {
-          failed.push({
-            name: derivedName,
-            prefix: job.prefix,
-            error: res.reason?.message || 'Virtualize failed',
-            kind: 'virtual',
-            sourceFile: job.sourceFile,
-            targetModels,
-            targetPatterns,
-            oppositeModels,
-          });
-        }
-      });
 
-      const total = updates.length + virtualJobs.length;
+      const total = updates.length + virtualJobs.length + registryOnlyFiles.length;
       if (failed.length > 0) {
         setSaveReport({ base: trimmedBase, successful, failed });
         setErrorMessage(
@@ -623,7 +885,8 @@ export default function GroupManager({
       } else {
         setSaveReport(null);
         const virtualNote = virtualJobs.length > 0 ? ` (${virtualJobs.length} virtualizada[s])` : '';
-        setSuccessFeedback(`⚡ Pool "${trimmedBase}" creado y guardado con éxito (${total} cuentas${virtualNote}).`);
+        const registryNote = registryOnlyFiles.length > 0 ? ` · ${registryOnlyFiles.length} vía registro (2N)` : '';
+        setSuccessFeedback(`⚡ Pool "${trimmedBase}" creado y guardado con éxito (${updates.length + virtualJobs.length + registryOnlyFiles.length} cuentas${virtualNote})${registryNote}.`);
         setGroupBasePrefix('');
         setSelectedActiveNodeId('');
         setSelectedReserveNodeIds([]);
@@ -636,9 +899,9 @@ export default function GroupManager({
         } catch {
           setModelRoutes(null);
         }
-      }
-      if (typeof onReloadRequested === 'function') {
-        await onReloadRequested();
+        if (typeof onReloadRequested === 'function') {
+          await onReloadRequested();
+        }
       }
       setTimeout(() => setSuccessFeedback(''), 4000);
     } catch (err) {
@@ -646,7 +909,7 @@ export default function GroupManager({
     } finally {
       setIsSubmitting(false);
     }
-  }, [groupBasePrefix, selectedActiveNodeId, selectedReserveNodeIds, nodes, onReloadRequested, isVirtualSource, effectiveFamily, excludeVersion55, disableIsolation]);
+  }, [groupBasePrefix, selectedActiveNodeId, selectedReserveNodeIds, nodes, onReloadRequested, effectiveFamily, excludeVersion55, disableIsolation, isVirtualSource, registryMemberFileNames, registryMembersByRole]);
 
   // Reintentar solo las cuentas que fallaron en el último guardado
   const handleRetryFailed = useCallback(async () => {
@@ -733,22 +996,94 @@ export default function GroupManager({
       : `¿Seguro que deseas disolver el pool "${pool.basePrefix}"? Todas sus cuentas volverán a estar libres.`;
     if (!window.confirm(confirmMsg)) return;
 
-    const updates = [];
+    const masterUpdates = [];
+    const virtualDeletions = [];
+    const memberMasterFiles = new Set();
+
     descendants.forEach((node) => {
-      if (node.data?.fileName) {
-        updates.push({ name: node.data.fileName, prefix: '' });
+      const fileName = node.data?.fileName || node.name || '';
+      if (!fileName) return;
+      const classification = classifyAuthAccount(node);
+      if (classification.isVirtual) {
+        virtualDeletions.push(fileName);
+      } else {
+        masterUpdates.push({ name: fileName, prefix: '' });
+        memberMasterFiles.add(fileName);
       }
     });
 
-    if (updates.length === 0) return;
+    // [2N] Miembros del pool definidos solo en el registro (sin prefijo propio en disco):
+    // también deben recuperar su catálogo al disolver.
+    (pool.reserves || []).forEach(({ node }) => {
+      const fileName = node?.data?.fileName || node?.name || '';
+      if (fileName) memberMasterFiles.add(fileName);
+    });
+    if (pool.root?.data?.fileName) {
+      memberMasterFiles.add(pool.root.data.fileName);
+    }
 
     setIsSubmitting(true);
     try {
-      const report = await saveAuthFilePrefixes(updates);
-      if (report.failed.length > 0) {
-        setErrorMessage(`Error al disolver pool: fallaron ${report.failed.length} de ${updates.length} cuentas. Revisa la pestaña de prefijos.`);
+      try {
+        await dissolvePool(pool.basePrefix);
+      } catch (dissolveErr) {
+        console.warn('dissolvePool registry error:', dissolveErr);
+      }
+
+      const deleteResults = virtualDeletions.length > 0
+        ? await Promise.allSettled(virtualDeletions.map((fn) => deleteAuthFile(fn)))
+        : [];
+      const patchReport = masterUpdates.length > 0
+        ? await saveAuthFilePrefixes(masterUpdates)
+        : { successful: [], failed: [] };
+
+      // [2N] Re-parche union-aware de exclusiones para los miembros liberados:
+      // excluido = catálogo base − unión de los targets de los pools REMANENTES de la
+      // cuenta (vacío cuando ya no pertenece a ningún pool: catálogo base completo).
+      try {
+        const [poolsRes, modelsRes] = await Promise.allSettled([listPools(), listModels()]);
+        const remainingPools = poolsRes.status === 'fulfilled' && Array.isArray(poolsRes.value?.pools)
+          ? poolsRes.value.pools
+          : [];
+        const allBaseModels = modelsRes.status === 'fulfilled'
+          ? [...new Set((modelsRes.value?.models || []).map((id) => {
+              const slash = String(id).indexOf('/');
+              return slash > 0 ? String(id).slice(slash + 1) : String(id);
+            })).filter(Boolean)]
+          : [];
+        await Promise.allSettled(
+          [...memberMasterFiles].map((file) => {
+            const union = new Set();
+            remainingPools.forEach((p) => {
+              const members = [p.leader_auth, ...(Array.isArray(p.reserves) ? p.reserves : [])].filter(Boolean);
+              const isMember = members.some((m) => String(m).toLowerCase() === String(file).toLowerCase());
+              if (isMember && !p.policy?.disable_isolation) {
+                (p.policy?.target_models || []).forEach((m) => union.add(m));
+              }
+            });
+            const junk = allBaseModels.filter((m) => !union.has(m));
+            return patchAuthFileExclusions(file, junk);
+          })
+        );
+      } catch (exclusionErr) {
+        console.warn('dissolve exclusion re-patch error:', exclusionErr);
+      }
+
+      const failedDeletions = deleteResults.filter((r) => r.status === 'rejected');
+      const totalFailed = failedDeletions.length + patchReport.failed.length;
+      if (totalFailed > 0) {
+        setErrorMessage(
+          `Error al disolver pool: fallaron ${totalFailed} de ${masterUpdates.length + virtualDeletions.length} operaciones.`
+        );
       } else {
-        setSuccessFeedback(`💥 Pool "${pool.basePrefix}" disuelto exitosamente. Se liberaron ${updates.length} cuentas.`);
+        const parts = [];
+        if (virtualDeletions.length > 0) {
+          parts.push(`${virtualDeletions.length} cuenta(s) virtual(es) eliminada(s) de disco`);
+        }
+        if (masterUpdates.length > 0) {
+          parts.push(`${masterUpdates.length} cuenta(s) maestra(s) liberada(s)`);
+        }
+        setSuccessFeedback(`💥 Pool "${pool.basePrefix}" disuelto exitosamente (${parts.join(', ')}).`);
         setTimeout(() => setSuccessFeedback(''), 4000);
       }
       if (typeof onReloadRequested === 'function') {
@@ -896,33 +1231,37 @@ export default function GroupManager({
                           <span className="group-subfamily-label">🔷 Gemini Puro</span>
                           <span className="group-subfamily-hint">Prefijo: agy, agy2... · Cuota: Gemini Models</span>
                         </button>
-                        <button
-                          type="button"
-                          className={`group-subfamily-chip ${geminiSubtype === 'sonnet' ? 'active' : ''}`}
-                          onClick={() => handleSelectGeminiSubtype('sonnet')}
-                          data-testid="subfamily-gemini-sonnet"
-                        >
-                          <span className="group-subfamily-label">🔶 Claude Sonnet</span>
-                          <span className="group-subfamily-hint">Prefijo: agy_son... · claude-sonnet 4.6 & 5.5</span>
-                        </button>
-                        <button
-                          type="button"
-                          className={`group-subfamily-chip ${geminiSubtype === 'opus' ? 'active' : ''}`}
-                          onClick={() => handleSelectGeminiSubtype('opus')}
-                          data-testid="subfamily-gemini-opus"
-                        >
-                          <span className="group-subfamily-label">🟣 Claude Opus</span>
-                          <span className="group-subfamily-hint">Prefijo: agy_opus... · claude-opus 4.6 & 5.5 High</span>
-                        </button>
-                        <button
-                          type="button"
-                          className={`group-subfamily-chip ${geminiSubtype === 'claude' ? 'active' : ''}`}
-                          onClick={() => handleSelectGeminiSubtype('claude')}
-                          data-testid="subfamily-gemini-claude"
-                        >
-                          <span className="group-subfamily-label">🎭 Multipropósito</span>
-                          <span className="group-subfamily-hint">Prefijo: agy_clau... · Cuota: Claude & GPT</span>
-                        </button>
+                        {hasClaudeInAntigravity && (
+                          <>
+                            <button
+                              type="button"
+                              className={`group-subfamily-chip ${geminiSubtype === 'sonnet' ? 'active' : ''}`}
+                              onClick={() => handleSelectGeminiSubtype('sonnet')}
+                              data-testid="subfamily-gemini-sonnet"
+                            >
+                              <span className="group-subfamily-label">🔶 Claude Sonnet</span>
+                              <span className="group-subfamily-hint">Prefijo: agy_son... · claude-sonnet 4.6 & 5.5</span>
+                            </button>
+                            <button
+                              type="button"
+                              className={`group-subfamily-chip ${geminiSubtype === 'opus' ? 'active' : ''}`}
+                              onClick={() => handleSelectGeminiSubtype('opus')}
+                              data-testid="subfamily-gemini-opus"
+                            >
+                              <span className="group-subfamily-label">🟣 Claude Opus</span>
+                              <span className="group-subfamily-hint">Prefijo: agy_opus... · claude-opus 4.6 & 5.5 High</span>
+                            </button>
+                            <button
+                              type="button"
+                              className={`group-subfamily-chip ${geminiSubtype === 'claude' ? 'active' : ''}`}
+                              onClick={() => handleSelectGeminiSubtype('claude')}
+                              data-testid="subfamily-gemini-claude"
+                            >
+                              <span className="group-subfamily-label">🎭 Multipropósito</span>
+                              <span className="group-subfamily-hint">Prefijo: agy_clau... · Cuota: Claude & GPT</span>
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
                   )}
@@ -979,13 +1318,14 @@ export default function GroupManager({
                   )}
                 </div>
 
-                {/* Badge de Capacidad en Tiempo Real (Unifica Libres + Virtualizables) */}
+                {/* Badge de Capacidad en Tiempo Real */}
                 {family && (() => {
-                  const totalEligible = familyCompatibleNodes.length + (isGeminiPackageFamily ? virtualizableSourceNodes.length : 0);
+                  const totalEligible = leaderCandidates.length;
+                  const freeCount = freeCardsInTargetRole.length;
                   const maxGroups = Math.floor(totalEligible / 2);
                   return (
                     <div className="group-capacity-badge" data-testid="capacity-badge">
-                      <span>📊 Cuentas aptas: <strong>{totalEligible}</strong> ({familyCompatibleNodes.length} libres{isGeminiPackageFamily ? ` · 🔀 Virtualizables: ${virtualizableSourceNodes.length}` : ''})</span>
+                      <span>📊 Cuentas aptas: <strong>{totalEligible}</strong> ({freeCount} libres{totalEligible > freeCount ? ` · ${totalEligible - freeCount} reasignables` : ''})</span>
                       <span> · Capacidad máxima: <strong>{maxGroups}</strong> grupo(s) de rotación (mínimo 2 cuentas/grupo)</span>
                     </div>
                   );

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"visual-profile/internal/version"
-	"visual-profile/internal/web"
+	"auto-switcher-pro/internal/version"
+	"auto-switcher-pro/internal/web"
 )
 
 func TestHandlePluginMethod_PluginRegister(t *testing.T) {
@@ -93,6 +93,7 @@ func TestHandlePluginMethod_ManagementRegister(t *testing.T) {
 	foundTokensRoute := false
 	foundCreateRoute := false
 	foundGroupRoute := false
+	foundAutoAuthFilesRoute := false
 	for _, res := range payload.Resources {
 		if res.Path == "/profiles" {
 			foundProfilesRoute = true
@@ -108,14 +109,20 @@ func TestHandlePluginMethod_ManagementRegister(t *testing.T) {
 		}
 		if res.Path == "/create-prefixes" {
 			foundCreateRoute = true
-			if res.Menu != "⚡ Crear Prefijos" {
-				t.Errorf("expected Menu '⚡ Crear Prefijos', got %q", res.Menu)
+			if res.Menu != "📋 Directorio de Cuentas" {
+				t.Errorf("expected Menu '📋 Directorio de Cuentas', got %q", res.Menu)
 			}
 		}
 		if res.Path == "/create-groups" {
 			foundGroupRoute = true
 			if res.Menu != "🛠️ Crear Group/Pefiles" {
 				t.Errorf("expected Menu '🛠️ Crear Group/Pefiles', got %q", res.Menu)
+			}
+		}
+		if res.Path == "/auto-auth-files" {
+			foundAutoAuthFilesRoute = true
+			if res.Menu != "🗂️ Auto Auth Files" {
+				t.Errorf("expected Menu '🗂️ Auto Auth Files', got %q", res.Menu)
 			}
 		}
 	}
@@ -130,6 +137,9 @@ func TestHandlePluginMethod_ManagementRegister(t *testing.T) {
 	}
 	if !foundGroupRoute {
 		t.Errorf("expected route '/create-groups' in registered resources, got %+v", payload.Resources)
+	}
+	if !foundAutoAuthFilesRoute {
+		t.Errorf("expected route '/auto-auth-files' in registered resources, got %+v", payload.Resources)
 	}
 }
 
@@ -151,6 +161,9 @@ func TestMatchProfilesRoute_ExactSegmentScoped(t *testing.T) {
 		{"/create-prefixes/", "index.html"},
 		{"/create-groups", "index.html"},
 		{"/create-groups/", "index.html"},
+		{"/auto-auth-files", "index.html"},
+		{"/auto-auth-files/", "index.html"},
+		{"/v0/management/auto-auth-files", "index.html"},
 		{"/v0/resource/plugins/visual-profile/profiles", "index.html"},
 		{"/v0/resource/plugins/visual-profile/profiles/", "index.html"},
 		{"/v0/resource/plugins/visual-profile/profiles/index.html", "index.html"},
@@ -497,6 +510,8 @@ func TestHandlePluginMethod_ManagementHandle_HostSlashlessVsInternalIsolation(t 
 		{"internal isolation standard plugin path index.html", "/v0/resource/plugins/visual-profile/profiles/index.html"},
 		{"internal isolation linux-amd64 binary path slashless", "/v0/resource/plugins/visual-profile-linux-amd64/profiles"},
 		{"internal isolation linux-amd64 binary path slashful", "/v0/resource/plugins/visual-profile-linux-amd64/profiles/"},
+		{"internal isolation auto-switcher-pro-linux-amd64 binary path slashless", "/v0/resource/plugins/auto-switcher-pro-linux-amd64/profiles"},
+		{"internal isolation auto-switcher-pro-linux-amd64 binary path slashful", "/v0/resource/plugins/auto-switcher-pro-linux-amd64/profiles/"},
 		{"internal isolation arbitrary binary name slashless", "/v0/resource/plugins/custom-agent-profile-v2/profiles"},
 		{"internal isolation arbitrary binary name slashful", "/v0/resource/plugins/custom-agent-profile-v2/profiles/"},
 	}
@@ -570,6 +585,7 @@ func TestHandlePluginMethod_ManagementHandle_SubresourceRejection(t *testing.T) 
 		"/v0/resource/plugins/visual-profile/profiles/assets/index.js",
 		"/v0/resource/plugins/visual-profile/profiles/assets/style.css",
 		"/v0/resource/plugins/visual-profile-linux-amd64/profiles/assets/app.js",
+		"/v0/resource/plugins/auto-switcher-pro-linux-amd64/profiles/assets/app.js",
 	}
 
 	for _, p := range subresourcePaths {

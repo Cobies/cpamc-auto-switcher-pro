@@ -187,17 +187,17 @@ export default function PrefixManager({ nodes = [], onReloadRequested }) {
       <div className="pm-hero-bar">
         <div>
           <h2 className="pm-hero-title">
-            <span>⚡</span>
-            <span>Estudio Central de Creación y Asignación de Prefijos</span>
+            <span>📋</span>
+            <span>Directorio de Cuentas & Auditoría de Prefijos</span>
           </h2>
           <p className="pm-hero-desc">
-            Administra de forma visual el árbol jerárquico de cuentas, asigna roles de conmutación (Root / Reserva) y define los alias invocables en Pi.
+            Consulta el estado de tus cuentas vinculadas. La asignación normal y balanceo de prefijos se gestiona de forma automática en <strong>🛠️ Crear Group/Perfiles</strong>. La edición manual en esta tabla está reservada para ajustes avanzados o casos de emergencia.
           </p>
         </div>
 
         <div className="pm-guide-box">
-          <div>• <strong>Cuenta Líder (Root):</strong> Invocación directa <code>cpamc/{'{prefijo}'}/...</code> (ej: <code>agy</code>, <code>agy2</code>, <code>agy_clau</code>, <code>codex</code>)</div>
-          <div>• <strong>Cuenta Reserva (Child):</strong> Rotación automática con sufijo <code>cpamc/{'{prefijo}_{N}'}/...</code> (ej: <code>agy_1</code>, <code>agy2_1</code>, <code>agy_clau_1</code>)</div>
+          <div>• <strong>Creación Automática:</strong> Usa siempre <code>🛠️ Crear Group/Perfiles</code> para balanceo ordenado de Líder (ej: <code>agy</code>, <code>agy_clau</code>, <code>codex</code>) y Reservas (ej: <code>agy_1</code>, <code>agy_clau_1</code>).</div>
+          <div>• <strong>Edición Manual de Emergencia:</strong> Puedes forzar un prefijo en disco aquí si necesitas un rescate técnico manual.</div>
         </div>
       </div>
 

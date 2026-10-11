@@ -13,9 +13,25 @@ import {
   patchAuthFilePrefix,
   saveAuthFilePrefixes,
   virtualizeAccount,
+  classifyAuthAccount,
+  extractVirtualOrigin,
+  extractExclusionBadges,
+  deleteAuthFile,
+  buildManagedPoolCards,
   abbreviateEmail,
   extractSafeMaskedEmail,
   maskDisplayIdentifier,
+  computeSpecialistExclusions,
+  resolveInheritedCardModels,
+  patchAuthFileExclusions,
+  detectSpecialistState,
+  parseAntigravityTierSummary,
+  formatQuotaDuration,
+  parseAntigravityQuotaPayload,
+  fetchCardQuota,
+  computeAccountTelemetry,
+  classifyCooldowns,
+  formatRemainingDuration,
 } from './managementClient';
 
 describe('Management API Client - Auth & Security Invariants', () => {
@@ -291,6 +307,31 @@ describe('Auth Files Download & Prefix-Only Extraction', () => {
 
     expect(result.name).toBe('unlinked.json');
     expect(result.prefix).toBe('');
+    expect(result.excluded_models).toEqual([]);
+  });
+
+  it('extracts excluded_models array from payload and returns clean list', async () => {
+    const credential = {
+      prefix: 'agy_son',
+      excluded_models: ['gemini-2.5-flash', 'gemini-2.0-flash'],
+      token: 'sk-secret-token',
+    };
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => credential,
+    });
+
+    const result = await downloadAuthFilePrefix('antigravity-spec.json', {
+      key: 'test-key',
+      fetchFn: mockFetch,
+    });
+
+    expect(result.name).toBe('antigravity-spec.json');
+    expect(result.prefix).toBe('agy_son');
+    expect(result.excluded_models).toEqual(['gemini-2.5-flash', 'gemini-2.0-flash']);
+    expect(result.token).toBeUndefined();
   });
 });
 
@@ -329,8 +370,69 @@ describe('loadAuthFilesWithPrefixes - Fail-Closed Safety Contract', () => {
     });
 
     expect(records).toEqual([
-      { name: 'f1.json', prefix: 'agy_p1' },
-      { name: 'f2.json', prefix: 'agy_p1_1' },
+      {
+        name: 'f1.json',
+        prefix: 'agy_p1',
+        excluded_models: [],
+        unavailable: false,
+        disabled: false,
+        cooldowns: [],
+        recent_requests: [],
+        success: 0,
+        failed: 0,
+      },
+      {
+        name: 'f2.json',
+        prefix: 'agy_p1_1',
+        excluded_models: [],
+        unavailable: false,
+        disabled: false,
+        cooldowns: [],
+        recent_requests: [],
+        success: 0,
+        failed: 0,
+      },
+    ]);
+  });
+
+  it('propagates excluded_models into each auth file descriptor record', async () => {
+    const mockFetch = vi.fn().mockImplementation((url) => {
+      if (url === '/v0/management/auth-files') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            files: [{ name: 'f1.json' }],
+          }),
+        });
+      }
+      if (url.includes('f1.json')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ prefix: 'agy_p1', excluded_models: ['gemini-1.5-pro'] }),
+        });
+      }
+      return Promise.reject(new Error('Unknown url'));
+    });
+
+    const records = await loadAuthFilesWithPrefixes({
+      key: 'test-key',
+      fetchFn: mockFetch,
+    });
+
+    expect(records).toEqual([
+      {
+        name: 'f1.json',
+        prefix: 'agy_p1',
+        excluded_models: ['gemini-1.5-pro'],
+        unavailable: false,
+        disabled: false,
+        cooldowns: [],
+        recent_requests: [],
+        success: 0,
+        failed: 0,
+      },
     ]);
   });
 
@@ -395,8 +497,28 @@ describe('loadAuthFilesWithPrefixes - Fail-Closed Safety Contract', () => {
     });
 
     expect(records).toEqual([
-      { name: 'account-1.json', prefix: 'duplicate_prefix' },
-      { name: 'account-2.json', prefix: 'duplicate_prefix' },
+      {
+        name: 'account-1.json',
+        prefix: 'duplicate_prefix',
+        excluded_models: [],
+        unavailable: false,
+        disabled: false,
+        cooldowns: [],
+        recent_requests: [],
+        success: 0,
+        failed: 0,
+      },
+      {
+        name: 'account-2.json',
+        prefix: 'duplicate_prefix',
+        excluded_models: [],
+        unavailable: false,
+        disabled: false,
+        cooldowns: [],
+        recent_requests: [],
+        success: 0,
+        failed: 0,
+      },
     ]);
   });
 });
@@ -436,6 +558,17 @@ describe('buildGraphFromAuthFiles & Credential Leak Prevention', () => {
     expect(edges[0].target).toBe('auth-child-1.json');
     expect(edges[1].source).toBe('auth-root.json');
     expect(edges[1].target).toBe('auth-child-2.json');
+  });
+
+  it('forwards excluded_models and excludedModels to node.data and root node properties', () => {
+    const authFiles = [
+      { name: 'auth-spec.json', prefix: 'agy', excluded_models: ['gemini-1.5-pro'] },
+    ];
+    const { nodes } = buildGraphFromAuthFiles(authFiles);
+    expect(nodes[0].excluded_models).toEqual(['gemini-1.5-pro']);
+    expect(nodes[0].excludedModels).toEqual(['gemini-1.5-pro']);
+    expect(nodes[0].data.excluded_models).toEqual(['gemini-1.5-pro']);
+    expect(nodes[0].data.excludedModels).toEqual(['gemini-1.5-pro']);
   });
 
   it('builds graph with duplicate prefixes and leaves ambiguous nodes disconnected', () => {
@@ -812,6 +945,15 @@ describe('saveAuthFilePrefixes - Multi-File Staging and Non-Atomic Partial Failu
         provider: 'antigravity',
         email: 'antigravity.corp@gmail.com',
         status: '',
+        auth_index: '',
+        project_id: '',
+        unavailable: false,
+        disabled: false,
+        cooldowns: [],
+        recent_requests: [],
+        success: 0,
+        failed: 0,
+        next_retry_after: '',
       });
       expect(files[1]).toEqual({
         name: 'f2.json',
@@ -820,6 +962,15 @@ describe('saveAuthFilePrefixes - Multi-File Staging and Non-Atomic Partial Failu
         provider: 'codex',
         email: 'short@codex.ai',
         status: '',
+        auth_index: '',
+        project_id: '',
+        unavailable: false,
+        disabled: false,
+        cooldowns: [],
+        recent_requests: [],
+        success: 0,
+        failed: 0,
+        next_retry_after: '',
       });
     });
 
@@ -939,7 +1090,7 @@ describe('saveAuthFilePrefixes - Multi-File Staging and Non-Atomic Partial Failu
   });
 });
 
-describe('virtualizeAccount - POST /v0/management/visual-profile/virtualize', () => {
+describe('virtualizeAccount - POST /v0/management/auto-switcher-pro/virtualize', () => {
   it('posts the clone request and returns the created virtual file', async () => {
     let capturedUrl = null;
     let capturedOptions = null;
@@ -970,7 +1121,7 @@ describe('virtualizeAccount - POST /v0/management/visual-profile/virtualize', ()
       { key: 'secret-key', fetchFn: mockFetch }
     );
 
-    expect(capturedUrl).toBe('/v0/management/visual-profile/virtualize');
+    expect(capturedUrl).toBe('/v0/management/auto-switcher-pro/virtualize');
     expect(capturedOptions.method).toBe('POST');
     expect(capturedOptions.headers['Authorization']).toBe('Bearer secret-key');
     expect(capturedOptions.headers['Content-Type']).toBe('application/json');
@@ -1036,3 +1187,757 @@ describe('virtualizeAccount - POST /v0/management/visual-profile/virtualize', ()
     ).rejects.toThrow('source auth file not found: missing.json');
   });
 });
+
+describe('classifyAuthAccount, extractVirtualOrigin, and extractExclusionBadges', () => {
+  it('extractVirtualOrigin correctly identifies origin master file and ignores non-virtual files', () => {
+    expect(extractVirtualOrigin('antigravity-infosoytec@gmail.com.agy_son.json')).toBe(
+      'antigravity-infosoytec@gmail.com.json'
+    );
+    expect(extractVirtualOrigin('antigravity-infosoytec@gmail.com.agy_son_1.json')).toBe(
+      'antigravity-infosoytec@gmail.com.json'
+    );
+    expect(extractVirtualOrigin('antigravity-wilsonlavio11@gmail.com.agy_opus_2.json')).toBe(
+      'antigravity-wilsonlavio11@gmail.com.json'
+    );
+    expect(extractVirtualOrigin('antigravity-infosoytec@gmail.com.json')).toBeNull();
+    expect(extractVirtualOrigin('')).toBeNull();
+  });
+
+  it('classifyAuthAccount classifies physical master account without leaks', () => {
+    const master = classifyAuthAccount('antigravity-infosoytec@gmail.com.json');
+    expect(master.isVirtual).toBe(false);
+    expect(master.isMaster).toBe(true);
+    expect(master.role).toBe('master');
+    expect(master.masterOrigin).toBeNull();
+    expect(master.maskedEmail).toBe('inf...tec@gmail.com');
+  });
+
+  it('classifyAuthAccount classifies virtual derived accounts pointing to master origin', () => {
+    const virtual1 = classifyAuthAccount('antigravity-infosoytec@gmail.com.agy_son.json');
+    expect(virtual1.isVirtual).toBe(true);
+    expect(virtual1.isMaster).toBe(false);
+    expect(virtual1.role).toBe('virtual');
+    expect(virtual1.masterOrigin).toBe('antigravity-infosoytec@gmail.com.json');
+    expect(virtual1.maskedEmail).toBe('inf...tec@gmail.com');
+
+    const virtualWithSuffix = classifyAuthAccount({
+      name: 'antigravity-infosoytec@gmail.com.agy_son_1.json',
+      prefix: 'agy_son_1',
+    });
+    expect(virtualWithSuffix.isVirtual).toBe(true);
+    expect(virtualWithSuffix.isMaster).toBe(false);
+    expect(virtualWithSuffix.masterOrigin).toBe('antigravity-infosoytec@gmail.com.json');
+    expect(virtualWithSuffix.maskedEmail).toBe('inf...tec@gmail.com');
+  });
+
+  it('classifyAuthAccount handles node data and custom exclusion badges', () => {
+    const node = {
+      id: 'node-1',
+      data: {
+        fileName: 'antigravity-wilsonlavio9@gmail.com.agy_son_4.json',
+        prefix: 'agy_son_4',
+        excludedModels: ['gemini-1.5-pro', 'claude-sonnet-5-5-high'],
+      },
+    };
+    const result = classifyAuthAccount(node);
+    expect(result.isVirtual).toBe(true);
+    expect(result.masterOrigin).toBe('antigravity-wilsonlavio9@gmail.com.json');
+    expect(result.maskedEmail).toBe('wil...io9@gmail.com');
+    expect(result.exclusionBadges).toContain('Excluye 5.5');
+    expect(result.exclusionBadges).toContain('Excluye Gemini');
+    expect(result.exclusionBadges).toContain('Excluye Claude');
+  });
+
+  it('extractExclusionBadges formats human-readable badges', () => {
+    expect(extractExclusionBadges([])).toEqual([]);
+    expect(extractExclusionBadges(['gemini-pro', 'claude-opus-5-5-high'])).toEqual([
+      'Excluye 5.5',
+      'Excluye Gemini',
+      'Excluye Claude',
+    ]);
+    expect(extractExclusionBadges(['gemini-1.5-flash', 'gpt-4o'])).toEqual([
+      'Excluye Gemini',
+      'Excluye Codex',
+      'Claude Only',
+    ]);
+  });
+});
+
+describe('deleteAuthFile', () => {
+  it('sends authenticated DELETE request with sanitized URL parameter', async () => {
+    let capturedUrl = null;
+    let capturedOptions = null;
+    const mockFetch = vi.fn().mockImplementation((url, opts) => {
+      capturedUrl = url;
+      capturedOptions = opts;
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true }),
+      });
+    });
+
+    const res = await deleteAuthFile('antigravity-infosoytec@gmail.com.agy_son.json', {
+      key: 'del-secret-key',
+      fetchFn: mockFetch,
+    });
+
+    expect(capturedUrl).toBe('/v0/management/auth-files?name=antigravity-infosoytec%40gmail.com.agy_son.json');
+    expect(capturedOptions.method).toBe('DELETE');
+    expect(capturedOptions.headers['Authorization']).toBe('Bearer del-secret-key');
+    expect(res).toEqual({
+      name: 'antigravity-infosoytec@gmail.com.agy_son.json',
+      ok: true,
+      status: 200,
+    });
+  });
+
+  it('rejects path traversal and invalid filenames', async () => {
+    await expect(deleteAuthFile('../evil.json', { key: 'k' })).rejects.toThrow(/traversal/i);
+    await expect(deleteAuthFile('sub/dir/file.json', { key: 'k' })).rejects.toThrow(/traversal/i);
+    await expect(deleteAuthFile('sub\\dir\\file.json', { key: 'k' })).rejects.toThrow(/traversal/i);
+    await expect(deleteAuthFile('not-json.txt', { key: 'k' })).rejects.toThrow(/json/i);
+    await expect(deleteAuthFile('', { key: 'k' })).rejects.toThrow(/required/i);
+  });
+});
+
+describe('buildManagedPoolCards - Scalable N -> 2N Managed Pool Cards Model', () => {
+  const physicalMasters4 = [
+    {
+      id: 'm1',
+      data: {
+        fileName: 'antigravity-infosoytec@gmail.com.json',
+        email: 'infosoytec@gmail.com',
+        prefix: 'agy',
+        provider: 'antigravity',
+      },
+    },
+    {
+      id: 'm2',
+      data: {
+        fileName: 'antigravity-maribelluzbonitaaquinocastro@gmail.com.json',
+        email: 'maribelluzbonitaaquinocastro@gmail.com',
+        prefix: 'agy_1',
+        provider: 'antigravity',
+      },
+    },
+    {
+      id: 'm3',
+      data: {
+        fileName: 'antigravity-wilsonlavio11@gmail.com.json',
+        email: 'wilsonlavio11@gmail.com',
+        prefix: 'agy_2',
+        provider: 'antigravity',
+      },
+    },
+    {
+      id: 'm4',
+      data: {
+        fileName: 'antigravity-wilsonlavio9@gmail.com.json',
+        email: 'wilsonlavio9@gmail.com',
+        prefix: 'agy_3',
+        provider: 'antigravity',
+      },
+    },
+  ];
+
+  it('generates exactly 8 managed cards (4 Gemini + 4 Claude) from 4 physical master nodes', () => {
+    const cards = buildManagedPoolCards(physicalMasters4);
+    expect(cards).toHaveLength(8);
+
+    const geminiCards = cards.filter((c) => c.familyRole === 'gemini');
+    const claudeCards = cards.filter((c) => c.familyRole === 'claude');
+    expect(geminiCards).toHaveLength(4);
+    expect(claudeCards).toHaveLength(4);
+
+    // Gemini leader card m1
+    const leaderCard = geminiCards.find((c) => c.masterFileName === 'antigravity-infosoytec@gmail.com.json');
+    expect(leaderCard).toBeDefined();
+    expect(leaderCard.assignedPrefix).toBe('agy');
+    expect(leaderCard.poolRole).toBe('leader');
+    expect(leaderCard.activePoolBase).toBe('agy');
+    expect(leaderCard.maskedEmail).toBe('inf...tec@gmail.com');
+
+    // Gemini reserve card m2
+    const reserveCard = geminiCards.find((c) => c.masterFileName === 'antigravity-maribelluzbonitaaquinocastro@gmail.com.json');
+    expect(reserveCard).toBeDefined();
+    expect(reserveCard.assignedPrefix).toBe('agy_1');
+    expect(reserveCard.poolRole).toBe('reserve');
+    expect(reserveCard.activePoolBase).toBe('agy');
+    expect(reserveCard.maskedEmail).toBe('mar...tro@gmail.com');
+
+    // Unassigned Claude cards
+    claudeCards.forEach((c) => {
+      expect(c.assignedPrefix).toBe('');
+      expect(c.poolRole).toBe('unassigned');
+      expect(c.activePoolBase).toBe('');
+      expect(c.virtualFileName).toBe('');
+    });
+  });
+
+  it('merges active virtual credentials on disk into Claude cards without duplicating cards', () => {
+    const nodesWithVirtuals = [
+      ...physicalMasters4,
+      {
+        id: 'v1',
+        data: {
+          fileName: 'antigravity-infosoytec@gmail.com.agy_son.json',
+          email: 'infosoytec@gmail.com',
+          prefix: 'agy_son',
+          provider: 'antigravity',
+          excludedModels: ['gemini-1.5-pro', 'claude-sonnet-5-5-high'],
+        },
+      },
+      {
+        id: 'v2',
+        data: {
+          fileName: 'antigravity-maribelluzbonitaaquinocastro@gmail.com.agy_son_1.json',
+          email: 'maribelluzbonitaaquinocastro@gmail.com',
+          prefix: 'agy_son_1',
+          provider: 'antigravity',
+          excludedModels: ['gemini-2.0-flash'],
+        },
+      },
+    ];
+
+    const cards = buildManagedPoolCards(nodesWithVirtuals);
+    // Still strictly 8 cards (4 masters -> 8 cards)
+    expect(cards).toHaveLength(8);
+
+    const claudeCards = cards.filter((c) => c.familyRole === 'claude');
+    expect(claudeCards).toHaveLength(4);
+
+    const sonnetLeader = claudeCards.find((c) => c.masterFileName === 'antigravity-infosoytec@gmail.com.json');
+    expect(sonnetLeader.assignedPrefix).toBe('agy_son');
+    expect(sonnetLeader.poolRole).toBe('leader');
+    expect(sonnetLeader.activePoolBase).toBe('agy_son');
+    expect(sonnetLeader.virtualFileName).toBe('antigravity-infosoytec@gmail.com.agy_son.json');
+    expect(sonnetLeader.exclusionBadges).toContain('Excluye 5.5');
+    expect(sonnetLeader.exclusionBadges).toContain('Excluye Gemini');
+
+    const sonnetReserve = claudeCards.find((c) => c.masterFileName === 'antigravity-maribelluzbonitaaquinocastro@gmail.com.json');
+    expect(sonnetReserve.assignedPrefix).toBe('agy_son_1');
+    expect(sonnetReserve.poolRole).toBe('reserve');
+    expect(sonnetReserve.activePoolBase).toBe('agy_son');
+    expect(sonnetReserve.virtualFileName).toBe('antigravity-maribelluzbonitaaquinocastro@gmail.com.agy_son_1.json');
+    expect(sonnetReserve.exclusionBadges).toContain('Excluye Gemini');
+  });
+
+  it('scales to exactly 10 cards (5 Gemini + 5 Claude) when a 5th master account is added', () => {
+    const physicalMasters5 = [
+      ...physicalMasters4,
+      {
+        id: 'm5',
+        data: {
+          fileName: 'antigravity-cuenta5@gmail.com.json',
+          email: 'cuenta5@gmail.com',
+          prefix: '',
+          provider: 'antigravity',
+        },
+      },
+    ];
+
+    const cards = buildManagedPoolCards(physicalMasters5);
+    expect(cards).toHaveLength(10);
+    expect(cards.filter((c) => c.familyRole === 'gemini')).toHaveLength(5);
+    expect(cards.filter((c) => c.familyRole === 'claude')).toHaveLength(5);
+
+    const m5Gemini = cards.find((c) => c.masterFileName === 'antigravity-cuenta5@gmail.com.json' && c.familyRole === 'gemini');
+    expect(m5Gemini.poolRole).toBe('unassigned');
+    expect(m5Gemini.assignedPrefix).toBe('');
+    expect(m5Gemini.maskedEmail).toBe('cue...ta5@gmail.com');
+  });
+
+  it('discards references to deleted physical accounts and prevents ghost cards when registeredPools are passed', () => {
+    // Pool registrado con líder y 2 reservas
+    const registeredPools = [
+      {
+        family: 'gemini_pure',
+        base_prefix: 'agy',
+        leader_auth: 'antigravity-leader.json',
+        reserves: ['antigravity-alive-res.json', 'antigravity-deleted-res.json'],
+        policy: { disable_isolation: false },
+      },
+    ];
+
+    // Solo leader y alive-res existen en nodes (deleted-res fue eliminada de CPAMC)
+    const nodes = [
+      {
+        id: 'n1',
+        data: {
+          fileName: 'antigravity-leader.json',
+          email: 'leader@gmail.com',
+          prefix: 'agy',
+        },
+      },
+      {
+        id: 'n2',
+        data: {
+          fileName: 'antigravity-alive-res.json',
+          email: 'res@gmail.com',
+          prefix: 'agy_1',
+        },
+      },
+    ];
+
+    const cards = buildManagedPoolCards(nodes, registeredPools);
+    // Exactamente 2 cards (leader y alive-res), omitiendo estrictamente la borrada
+    expect(cards).toHaveLength(2);
+    expect(cards.map((c) => c.masterFileName)).toEqual([
+      'antigravity-leader.json',
+      'antigravity-alive-res.json',
+    ]);
+  });
+
+  it('retains exclusion metadata so detectSpecialistState recognizes single-model specialist status', () => {
+    const nodes = [
+      {
+        id: 'spec-node.json',
+        data: {
+          fileName: 'antigravity-user@gmail.com.json',
+          prefix: 'agy',
+          excluded_models: ['gemini-2.5-flash', 'gemini-2.0-flash'],
+        },
+      },
+    ];
+    const cards = buildManagedPoolCards(nodes);
+    const geminiCard = cards.find((c) => c.familyRole === 'gemini');
+    expect(geminiCard.excluded_models).toEqual(['gemini-2.5-flash', 'gemini-2.0-flash']);
+    const catalog = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'];
+    const inherited = resolveInheritedCardModels(geminiCard, catalog);
+    const state = detectSpecialistState(geminiCard, inherited);
+    expect(state.isSpecialist).toBe(true);
+    expect(state.activeSpecialistModel).toBe('gemini-2.5-pro');
+  });
+});
+
+describe('Specialist Engine - computeSpecialistExclusions, resolveInheritedCardModels, patchAuthFileExclusions, detectSpecialistState', () => {
+  describe('computeSpecialistExclusions', () => {
+    it('returns a sorted, deduplicated array of all models except the target model', () => {
+      const available = [
+        'gemini-2.5-pro',
+        'gemini-2.5-flash',
+        'gemini-2.0-flash',
+        'gemini-2.5-pro', // duplicate
+      ];
+      const target = 'gemini-2.5-pro';
+      const result = computeSpecialistExclusions(available, target);
+      expect(result).toEqual(['gemini-2.0-flash', 'gemini-2.5-flash']);
+    });
+
+    it('returns empty array when available models list is empty or invalid', () => {
+      expect(computeSpecialistExclusions([], 'gemini-2.5-pro')).toEqual([]);
+      expect(computeSpecialistExclusions(null, 'gemini-2.5-pro')).toEqual([]);
+    });
+
+    it('returns all sorted deduplicated models when target model is not in list', () => {
+      const available = ['claude-3-7-sonnet', 'claude-3-5-haiku'];
+      expect(computeSpecialistExclusions(available, 'other-model')).toEqual([
+        'claude-3-5-haiku',
+        'claude-3-7-sonnet',
+      ]);
+    });
+  });
+
+  describe('resolveInheritedCardModels', () => {
+    const catalog = [
+      'g1/gemini-2.5-pro',
+      'g1/gemini-2.5-flash',
+      'claude-3-7-sonnet',
+      'agy_son/claude-3-5-sonnet',
+      'codex-mini',
+      'gpt-4o',
+    ];
+
+    it('resolves and strips route prefixes for gemini family', () => {
+      const card = { familyRole: 'gemini' };
+      const resolved = resolveInheritedCardModels(card, catalog);
+      expect(resolved).toEqual(['gemini-2.5-flash', 'gemini-2.5-pro']);
+    });
+
+    it('resolves and strips route prefixes for claude family', () => {
+      const card = { familyRole: 'claude' };
+      const resolved = resolveInheritedCardModels(card, catalog);
+      expect(resolved).toContain('claude-3-7-sonnet');
+      expect(resolved).toContain('claude-3-5-sonnet');
+      expect(resolved).not.toContain('gemini-2.5-pro');
+    });
+
+    it('resolves and strips route prefixes for codex family', () => {
+      const card = { familyRole: 'codex' };
+      const resolved = resolveInheritedCardModels(card, catalog);
+      expect(resolved).toContain('codex-mini');
+      expect(resolved).toContain('gpt-4o');
+      expect(resolved).not.toContain('gemini-2.5-pro');
+    });
+
+    it('excludes models present in globalDisabledModels', () => {
+      const card = { familyRole: 'gemini' };
+      const globalDisabled = ['gemini-2.5-pro'];
+      const resolved = resolveInheritedCardModels(card, catalog, globalDisabled);
+      expect(resolved).toEqual(['gemini-2.5-flash']);
+    });
+  });
+
+  describe('patchAuthFileExclusions', () => {
+    it('dispatches PATCH /v0/management/auth-files/fields with name and sorted excluded_models', async () => {
+      let capturedUrl = '';
+      let capturedBody = null;
+      let capturedMethod = '';
+
+      const mockFetch = vi.fn().mockImplementation((url, opts) => {
+        capturedUrl = url;
+        capturedMethod = opts.method;
+        capturedBody = JSON.parse(opts.body);
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ status: 'ok' }),
+        });
+      });
+
+      const res = await patchAuthFileExclusions(
+        'antigravity-user@gmail.com.json',
+        ['gemini-2.5-flash', 'gemini-2.0-flash'],
+        { key: 'test-key', fetchFn: mockFetch }
+      );
+
+      expect(capturedUrl).toBe('/v0/management/auth-files/fields');
+      expect(capturedMethod).toBe('PATCH');
+      expect(capturedBody).toEqual({
+        name: 'antigravity-user@gmail.com.json',
+        excluded_models: ['gemini-2.0-flash', 'gemini-2.5-flash'],
+      });
+      expect(res.ok || res.status === 200).toBe(true);
+      expect(res.excluded_models).toEqual(['gemini-2.0-flash', 'gemini-2.5-flash']);
+    });
+
+    it('rejects invalid or empty fileName with fail-closed error', async () => {
+      await expect(patchAuthFileExclusions('', ['model-a'])).rejects.toThrow(
+        'Invalid auth file name: filename must be a non-empty string'
+      );
+    });
+
+    it('handles 401 Unauthorized with sanitized masked error', async () => {
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: async () => ({ error: 'unauthorized' }),
+      });
+
+      await expect(
+        patchAuthFileExclusions('antigravity-secret@domain.com.json', [], {
+          key: 'top-secret',
+          fetchFn: mockFetch,
+        })
+      ).rejects.toThrow('401 Unauthorized');
+    });
+  });
+
+  describe('detectSpecialistState', () => {
+    const inherited = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'];
+
+    it('detects specialist mode when exactly one model is not excluded', () => {
+      const card = {
+        excluded_models: ['gemini-2.5-flash', 'gemini-2.0-flash'],
+      };
+      const state = detectSpecialistState(card, inherited);
+      expect(state.isSpecialist).toBe(true);
+      expect(state.activeSpecialistModel).toBe('gemini-2.5-pro');
+      expect(state.excludedCount).toBe(2);
+    });
+
+    it('detects multipurpose mode when no models are excluded', () => {
+      const card = {
+        excluded_models: [],
+      };
+      const state = detectSpecialistState(card, inherited);
+      expect(state.isSpecialist).toBe(false);
+      expect(state.activeSpecialistModel).toBeNull();
+    });
+
+    it('detects multipurpose mode when multiple models remain active', () => {
+      const card = {
+        excluded_models: ['gemini-2.0-flash'],
+      };
+      const state = detectSpecialistState(card, inherited);
+      expect(state.isSpecialist).toBe(false);
+      expect(state.activeSpecialistModel).toBeNull();
+    });
+  });
+
+  describe('Quota Telemetry & Tier Summary Engine (MINI-003)', () => {
+    it('parseAntigravityTierSummary parses g1-pro-tier as Pro', () => {
+      const payload = {
+        currentTier: { id: 'g1-pro-tier', name: 'Google One Pro' },
+      };
+      const res = parseAntigravityTierSummary(payload);
+      expect(res.plan).toBe('Pro');
+      expect(res.tierId).toBe('g1-pro-tier');
+    });
+
+    it('parseAntigravityTierSummary parses paidTier precedence and other tiers', () => {
+      const ultraPayload = {
+        currentTier: { id: 'free-tier' },
+        paidTier: { id: 'g1-ultra-tier', name: 'Ultra' },
+      };
+      expect(parseAntigravityTierSummary(ultraPayload).plan).toBe('Ultra');
+
+      const freePayload = {
+        currentTier: { id: 'free-tier' },
+      };
+      expect(parseAntigravityTierSummary(freePayload).plan).toBe('Free');
+    });
+
+    it('parseAntigravityQuotaPayload unwraps Antigravity envelope and calculates 5h/weekly remaining percentages', () => {
+      const quotaEnvelope = {
+        statusCode: 200,
+        body: {
+          groups: [
+            {
+              displayName: 'Gemini Models',
+              buckets: [
+                {
+                  displayName: 'Five Hour Limit',
+                  remainingFraction: 1.0,
+                  resetTime: '2026-10-09T20:00:00Z',
+                },
+                {
+                  displayName: 'Weekly Limit',
+                  remainingFraction: 0.98,
+                  resetTime: '2026-10-16T20:00:00Z',
+                },
+              ],
+            },
+            {
+              displayName: 'Claude and GPT models',
+              buckets: [
+                {
+                  displayName: 'Five Hour Limit',
+                  remainingFraction: 0.75,
+                  resetTime: '2026-10-09T20:00:00Z',
+                },
+                {
+                  displayName: 'Weekly Limit',
+                  remainingFraction: 0.50,
+                  resetTime: '2026-10-16T20:00:00Z',
+                },
+              ],
+            },
+          ],
+        },
+      };
+
+      const groups = parseAntigravityQuotaPayload(quotaEnvelope);
+      expect(groups).toHaveLength(2);
+
+      const geminiGroup = groups.find((g) => g.title === 'GEMINI MODELS');
+      expect(geminiGroup).toBeDefined();
+      expect(geminiGroup.rows[0].label).toBe('Five Hour Limit');
+      expect(geminiGroup.rows[0].percent).toBe(100);
+      expect(geminiGroup.rows[0].percentLabel).toBe('Quota available');
+      expect(geminiGroup.rows[1].label).toBe('Weekly Limit');
+      expect(geminiGroup.rows[1].percent).toBe(98);
+      expect(geminiGroup.rows[1].percentLabel).toBe('98% remaining');
+
+      const claudeGroup = groups.find((g) => g.title === 'CLAUDE AND GPT MODELS');
+      expect(claudeGroup).toBeDefined();
+      expect(claudeGroup.rows[0].label).toBe('Five Hour Limit');
+      expect(claudeGroup.rows[0].percent).toBe(75);
+      expect(claudeGroup.rows[0].percentLabel).toBe('75% remaining');
+      expect(claudeGroup.rows[1].label).toBe('Weekly Limit');
+      expect(claudeGroup.rows[1].percent).toBe(50);
+      expect(claudeGroup.rows[1].percentLabel).toBe('50% remaining');
+    });
+
+    it('fetchCardQuota queries /v0/management/api-call and returns plan and parsed groups', async () => {
+      const mockFetch = vi.fn().mockImplementation((url, opts) => {
+        const body = JSON.parse(opts.body);
+        if (body.url.includes('loadCodeAssist')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              statusCode: 200,
+              body: { currentTier: { id: 'g1-pro-tier' } },
+            }),
+          });
+        }
+        if (body.url.includes('retrieveUserQuotaSummary')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              statusCode: 200,
+              body: {
+                groups: [
+                  {
+                    displayName: 'Gemini Models',
+                    buckets: [
+                      { displayName: '5h', remainingFraction: 1.0 },
+                      { displayName: 'Weekly', remainingFraction: 0.9 },
+                    ],
+                  },
+                ],
+              },
+            }),
+          });
+        }
+        return Promise.reject(new Error('Unknown url'));
+      });
+
+      const card = {
+        fileName: 'antigravity-infosoytec@gmail.com.json',
+        auth_index: '0',
+      };
+
+      const result = await fetchCardQuota(card, {
+        key: 'test-key',
+        fetchFn: mockFetch,
+      });
+
+      expect(result.plan).toBe('Pro');
+      expect(result.groups).toHaveLength(1);
+      expect(result.groups[0].title).toBe('GEMINI MODELS');
+      expect(result.groups[0].rows[0].percent).toBe(100);
+      expect(result.groups[0].rows[1].percent).toBe(90);
+    });
+
+    it('fetchCardQuota returns EMPTY groups (no fabricated mocks) when live quota endpoints are unreachable', async () => {
+      const mockFetch = vi.fn().mockImplementation((url, opts) => {
+        const body = JSON.parse(opts.body);
+        if (body.url.includes('loadCodeAssist')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              statusCode: 200,
+              body: { currentTier: { id: 'free-tier', name: 'Antigravity' } },
+            }),
+          });
+        }
+        // All quota summary endpoints fail (e.g. 403 SUBSCRIPTION_REQUIRED)
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            statusCode: 403,
+            body: {
+              error: {
+                code: 403,
+                status: 'PERMISSION_DENIED',
+                reason: 'SUBSCRIPTION_REQUIRED',
+              },
+            },
+          }),
+        });
+      });
+
+      const result = await fetchCardQuota(
+        { fileName: 'acc.json', auth_index: 'abc123', project_id: 'proj-1' },
+        { key: 'test-key', fetchFn: mockFetch }
+      );
+
+      // Real tier from loadCodeAssist is preserved (free-tier -> Free)
+      expect(result.plan).toBe('Free');
+      // CRITICAL: no mock percentage groups are invented when live data fails
+      expect(result.groups).toEqual([]);
+      expect(result.live).toBe(false);
+    });
+
+    it('fetchCardQuota propagates real auth_index to api-call requests', async () => {
+      const calls = [];
+      const mockFetch = vi.fn().mockImplementation((url, opts) => {
+        calls.push(JSON.parse(opts.body));
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ statusCode: 403, body: { error: { code: 403 } } }),
+        });
+      });
+
+      await fetchCardQuota(
+        { fileName: 'acc.json', auth_index: 'deadbeef01', project_id: 'proj-9' },
+        { key: 'test-key', fetchFn: mockFetch }
+      );
+
+      expect(mockFetch).toHaveBeenCalled();
+      expect(calls.length).toBeGreaterThanOrEqual(1);
+      calls.forEach((c) => {
+        expect(c.authIndex).toBe('deadbeef01');
+      });
+    });
+  });
+
+  describe('Real CPAMC Native Telemetry Helpers', () => {
+    it('computeAccountTelemetry sums real recent_requests buckets into reqs and ok percentage', () => {
+      const buckets = [
+        { time: '00:00-00:10', success: 45, failed: 0 },
+        { time: '00:10-00:20', success: 14, failed: 0 },
+        { time: '00:20-00:30', success: 1, failed: 1 },
+      ];
+      const t = computeAccountTelemetry(buckets);
+      expect(t.reqs).toBe(61);
+      expect(t.ok).toBe(60);
+      expect(t.failed).toBe(1);
+      expect(t.okPct).toBe(98);
+    });
+
+    it('computeAccountTelemetry returns 0 reqs and 100% ok for empty activity', () => {
+      const t = computeAccountTelemetry([]);
+      expect(t).toEqual({ reqs: 0, ok: 0, failed: 0, okPct: 100 });
+    });
+
+    it('classifyCooldowns separates gemini vs claude/gpt families and drops expired cooldowns', () => {
+      const now = Date.now();
+      const cooldowns = [
+        {
+          scope: 'model',
+          model_key: 'gemini-3.8-flash-high',
+          reason: 'quota',
+          retry_at: new Date(now + 43 * 3600 * 1000).toISOString(),
+          http_status: 429,
+        },
+        {
+          scope: 'model',
+          model_key: 'claude-sonnet-4-6',
+          reason: 'quota',
+          retry_at: new Date(now + 48 * 3600 * 1000).toISOString(),
+          http_status: 429,
+        },
+        {
+          scope: 'model',
+          model_key: 'gemini-3.7-flash-high',
+          reason: 'quota',
+          retry_at: new Date(now - 3600 * 1000).toISOString(), // already expired
+          http_status: 429,
+        },
+      ];
+
+      const cd = classifyCooldowns(cooldowns, now);
+      expect(cd.active).toHaveLength(2);
+      expect(cd.hasGemini).toBe(true);
+      expect(cd.hasClaudeGpt).toBe(true);
+      expect(cd.gemini.modelKey).toBe('gemini-3.8-flash-high');
+      expect(cd.claudeGpt.modelKey).toBe('claude-sonnet-4-6');
+      // Expired cooldown is excluded from active set
+      expect(cd.active.some((a) => a.modelKey === 'gemini-3.7-flash-high')).toBe(false);
+    });
+
+    it('formatRemainingDuration renders compact human-readable remaining time', () => {
+      const now = Date.now();
+      // Durations beyond 24h roll into days (consistent with formatQuotaDuration convention)
+      expect(formatRemainingDuration(new Date(now + 43 * 3600 * 1000 + 51 * 60000).toISOString(), now)).toBe(
+        '1d 19h'
+      );
+      expect(formatRemainingDuration(new Date(now + 5 * 3600 * 1000 + 30 * 60000).toISOString(), now)).toBe(
+        '5h 30m'
+      );
+      expect(formatRemainingDuration(new Date(now + 2 * 86400 * 1000 + 11 * 3600 * 1000).toISOString(), now)).toBe(
+        '2d 11h'
+      );
+      expect(formatRemainingDuration(new Date(now - 60000).toISOString(), now)).toBe('0m');
+    });
+  });
+});
+

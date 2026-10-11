@@ -5,20 +5,27 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 )
 
 // Host callback method names exposed by CLIProxyAPI for auth-file management.
 const (
-	hostMethodAuthList = "host.auth.list"
-	hostMethodAuthGet  = "host.auth.get"
-	hostMethodAuthSave = "host.auth.save"
+	hostMethodAuthList   = "host.auth.list"
+	hostMethodAuthGet    = "host.auth.get"
+	hostMethodAuthSave   = "host.auth.save"
+	hostMethodAuthDelete = "host.auth.delete"
 )
 
-// virtualizeRoutePath is the plugin-relative management route. The host resolves
-// it under /v0/management/, i.e. POST /v0/management/visual-profile/virtualize.
-const virtualizeRoutePath = "/visual-profile/virtualize"
+// virtualizeRoutePath is the primary plugin-relative management route. The host resolves
+// it under /v0/management/, i.e. POST /v0/management/auto-switcher-pro/virtualize.
+// legacyVirtualizeRoutePath preserves backward compatibility with older clients.
+const (
+	virtualizeRoutePath       = "/auto-switcher-pro/virtualize"
+	legacyVirtualizeRoutePath = "/visual-profile/virtualize"
+)
 
 var (
 	authFileSuffixPattern = regexp.MustCompile(`(?i)\.json$`)
@@ -278,7 +285,7 @@ func isVirtualizePath(rawPath string) bool {
 		normalized = normalized[:idx]
 	}
 	normalized = strings.TrimRight(normalized, "/")
-	return strings.HasSuffix(normalized, virtualizeRoutePath)
+	return strings.HasSuffix(normalized, virtualizeRoutePath) || strings.HasSuffix(normalized, legacyVirtualizeRoutePath)
 }
 
 // VirtualizeResponse is the JSON payload returned by the virtualize route. It is
@@ -318,6 +325,83 @@ func handleVirtualizeHTTP(req ManagementRequestPayload) ([]byte, error) {
 		Path:   result.Path,
 		Prefix: result.Prefix,
 	})
+}
+
+// DeleteVirtual deletes a virtual auth file from CPAMC disk via host bridge.
+func DeleteVirtual(name string) error {
+	if hostCaller == nil {
+		return fmt.Errorf("host bridge is not available")
+	}
+
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return fmt.Errorf("auth file name is required")
+	}
+	if !isValidAuthFileName(trimmed) {
+		return fmt.Errorf("invalid auth file name: %s", trimmed)
+	}
+
+	_, err := hostCaller(hostMethodAuthDelete, map[string]any{"name": trimmed})
+	if err != nil {
+		return fmt.Errorf("host.auth.delete failed for %s: %w", trimmed, err)
+	}
+	return nil
+}
+
+// handleDeleteVirtualHTTP serves DELETE /v0/management/auto-switcher-pro/virtualize?name=...
+func handleDeleteVirtualHTTP(req ManagementRequestPayload) ([]byte, error) {
+	name := ""
+	if u, err := url.Parse(req.Path); err == nil {
+		name = strings.TrimSpace(u.Query().Get("name"))
+	}
+	if name == "" && len(req.Body) > 0 {
+		var body struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(req.Body, &body); err == nil {
+			name = strings.TrimSpace(body.Name)
+		}
+	}
+
+	if name == "" {
+		return jsonManagementResponse(http.StatusBadRequest, map[string]string{
+			"error":   "bad_request",
+			"message": "auth file name is required",
+		})
+	}
+
+	err := DeleteVirtual(name)
+	if err != nil {
+		return jsonManagementResponse(http.StatusOK, map[string]any{
+			"ok":      false,
+			"error":   "delete_failed",
+			"message": err.Error(),
+		})
+	}
+	return jsonManagementResponse(http.StatusOK, map[string]any{
+		"ok":   true,
+		"name": name,
+	})
+}
+
+// ComputeSpecialistExclusions returns a sorted, deduplicated slice containing
+// every model from allModels except targetModel.
+func ComputeSpecialistExclusions(allModels []string, targetModel string) []string {
+	target := strings.TrimSpace(targetModel)
+	seen := make(map[string]struct{})
+	out := make([]string, 0, len(allModels))
+	for _, m := range allModels {
+		clean := strings.TrimSpace(m)
+		if clean == "" || clean == target {
+			continue
+		}
+		if _, exists := seen[clean]; !exists {
+			seen[clean] = struct{}{}
+			out = append(out, clean)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func jsonManagementResponse(statusCode int, body any) ([]byte, error) {

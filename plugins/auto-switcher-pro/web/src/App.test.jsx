@@ -160,7 +160,7 @@ describe('App Host Component Integration', () => {
 
     const manageBtn = await screen.findByTestId('btn-header-manage-prefixes');
     expect(manageBtn).toBeTruthy();
-    expect(manageBtn.textContent).toContain('Gestionar Prefijos');
+    expect(manageBtn.textContent).toContain('Directorio');
 
     const createBtn = screen.getByTestId('btn-header-create-group');
     expect(createBtn).toBeTruthy();
@@ -184,5 +184,156 @@ describe('App Host Component Integration', () => {
 
     expect(screen.getByText('/create-groups')).toBeTruthy();
     expect(await screen.findByTestId('group-manager-view')).toBeTruthy();
+  });
+
+  it('switches to Auto Auth Files tab and renders AutoAuthFiles view', async () => {
+    vi.spyOn(managementClient, 'getManagementKey').mockReturnValue('valid-key-123');
+    vi.spyOn(managementClient, 'loadAuthFilesWithPrefixes').mockResolvedValue([]);
+
+    render(<App />);
+
+    const autoAuthTab = await screen.findByTestId('tab-auto-auth-files');
+    expect(autoAuthTab).toBeTruthy();
+
+    fireEvent.click(autoAuthTab);
+
+    expect(screen.getByText('/auto-auth-files')).toBeTruthy();
+    expect(await screen.findByTestId('auto-auth-files-view')).toBeTruthy();
+  });
+
+  describe('MINI-002: Startup Cooldown & Background Auto-Update Orchestration', () => {
+    beforeEach(() => {
+      window.localStorage.clear();
+    });
+
+    it('does not call scanSystemHealth or updateManagementConsole if auto_update_console_on_boot is "false"', async () => {
+      window.localStorage.setItem('auto_update_console_on_boot', 'false');
+      vi.spyOn(managementClient, 'getManagementKey').mockReturnValue('valid-key-123');
+      vi.spyOn(managementClient, 'loadAuthFilesWithPrefixes').mockResolvedValue([]);
+      const scanSpy = vi.spyOn(managementClient, 'scanSystemHealth');
+      const updateSpy = vi.spyOn(managementClient, 'updateManagementConsole');
+
+      render(<App />);
+
+      await screen.findByTestId('btn-reload-profiles');
+      expect(scanSpy).not.toHaveBeenCalled();
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+
+    it('does not call scanSystemHealth or updateManagementConsole if last check occurred within 6 hours', async () => {
+      const recentTs = (Date.now() - 3600 * 1000).toString();
+      window.localStorage.setItem('last_console_check_ts', recentTs);
+      vi.spyOn(managementClient, 'getManagementKey').mockReturnValue('valid-key-123');
+      vi.spyOn(managementClient, 'loadAuthFilesWithPrefixes').mockResolvedValue([]);
+      const scanSpy = vi.spyOn(managementClient, 'scanSystemHealth');
+      const updateSpy = vi.spyOn(managementClient, 'updateManagementConsole');
+
+      render(<App />);
+
+      await screen.findByTestId('btn-reload-profiles');
+      expect(scanSpy).not.toHaveBeenCalled();
+      expect(updateSpy).not.toHaveBeenCalled();
+    });
+
+    it('calls scanSystemHealth and updateManagementConsole when preference is enabled and cooldown elapsed, updating last_console_check_ts', async () => {
+      const oldTs = (Date.now() - 7 * 3600 * 1000).toString();
+      window.localStorage.setItem('last_console_check_ts', oldTs);
+      vi.spyOn(managementClient, 'getManagementKey').mockReturnValue('valid-key-123');
+      vi.spyOn(managementClient, 'loadAuthFilesWithPrefixes').mockResolvedValue([]);
+      const scanSpy = vi.spyOn(managementClient, 'scanSystemHealth').mockResolvedValue({
+        ok: true,
+        console_update_available: true,
+        console_latest_github: 'v1.28.0',
+      });
+      const updateSpy = vi.spyOn(managementClient, 'updateManagementConsole').mockResolvedValue({ ok: true });
+
+      render(<App />);
+
+      await waitFor(() => {
+        expect(scanSpy).toHaveBeenCalledTimes(1);
+        expect(updateSpy).toHaveBeenCalledTimes(1);
+      });
+
+      const updatedTs = Number(window.localStorage.getItem('last_console_check_ts'));
+      expect(updatedTs).toBeGreaterThan(Number(oldTs));
+    });
+
+    it('does not break app status or throw if background scan fails with an exception', async () => {
+      vi.spyOn(managementClient, 'getManagementKey').mockReturnValue('valid-key-123');
+      vi.spyOn(managementClient, 'loadAuthFilesWithPrefixes').mockResolvedValue([
+        { name: 'antigravity-1.json', prefix: 'agy_p1' },
+      ]);
+      vi.spyOn(managementClient, 'scanSystemHealth').mockRejectedValue(new Error('Network error or rate limit'));
+
+      render(<App />);
+
+      expect(await screen.findByText('agy_p1')).toBeTruthy();
+      expect(screen.queryByTestId('status-error')).toBeNull();
+    });
+  });
+
+  describe('MINI-003: 12-Second Auto-Dismissing Toast Notification', () => {
+    beforeEach(() => {
+      window.localStorage.clear();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('displays toast with exact message and target version, and dismisses immediately on manual close click', async () => {
+      vi.spyOn(managementClient, 'getManagementKey').mockReturnValue('valid-key-123');
+      vi.spyOn(managementClient, 'loadAuthFilesWithPrefixes').mockResolvedValue([]);
+      vi.spyOn(managementClient, 'scanSystemHealth').mockResolvedValue({
+        ok: true,
+        console_update_available: true,
+        console_latest_github: 'v1.28.0',
+      });
+      vi.spyOn(managementClient, 'updateManagementConsole').mockResolvedValue({ ok: true });
+
+      render(<App />);
+
+      const toast = await screen.findByTestId('toast-auto-update-console');
+      expect(toast).toBeTruthy();
+      expect(toast.textContent).toContain(
+        '⚡ AUTO SWITCHER PRO: Consola de Gestión actualizada automáticamente a la versión v1.28.0 (Oficial)'
+      );
+
+      const closeBtn = screen.getByTestId('btn-close-console-toast');
+      fireEvent.click(closeBtn);
+
+      expect(screen.queryByTestId('toast-auto-update-console')).toBeNull();
+    });
+
+    it('automatically dismisses toast notification after 12 seconds with fake timers', async () => {
+      vi.useFakeTimers();
+      vi.spyOn(managementClient, 'getManagementKey').mockReturnValue('valid-key-123');
+      vi.spyOn(managementClient, 'loadAuthFilesWithPrefixes').mockResolvedValue([]);
+      vi.spyOn(managementClient, 'scanSystemHealth').mockResolvedValue({
+        ok: true,
+        console_update_available: true,
+        console_latest_github: 'v1.28.0',
+      });
+      vi.spyOn(managementClient, 'updateManagementConsole').mockResolvedValue({ ok: true });
+
+      render(<App />);
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(screen.getByTestId('toast-auto-update-console')).toBeTruthy();
+
+      act(() => {
+        vi.advanceTimersByTime(11900);
+      });
+      expect(screen.getByTestId('toast-auto-update-console')).toBeTruthy();
+
+      act(() => {
+        vi.advanceTimersByTime(100);
+      });
+      expect(screen.queryByTestId('toast-auto-update-console')).toBeNull();
+    });
   });
 });

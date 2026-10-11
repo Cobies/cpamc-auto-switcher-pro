@@ -9,9 +9,9 @@ import (
 	"path"
 	"strings"
 
-	"visual-profile/internal/handlers"
-	"visual-profile/internal/version"
-	"visual-profile/internal/web"
+	"auto-switcher-pro/internal/handlers"
+	"auto-switcher-pro/internal/version"
+	"auto-switcher-pro/internal/web"
 )
 
 // ABIVersion defines the supported CLIProxyAPI C-ABI version.
@@ -63,6 +63,9 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 			},
 			"capabilities": map[string]any{
 				"management_api": true,
+				"model_provider": true,
+				"model_router":   true,
+				"scheduler":      true,
 			},
 		}
 		raw, err := json.Marshal(registration)
@@ -75,21 +78,56 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 		regResponse := map[string]any{
 			"routes": []map[string]any{
 				{
+					"Method":      http.MethodGet,
+					"Path":        poolsRoutePath,
+					"Description": "Lista los pools de balanceo de carga registrados en el plugin",
+				},
+				{
+					"Method":      http.MethodPost,
+					"Path":        poolsRoutePath,
+					"Description": "Crea o actualiza un pool de balanceo de carga en el registro del plugin",
+				},
+				{
+					"Method":      http.MethodDelete,
+					"Path":        poolsRoutePath,
+					"Description": "Disuelve un pool de balanceo de carga del registro del plugin",
+				},
+				{
 					"Method":      http.MethodPost,
 					"Path":        virtualizeRoutePath,
-					"Description": "Clona una cuenta física en una credencial virtual con prefijo y exclusiones por familia (multi-prefix)",
+					"Description": "Clona una cuenta física en una credencial virtual con prefijo y exclusiones por familia (legacy / multi-prefix)",
+				},
+				{
+					"Method":      http.MethodDelete,
+					"Path":        virtualizeRoutePath,
+					"Description": "Elimina una credencial virtual de disco",
+				},
+				{
+					"Method":      http.MethodGet,
+					"Path":        maintenanceScanRoutePath,
+					"Description": "Escanea el estado del sistema, residuos en cuentas y versiones de CPAMC Console",
+				},
+				{
+					"Method":      http.MethodPost,
+					"Path":        maintenanceCleanRoutePath,
+					"Description": "Limpia y depura modelos residuales ajenos en credenciales",
+				},
+				{
+					"Method":      http.MethodPost,
+					"Path":        maintenanceUpdateRoutePath,
+					"Description": "Descarga y actualiza de forma segura management.html desde el release oficial con rollback",
 				},
 			},
 			"resources": []map[string]any{
 				{
-					"Path":        "/create-prefixes",
-					"Menu":        "⚡ Crear Prefijos",
-					"Description": "Gestor y creador integral de prefijos de enrutamiento y cuentas",
-				},
-				{
 					"Path":        "/create-groups",
 					"Menu":        "🛠️ Crear Group/Pefiles",
 					"Description": "Asistente y orquestador para armar o disolver grupos y pools de perfiles",
+				},
+				{
+					"Path":        "/auto-auth-files",
+					"Menu":        "🗂️ Auto Auth Files",
+					"Description": "Visualizador y trazabilidad de cuentas maestras OAuth y credenciales virtuales",
 				},
 				{
 					"Path":        "/control-switcher",
@@ -106,6 +144,21 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 					"Menu":        "🏷️ Pulse Tokens",
 					"Description": "Telemetría y analítica de consumo de tokens y latencias",
 				},
+				{
+					"Path":        "/create-prefixes",
+					"Menu":        "📋 Directorio de Cuentas",
+					"Description": "Directorio e inspección de cuentas vinculadas y prefijos (edición manual de emergencia)",
+				},
+				{
+					"Path":        "/maintenance",
+					"Menu":        "🩺 CPAMC Salud & Mantenimiento",
+					"Description": "Diagnóstico, depuración de residuos y actualización segura de CPAMC Console",
+				},
+				{
+					"Path":        "/quick-guide",
+					"Menu":        "❓ Guía Rápida",
+					"Description": "Manual de usuario, arquitectura de pools y guía operativa de Auto Switcher Pro",
+				},
 			},
 		}
 		raw, err := json.Marshal(regResponse)
@@ -116,6 +169,56 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 
 	case "management.handle":
 		return HandleManagementHTTP(request)
+
+	case methodModelStatic, methodModelRegister:
+		resp := handleModelStatic()
+		raw, err := json.Marshal(resp)
+		if err != nil {
+			return nil, err
+		}
+		return OKEnvelope(raw), nil
+
+	case methodModelForAuth:
+		var req modelForAuthRequest
+		if len(request) > 0 {
+			if err := json.Unmarshal(request, &req); err != nil {
+				return ErrorEnvelope("bad_request", "malformed model.for_auth request: "+err.Error()), nil
+			}
+		}
+		resp := handleModelForAuth(req)
+		raw, err := json.Marshal(resp)
+		if err != nil {
+			return nil, err
+		}
+		return OKEnvelope(raw), nil
+
+	case methodModelRoute:
+		var req modelRouteRequest
+		if len(request) > 0 {
+			if err := json.Unmarshal(request, &req); err != nil {
+				return ErrorEnvelope("bad_request", "malformed model.route request: "+err.Error()), nil
+			}
+		}
+		resp := handleModelRoute(req)
+		raw, err := json.Marshal(resp)
+		if err != nil {
+			return nil, err
+		}
+		return OKEnvelope(raw), nil
+
+	case methodSchedulerPick:
+		var req schedulerPickRequest
+		if len(request) > 0 {
+			if err := json.Unmarshal(request, &req); err != nil {
+				return ErrorEnvelope("bad_request", "malformed scheduler.pick request: "+err.Error()), nil
+			}
+		}
+		resp := handleSchedulerPick(req)
+		raw, err := json.Marshal(resp)
+		if err != nil {
+			return nil, err
+		}
+		return OKEnvelope(raw), nil
 
 	default:
 		return ErrorEnvelope("unknown_method", "unknown method: "+method), nil
@@ -148,7 +251,7 @@ func MatchProfilesRoute(rawPath string) (subpath string, matched bool) {
 
 	matchedIdx := -1
 	for i, seg := range segments {
-		if seg == "profiles" || seg == "control-switcher" || seg == "pulse-tokens" || seg == "pulso-tokens" || seg == "create-prefixes" || seg == "create-groups" {
+		if seg == "home" || seg == "profiles" || seg == "center" || seg == "control-switcher" || seg == "pulse-tokens" || seg == "pulso-tokens" || seg == "create-prefixes" || seg == "create-groups" || seg == "auto-auth-files" || seg == "maintenance" || seg == "quick-guide" {
 			matchedIdx = i
 			break
 		}
@@ -195,21 +298,34 @@ func HandleManagementHTTP(request []byte) ([]byte, error) {
 		method = http.MethodGet // default when omitted
 	}
 
-	// Virtualize route: POST only (host dispatches it as an authenticated management route).
+	// Pool management routes: GET to list pools, POST to create/update, DELETE to dissolve
+	if isPoolsPath(req.Path) {
+		return handlePoolsHTTP(req)
+	}
+
+	// Maintenance API routes
+	if isMaintenancePath(req.Path) {
+		return handleMaintenanceHTTP(req)
+	}
+
+	// Virtualize route: POST for cloning, DELETE for removing virtual credential.
 	if isVirtualizePath(req.Path) {
-		if method != http.MethodPost {
-			resp := ManagementResponsePayload{
-				StatusCode: http.StatusMethodNotAllowed,
-				Headers: map[string][]string{
-					"Content-Type":           {"application/json; charset=utf-8"},
-					"X-Content-Type-Options": {"nosniff"},
-				},
-				Body: base64.StdEncoding.EncodeToString([]byte(`{"error":"method_not_allowed","message":"method not allowed"}`)),
-			}
-			raw, _ := json.Marshal(resp)
-			return OKEnvelope(raw), nil
+		if method == http.MethodPost {
+			return handleVirtualizeHTTP(req)
 		}
-		return handleVirtualizeHTTP(req)
+		if method == http.MethodDelete {
+			return handleDeleteVirtualHTTP(req)
+		}
+		resp := ManagementResponsePayload{
+			StatusCode: http.StatusMethodNotAllowed,
+			Headers: map[string][]string{
+				"Content-Type":           {"application/json; charset=utf-8"},
+				"X-Content-Type-Options": {"nosniff"},
+			},
+			Body: base64.StdEncoding.EncodeToString([]byte(`{"error":"method_not_allowed","message":"method not allowed"}`)),
+		}
+		raw, _ := json.Marshal(resp)
+		return OKEnvelope(raw), nil
 	}
 
 	if method != http.MethodGet && method != http.MethodHead {

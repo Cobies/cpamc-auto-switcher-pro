@@ -11,14 +11,15 @@ import (
 // stubCaller is an in-memory implementation of the host bridge used to exercise
 // Virtualize without a live CLIProxyAPI host.
 type stubCaller struct {
-	listFiles   []hostAuthFileEntry
-	getJSON     json.RawMessage
-	saveName    string
-	savePath    string
-	calls       []string
-	lastGetAuth string
-	lastSaveReq map[string]any
-	err         error
+	listFiles      []hostAuthFileEntry
+	getJSON        json.RawMessage
+	saveName       string
+	savePath       string
+	calls          []string
+	lastGetAuth    string
+	lastSaveReq    map[string]any
+	lastDeleteName string
+	err            error
 }
 
 func (s *stubCaller) call(method string, payload any) (json.RawMessage, error) {
@@ -48,6 +49,13 @@ func (s *stubCaller) call(method string, payload any) (json.RawMessage, error) {
 		}
 		raw, _ := json.Marshal(hostAuthSaveResult{Name: s.saveName, Path: s.savePath})
 		return raw, nil
+	case hostMethodAuthDelete:
+		if m, ok := payload.(map[string]any); ok {
+			if v, ok := m["name"].(string); ok {
+				s.lastDeleteName = v
+			}
+		}
+		return json.RawMessage(`{"ok":true}`), nil
 	}
 	return nil, nil
 }
@@ -303,7 +311,7 @@ func TestHandleManagementHTTP_VirtualizeRoute(t *testing.T) {
 	})
 	req, _ := json.Marshal(ManagementRequestPayload{
 		Method: http.MethodPost,
-		Path:   "/v0/management/visual-profile/virtualize",
+		Path:   "/v0/management/auto-switcher-pro/virtualize",
 		Body:   body,
 	})
 
@@ -342,7 +350,7 @@ func TestHandleManagementHTTP_VirtualizeReportsPluginError(t *testing.T) {
 	body, _ := json.Marshal(VirtualizeRequest{SourceFileName: "missing.json", Prefix: "agy_clau"})
 	req, _ := json.Marshal(ManagementRequestPayload{
 		Method: http.MethodPost,
-		Path:   "/v0/management/visual-profile/virtualize",
+		Path:   "/v0/management/auto-switcher-pro/virtualize",
 		Body:   body,
 	})
 	raw, err := HandleManagementHTTP(req)
@@ -373,7 +381,7 @@ func TestHandleManagementHTTP_VirtualizeRejectsGET(t *testing.T) {
 
 	req, _ := json.Marshal(ManagementRequestPayload{
 		Method: http.MethodGet,
-		Path:   "/v0/management/visual-profile/virtualize",
+		Path:   "/v0/management/auto-switcher-pro/virtualize",
 	})
 	raw, err := HandleManagementHTTP(req)
 	if err != nil {
@@ -420,3 +428,90 @@ func TestManagementRegister_DeclaresVirtualizeRoute(t *testing.T) {
 		t.Errorf("expected POST %s in routes, got %+v", virtualizeRoutePath, payload.Routes)
 	}
 }
+
+func TestDeleteVirtual_DeletesAuthFileViaHost(t *testing.T) {
+	stub := &stubCaller{}
+	installStub(t, stub)
+
+	err := DeleteVirtual("antigravity-user@gmail.com.agy_son.json")
+	if err != nil {
+		t.Fatalf("DeleteVirtual failed: %v", err)
+	}
+	if stub.lastDeleteName != "antigravity-user@gmail.com.agy_son.json" {
+		t.Errorf("expected deleted name %q, got %q", "antigravity-user@gmail.com.agy_son.json", stub.lastDeleteName)
+	}
+}
+
+func TestHandleManagementHTTP_VirtualizeRouteDelete(t *testing.T) {
+	stub := &stubCaller{}
+	installStub(t, stub)
+
+	req, _ := json.Marshal(ManagementRequestPayload{
+		Method: http.MethodDelete,
+		Path:   "/v0/management/auto-switcher-pro/virtualize?name=antigravity-user%40gmail.com.agy_son.json",
+	})
+	raw, err := HandleManagementHTTP(req)
+	if err != nil {
+		t.Fatalf("HandleManagementHTTP failed: %v", err)
+	}
+	var env Envelope
+	if err := json.Unmarshal(raw, &env); err != nil || !env.OK {
+		t.Fatalf("expected OK envelope, got %s", string(raw))
+	}
+	var resp ManagementResponsePayload
+	if err := json.Unmarshal(env.Result, &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if stub.lastDeleteName != "antigravity-user@gmail.com.agy_son.json" {
+		t.Errorf("expected deleted name %q, got %q", "antigravity-user@gmail.com.agy_son.json", stub.lastDeleteName)
+	}
+}
+
+func TestComputeSpecialistExclusions(t *testing.T) {
+	allModels := []string{
+		"gemini-2.5-pro",
+		"gemini-2.5-flash",
+		"gemini-2.0-flash",
+		"gemini-2.5-pro",
+		"  ",
+	}
+	targetModel := "gemini-2.5-pro"
+
+	result := ComputeSpecialistExclusions(allModels, targetModel)
+	expected := []string{"gemini-2.0-flash", "gemini-2.5-flash"}
+
+	if len(result) != len(expected) {
+		t.Fatalf("expected %d exclusions, got %d: %+v", len(expected), len(result), result)
+	}
+	for i, v := range expected {
+		if result[i] != v {
+			t.Errorf("at index %d: expected %s, got %s", i, v, result[i])
+		}
+	}
+}
+
+func TestComputeSpecialistExclusions_TargetNotInList(t *testing.T) {
+	allModels := []string{"claude-3-7-sonnet", "claude-3-5-haiku"}
+	result := ComputeSpecialistExclusions(allModels, "other-model")
+	expected := []string{"claude-3-5-haiku", "claude-3-7-sonnet"}
+
+	if len(result) != len(expected) {
+		t.Fatalf("expected %d, got %d", len(expected), len(result))
+	}
+	for i, v := range expected {
+		if result[i] != v {
+			t.Errorf("expected %s, got %s", v, result[i])
+		}
+	}
+}
+
+func TestComputeSpecialistExclusions_Empty(t *testing.T) {
+	result := ComputeSpecialistExclusions(nil, "gemini-2.5-pro")
+	if len(result) != 0 {
+		t.Fatalf("expected empty, got %+v", result)
+	}
+}
+

@@ -62,7 +62,7 @@ import (
 	"fmt"
 	"unsafe"
 
-	"visual-profile/internal/plugin"
+	"auto-switcher-pro/internal/plugin"
 )
 
 //export cliproxy_plugin_init
