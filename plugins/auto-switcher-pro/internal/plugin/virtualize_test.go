@@ -514,4 +514,3 @@ func TestComputeSpecialistExclusions_Empty(t *testing.T) {
 		t.Fatalf("expected empty, got %+v", result)
 	}
 }
-

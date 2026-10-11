@@ -249,11 +249,11 @@ func TestCodexSwitcherWorkflow(t *testing.T) {
 	defer server.Close()
 
 	cfg := &config.Config{
-		Endpoint:            server.URL,
-		ManagementKey:       "dummy",
-		Provider:            "codex",
-		FiveHourThreshold:   90.0,
-		WeeklyThreshold:     95.0,
+		Endpoint:          server.URL,
+		ManagementKey:     "dummy",
+		Provider:          "codex",
+		FiveHourThreshold: 90.0,
+		WeeklyThreshold:   95.0,
 	}
 
 	cli, err := client.New(cfg.Endpoint, cfg.ManagementKey)
@@ -364,11 +364,11 @@ func TestConcurrentQuotaFetchingAndDecision(t *testing.T) {
 	defer server.Close()
 
 	cfg := &config.Config{
-		Endpoint:            server.URL,
-		ManagementKey:       "dummy",
-		Provider:            "codex",
-		FiveHourThreshold:   90.0,
-		WeeklyThreshold:     95.0,
+		Endpoint:          server.URL,
+		ManagementKey:     "dummy",
+		Provider:          "codex",
+		FiveHourThreshold: 90.0,
+		WeeklyThreshold:   95.0,
 	}
 
 	cli, err := client.New(cfg.Endpoint, cfg.ManagementKey)
@@ -484,10 +484,10 @@ func TestProfileListing(t *testing.T) {
 func TestProfileManualSwitch(t *testing.T) {
 	var mu sync.Mutex
 	prefixes := map[string]string{
-		"def-act.json":  "agy",
-		"def-res.json":  "agy_1",
-		"p1-act.json":   "agy_p1",
-		"p1-res.json":   "agy_p1_1",
+		"def-act.json": "agy",
+		"def-res.json": "agy_1",
+		"p1-act.json":  "agy_p1",
+		"p1-res.json":  "agy_p1_1",
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -742,4 +742,3 @@ func TestNumberedPoolRotation(t *testing.T) {
 		t.Errorf("expected agy2-act.json to become agy2_1, got %s", prefixes["agy2-act.json"])
 	}
 }
-

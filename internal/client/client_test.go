@@ -138,7 +138,7 @@ func TestClientGetCodexQuotaSummary(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status_code": 200,
-			"body": `{"rate_limit":{"primary_window":{"used_percent":15.0}}}`,
+			"body":        `{"rate_limit":{"primary_window":{"used_percent":15.0}}}`,
 		})
 	}))
 	defer server.Close()

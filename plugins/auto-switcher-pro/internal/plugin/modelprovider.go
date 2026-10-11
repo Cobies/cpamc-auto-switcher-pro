@@ -47,13 +47,13 @@ type modelForAuthRequest struct {
 }
 
 type modelRouteRequest struct {
-	Plugin         map[string]any       `json:"Plugin"`
-	PluginID       string               `json:"PluginID"`
-	SourceFormat   string               `json:"SourceFormat"`
-	RequestedModel string               `json:"RequestedModel"`
-	Stream         bool                 `json:"Stream"`
-	Metadata       map[string]any       `json:"Metadata"`
-	Headers        map[string][]string  `json:"Headers"`
+	Plugin         map[string]any      `json:"Plugin"`
+	PluginID       string              `json:"PluginID"`
+	SourceFormat   string              `json:"SourceFormat"`
+	RequestedModel string              `json:"RequestedModel"`
+	Stream         bool                `json:"Stream"`
+	Metadata       map[string]any      `json:"Metadata"`
+	Headers        map[string][]string `json:"Headers"`
 }
 
 // pluginModelInfo mirrors sdk/pluginapi.ModelInfo (untagged fields). Only the

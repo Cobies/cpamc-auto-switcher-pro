@@ -175,8 +175,8 @@ func TestManagementResourceAndHandling(t *testing.T) {
 	// 7. Host resource routing: Only slashless /profiles is registered and supported by host runtime routing.
 	// Internal handler also tolerates trailing slash defensively in isolation.
 	profilesRoutes := []string{
-		"/profiles",                                    // Host registered slashless route (only supported host runtime path)
-		"/profiles/",                                   // Internal isolation fallback
+		"/profiles",  // Host registered slashless route (only supported host runtime path)
+		"/profiles/", // Internal isolation fallback
 		"/v0/resource/plugins/visual-profile/profiles",  // Internal isolation plugin path
 		"/v0/resource/plugins/visual-profile/profiles/", // Internal isolation plugin path with trailing slash
 	}

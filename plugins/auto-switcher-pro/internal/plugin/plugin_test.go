@@ -494,9 +494,9 @@ func TestHandlePluginMethod_UnknownMethod(t *testing.T) {
 }
 
 // TestHandlePluginMethod_ManagementHandle_HostSlashlessVsInternalIsolation explicitly tests and distinguishes:
-// 1. Host-facing URL is strictly slashless "/profiles" (the only path registered in management.register and matched by host resourceRoutes).
-// 2. In isolation, the internal plugin handler MatchProfilesRoute defensively tolerates trailing slash variants,
-//    but runtime requests with trailing slashes are not routed by the host.
+//  1. Host-facing URL is strictly slashless "/profiles" (the only path registered in management.register and matched by host resourceRoutes).
+//  2. In isolation, the internal plugin handler MatchProfilesRoute defensively tolerates trailing slash variants,
+//     but runtime requests with trailing slashes are not routed by the host.
 func TestHandlePluginMethod_ManagementHandle_HostSlashlessVsInternalIsolation(t *testing.T) {
 	testRoutes := []struct {
 		name string

@@ -874,5 +874,3 @@ func TestRunInteractiveInitWithIO_ExistingConfig(t *testing.T) {
 		}
 	})
 }
-
-

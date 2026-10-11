@@ -65,10 +65,10 @@ type RegistryState struct {
 // PoolRegistry provides thread-safe in-memory caching and atomic file persistence
 // for pools created via GroupManager.
 type PoolRegistry struct {
-	mu        sync.RWMutex
-	filePath  string
-	pools     map[string]PoolDefinition // keyed by base_prefix (case-insensitive)
-	loaded    bool
+	mu       sync.RWMutex
+	filePath string
+	pools    map[string]PoolDefinition // keyed by base_prefix (case-insensitive)
+	loaded   bool
 }
 
 var (
@@ -216,6 +216,7 @@ func (r *PoolRegistry) GetPool(basePrefix string) (PoolDefinition, bool) {
 //   - Missing reserve files are pruned from pool.Reserves.
 //   - If LeaderAuth is missing, the first surviving reserve is promoted to leader.
 //   - If all members have been deleted from disk, the pool is dissolved automatically.
+//
 // Returns true if state changed and was saved atomically.
 func (r *PoolRegistry) PruneStaleAccounts(authDir string) (bool, error) {
 	if authDir == "" {
