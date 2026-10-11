@@ -294,4 +294,49 @@ func TestParseQuotaSummaryProfileFiltering(t *testing.T) {
 	if clauOnly.WorstWeekly.ConsumedPercentage != 100.0 {
 		t.Errorf("expected clau weekly 100%%, got %.1f%%", clauOnly.WorstWeekly.ConsumedPercentage)
 	}
+
+	// With profile "agy_1": ONLY evaluates Gemini
+	agy1Only, err := ParseQuotaSummary(dualJSON, "agy_1")
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if agy1Only.WorstWeekly.ConsumedPercentage != 30.0 {
+		t.Errorf("expected agy_1 weekly 30%%, got %.1f%%", agy1Only.WorstWeekly.ConsumedPercentage)
+	}
+
+	// With profile "agy_opus": ONLY evaluates Claude
+	agyOpusOnly, err := ParseQuotaSummary(dualJSON, "agy_opus")
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if agyOpusOnly.WorstWeekly.ConsumedPercentage != 100.0 {
+		t.Errorf("expected agy_opus weekly 100%%, got %.1f%%", agyOpusOnly.WorstWeekly.ConsumedPercentage)
+	}
+
+	// With numeric profile "2" (e.g. agy2 contingency): ONLY evaluates Gemini
+	numeric2Only, err := ParseQuotaSummary(dualJSON, "2")
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if numeric2Only.WorstWeekly.ConsumedPercentage != 30.0 {
+		t.Errorf("expected numeric profile '2' weekly 30%%, got %.1f%%", numeric2Only.WorstWeekly.ConsumedPercentage)
+	}
+
+	// With profile "agy2": ONLY evaluates Gemini
+	agy2Only, err := ParseQuotaSummary(dualJSON, "agy2")
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if agy2Only.WorstWeekly.ConsumedPercentage != 30.0 {
+		t.Errorf("expected agy2 weekly 30%%, got %.1f%%", agy2Only.WorstWeekly.ConsumedPercentage)
+	}
+
+	// With profile "agy_g2": ONLY evaluates Gemini
+	agyg2Only, err := ParseQuotaSummary(dualJSON, "agy_g2")
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if agyg2Only.WorstWeekly.ConsumedPercentage != 30.0 {
+		t.Errorf("expected agy_g2 weekly 30%%, got %.1f%%", agyg2Only.WorstWeekly.ConsumedPercentage)
+	}
 }

@@ -81,17 +81,31 @@ func ParseQuotaSummary(raw []byte, profile ...string) (*AccountQuota, error) {
 		prof = strings.ToLower(strings.TrimSpace(profile[0]))
 	}
 
+	hasGeminiGroup := false
+	hasClaudeGroup := false
+	for _, group := range resp.Groups {
+		name := strings.ToLower(group.DisplayName)
+		if strings.Contains(name, "gemini") {
+			hasGeminiGroup = true
+		}
+		if strings.Contains(name, "claude") || strings.Contains(name, "gpt") {
+			hasClaudeGroup = true
+		}
+	}
+
 	for _, group := range resp.Groups {
 		grpName := strings.ToLower(group.DisplayName)
 		// Model-family filtering by profile to ensure independent quotas:
-		// agy_clau*, clau*, son* -> only evaluate Claude / GPT models
+		// agy_clau*, clau*, son*, agy_son*, opus*, agy_opus* -> only evaluate Claude / GPT models
 		// agy*, g* -> only evaluate Gemini models
-		if strings.HasPrefix(prof, "agy_clau") || strings.HasPrefix(prof, "clau") || strings.HasPrefix(prof, "son") {
-			if !strings.Contains(grpName, "claude") && !strings.Contains(grpName, "gpt") {
+		if strings.HasPrefix(prof, "agy_opus") || strings.HasPrefix(prof, "opus") ||
+			strings.HasPrefix(prof, "agy_son") || strings.HasPrefix(prof, "son") ||
+			strings.HasPrefix(prof, "agy_clau") || strings.HasPrefix(prof, "clau") {
+			if hasClaudeGroup && !strings.Contains(grpName, "claude") && !strings.Contains(grpName, "gpt") {
 				continue
 			}
-		} else if strings.HasPrefix(prof, "agy") || strings.HasPrefix(prof, "g") {
-			if !strings.Contains(grpName, "gemini") {
+		} else if strings.HasPrefix(prof, "agy") || strings.HasPrefix(prof, "g") || isAllDigits(prof) {
+			if hasGeminiGroup && !strings.Contains(grpName, "gemini") {
 				continue
 			}
 		}
@@ -146,6 +160,18 @@ func ParseQuotaSummary(raw []byte, profile ...string) (*AccountQuota, error) {
 	}
 
 	return result, nil
+}
+
+func isAllDigits(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // ParseQuotaSummaryForProvider parses quota JSON based on the target provider ("antigravity" or "codex")

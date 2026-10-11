@@ -123,16 +123,6 @@ func ParsePrefix(prefix, baseActive string) ParsedPrefix {
 		}
 	}
 
-	prefixWithUnder := baseActive + "_"
-	if !strings.HasPrefix(prefix, prefixWithUnder) {
-		return ParsedPrefix{}
-	}
-
-	remainder := strings.TrimPrefix(prefix, prefixWithUnder)
-	if remainder == "" || strings.HasPrefix(remainder, "_") || strings.HasSuffix(remainder, "_") {
-		return ParsedPrefix{}
-	}
-
 	isDigits := func(s string) bool {
 		if len(s) == 0 {
 			return false
@@ -143,6 +133,49 @@ func ParsePrefix(prefix, baseActive string) ParsedPrefix {
 			}
 		}
 		return true
+	}
+
+	prefixWithUnder := baseActive + "_"
+	if !strings.HasPrefix(prefix, prefixWithUnder) {
+		// Contingency check: numbered base prefix without underscore, e.g. "agy2", "agy2_1", "codex2", "codex2_1"
+		if strings.HasPrefix(prefix, baseActive) {
+			rest := strings.TrimPrefix(prefix, baseActive)
+			if len(rest) > 0 && rest[0] >= '0' && rest[0] <= '9' {
+				lastIdx := strings.LastIndex(rest, "_")
+				if lastIdx != -1 {
+					profPart := rest[:lastIdx]
+					idxPart := rest[lastIdx+1:]
+					if isDigits(profPart) && isDigits(idxPart) {
+						idx, err := strconv.Atoi(idxPart)
+						if err == nil && idx >= 0 {
+							return ParsedPrefix{
+								BasePrefix:   baseActive,
+								Profile:      profPart,
+								IsActive:     false,
+								IsReserve:    true,
+								ReserveIndex: idx,
+								Matched:      true,
+							}
+						}
+					}
+				} else if isDigits(rest) {
+					return ParsedPrefix{
+						BasePrefix:   baseActive,
+						Profile:      rest,
+						IsActive:     true,
+						IsReserve:    false,
+						ReserveIndex: 0,
+						Matched:      true,
+					}
+				}
+			}
+		}
+		return ParsedPrefix{}
+	}
+
+	remainder := strings.TrimPrefix(prefix, prefixWithUnder)
+	if remainder == "" || strings.HasPrefix(remainder, "_") || strings.HasSuffix(remainder, "_") {
+		return ParsedPrefix{}
 	}
 
 	lastIdx := strings.LastIndex(remainder, "_")
@@ -206,6 +239,21 @@ func (c *Config) ConventionForProfile(provider, profile string) (activePrefix, r
 	trimmedProfile := strings.TrimSpace(profile)
 	if trimmedProfile == "" {
 		return baseActive, baseReserve
+	}
+	isDigits := func(s string) bool {
+		if len(s) == 0 {
+			return false
+		}
+		for _, r := range s {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+		return true
+	}
+	if isDigits(trimmedProfile) {
+		active := fmt.Sprintf("%s%s", baseActive, trimmedProfile)
+		return active, active + "_"
 	}
 	active := fmt.Sprintf("%s_%s", baseActive, trimmedProfile)
 	return active, active + "_"

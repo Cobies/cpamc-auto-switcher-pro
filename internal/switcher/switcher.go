@@ -151,7 +151,11 @@ func (s *Switcher) fetchAccountsConcurrently(ctx context.Context, targetProvider
 				if errQuota != nil {
 					state.QuotaErr = errQuota
 				} else {
-					parsedQuota, errParse := quota.ParseQuotaSummaryForProvider(f.Provider, qBytes, parsed.Profile)
+					evalProfile := meta.Prefix
+					if evalProfile == "" {
+						evalProfile = parsed.Profile
+					}
+					parsedQuota, errParse := quota.ParseQuotaSummaryForProvider(f.Provider, qBytes, evalProfile)
 					if errParse != nil {
 						state.QuotaErr = errParse
 					} else {

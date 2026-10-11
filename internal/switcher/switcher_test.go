@@ -667,3 +667,79 @@ func TestProfileAutomaticRotationIsolation(t *testing.T) {
 	}
 }
 
+func TestNumberedPoolRotation(t *testing.T) {
+	var mu sync.Mutex
+	prefixes := map[string]string{
+		"agy2-act.json": "agy2",   // active pool 2
+		"agy2-res.json": "agy2_1", // reserve 1 of pool 2
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		switch r.URL.Path {
+		case "/v0/management/auth-files":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"files": []map[string]any{
+					{"id": "a2", "name": "agy2-act.json", "auth_index": "idx-2a", "provider": "antigravity"},
+					{"id": "r2", "name": "agy2-res.json", "auth_index": "idx-2r", "provider": "antigravity"},
+				},
+			})
+		case "/v0/management/auth-files/download":
+			name := r.URL.Query().Get("name")
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"prefix": prefixes[name],
+			})
+		case "/v0/management/api-call":
+			var req client.APICallRequest
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			w.Header().Set("Content-Type", "application/json")
+			switch req.AuthIndex {
+			case "idx-2a":
+				// Exceeded 5h (95% consumed)
+				_, _ = w.Write([]byte(`{"groups":[{"displayName":"Gemini Models","buckets":[{"displayName":"5-Hour Limit","remainingFraction":0.05}]}]}`))
+			case "idx-2r":
+				// Healthy (80% remaining)
+				_, _ = w.Write([]byte(`{"groups":[{"displayName":"Gemini Models","buckets":[{"displayName":"5-Hour Limit","remainingFraction":0.80}]}]}`))
+			}
+		case "/v0/management/auth-files/fields":
+			var req map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			prefixes[req["name"]] = req["prefix"]
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		}
+	}))
+	defer server.Close()
+
+	cfg := &config.Config{
+		Endpoint:          server.URL,
+		ManagementKey:     "dummy",
+		Provider:          "antigravity",
+		FiveHourThreshold: 90.0,
+		WeeklyThreshold:   95.0,
+	}
+	cli, _ := client.New(server.URL, "dummy")
+	sw := New(cfg, cli)
+
+	res, err := sw.Run(context.Background(), false)
+	if err != nil {
+		t.Fatalf("sw.Run failed: %v", err)
+	}
+	if !res.Rotated {
+		t.Fatalf("expected agy2 pool to rotate, got: %s", res.Reason)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if prefixes["agy2-res.json"] != "agy2" {
+		t.Errorf("expected agy2-res.json to become agy2, got %s", prefixes["agy2-res.json"])
+	}
+	if prefixes["agy2-act.json"] != "agy2_1" {
+		t.Errorf("expected agy2-act.json to become agy2_1, got %s", prefixes["agy2-act.json"])
+	}
+}
+

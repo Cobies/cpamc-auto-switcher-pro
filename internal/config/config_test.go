@@ -122,6 +122,17 @@ func TestConventionForProfile(t *testing.T) {
 	if act != "codex_p2" || res != "codex_p2_" {
 		t.Errorf("expected codex_p2/codex_p2_, got %s/%s", act, res)
 	}
+
+	// Contingency: numeric profile 2 (agy2 / codex2)
+	act, res = cfg.ConventionForProfile("antigravity", "2")
+	if act != "agy2" || res != "agy2_" {
+		t.Errorf("expected agy2/agy2_, got %s/%s", act, res)
+	}
+
+	act, res = cfg.ConventionForProfile("codex", "3")
+	if act != "codex3" || res != "codex3_" {
+		t.Errorf("expected codex3/codex3_, got %s/%s", act, res)
+	}
 }
 
 func TestParsePrefix(t *testing.T) {
@@ -145,6 +156,17 @@ func TestParsePrefix(t *testing.T) {
 		{"agy_p1_1", "agy", "p1", false, true, 1, true},
 		{"agy_p1_2", "agy", "p1", false, true, 2, true},
 
+		// Antigravity profile g2 (underscore convention)
+		{"agy_g2", "agy", "g2", true, false, 0, true},
+		{"agy_g2_1", "agy", "g2", false, true, 1, true},
+
+		// Antigravity contingency: numbered base prefixes without underscore (agy2, agy2_1, agy3...)
+		{"agy2", "agy", "2", true, false, 0, true},
+		{"agy2_1", "agy", "2", false, true, 1, true},
+		{"agy2_2", "agy", "2", false, true, 2, true},
+		{"agy3", "agy", "3", true, false, 0, true},
+		{"agy3_1", "agy", "3", false, true, 1, true},
+
 		// Antigravity profile with underscore e.g. team_a
 		{"agy_team_a", "agy", "team_a", true, false, 0, true},
 		{"agy_team_a_1", "agy", "team_a", false, true, 1, true},
@@ -156,6 +178,10 @@ func TestParsePrefix(t *testing.T) {
 		// Codex profile p2
 		{"codex_p2", "codex", "p2", true, false, 0, true},
 		{"codex_p2_1", "codex", "p2", false, true, 1, true},
+
+		// Codex contingency: numbered base prefixes without underscore (codex2, codex2_1)
+		{"codex2", "codex", "2", true, false, 0, true},
+		{"codex2_1", "codex", "2", false, true, 1, true},
 
 		// Unmatched
 		{"other", "agy", "", false, false, 0, false},

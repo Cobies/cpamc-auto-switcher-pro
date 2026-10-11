@@ -1,4 +1,10 @@
-# cpamc-auto-switcher Pi Extension
+# cpamc-auto-switcher Pi Extension (Legacy Standalone Failover)
+
+> ⚠️ **AVISO DE DEPRECACIÓN / HOMOLOGACIÓN (OCTUBRE 2026)**:
+> Este módulo ha sido formalmente subsumido e integrado en la **Extensión Unificada Oficial**:
+> 👉 [`extensions/cpamc-auto-switcher`](../../extensions/cpamc-auto-switcher)
+> 
+> La extensión unificada combina el Failover Reactivo de este módulo junto con el Dynamic Provider (`cpamc`), el Selector Interactivo `/cpamc-model` y la QuotaCard Sidebar en un solo paquete homologado para Pi y Gentle-Shell.
 
 Pi coding-agent extension that automatically triggers `cpamc-auto-switcher` after agent turns, subagent completions, and on real-time rate limit (HTTP 429) or quota exhaustion events.
 

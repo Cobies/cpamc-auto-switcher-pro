@@ -1,0 +1,451 @@
+package plugin
+
+import (
+	"encoding/json"
+	"fmt"
+	"regexp"
+	"sort"
+	"strings"
+)
+
+// Plugin-side RPC methods exposed by the CLIProxyAPI plugin host for the
+// model_provider, model_router and scheduler capabilities (sdk/pluginabi names).
+const (
+	methodModelStatic   = "model.static"
+	methodModelRegister = "model.register"
+	methodModelForAuth  = "model.for_auth"
+	methodModelRoute    = "model.route"
+	methodSchedulerPick = "scheduler.pick"
+)
+
+// antigravityProviderKey is the built-in provider key that owns the physical
+// Antigravity OAuth credentials. The plugin registers its virtual pool models
+// under this provider so the host resolves and schedules them natively.
+const antigravityProviderKey = "antigravity"
+
+// poolPrefixTargetPattern matches the reserve numbering convention of a pool
+// base prefix (e.g. "clau_1" for base "clau"). Alphabetic suffixes belong to
+// sibling pools, never to this one.
+var poolReserveNumberPattern = regexp.MustCompile(`_\d+$`)
+
+// Wire payloads. The CLIProxyAPI host marshals SDK request structs without json
+// tags (Go field names, PascalCase) and decodes plugin responses into the same
+// structs case-insensitively, so responses also use Go field names.
+
+type modelStaticRequest struct {
+	Plugin map[string]any `json:"Plugin"`
+	Host   map[string]any `json:"Host"`
+}
+
+type modelForAuthRequest struct {
+	Plugin       map[string]any    `json:"Plugin"`
+	AuthID       string            `json:"AuthID"`
+	AuthProvider string            `json:"AuthProvider"`
+	StorageJSON  []byte            `json:"StorageJSON"`
+	Metadata     map[string]any    `json:"Metadata"`
+	Attributes   map[string]string `json:"Attributes"`
+}
+
+type modelRouteRequest struct {
+	Plugin         map[string]any       `json:"Plugin"`
+	PluginID       string               `json:"PluginID"`
+	SourceFormat   string               `json:"SourceFormat"`
+	RequestedModel string               `json:"RequestedModel"`
+	Stream         bool                 `json:"Stream"`
+	Metadata       map[string]any       `json:"Metadata"`
+	Headers        map[string][]string  `json:"Headers"`
+}
+
+// pluginModelInfo mirrors sdk/pluginapi.ModelInfo (untagged fields). Only the
+// identity fields the host registry consumes are populated.
+type pluginModelInfo struct {
+	ID          string `json:"ID"`
+	Object      string `json:"Object"`
+	Created     int64  `json:"Created"`
+	OwnedBy     string `json:"OwnedBy"`
+	DisplayName string `json:"DisplayName"`
+}
+
+type modelResponse struct {
+	Provider string            `json:"Provider"`
+	Models   []pluginModelInfo `json:"Models"`
+}
+
+type modelRouteResponse struct {
+	Handled     bool   `json:"Handled"`
+	TargetKind  string `json:"TargetKind"`
+	Target      string `json:"Target,omitempty"`
+	TargetModel string `json:"TargetModel,omitempty"`
+	Reason      string `json:"Reason,omitempty"`
+}
+
+// schedulerPickRequest mirrors sdk/pluginapi.SchedulerPickRequest. Candidates
+// arrive already filtered by availability (cooldowns excluded) and model support.
+type schedulerPickRequest struct {
+	Plugin     map[string]any       `json:"Plugin"`
+	Provider   string               `json:"Provider"`
+	Providers  []string             `json:"Providers"`
+	Model      string               `json:"Model"`
+	Stream     bool                 `json:"Stream"`
+	Options    schedulerOptions     `json:"Options"`
+	Candidates []schedulerCandidate `json:"Candidates"`
+}
+
+type schedulerOptions struct {
+	Headers  map[string][]string `json:"Headers"`
+	Metadata map[string]any      `json:"Metadata"`
+}
+
+type schedulerCandidate struct {
+	ID         string            `json:"ID"`
+	Provider   string            `json:"Provider"`
+	Priority   int               `json:"Priority"`
+	Status     string            `json:"Status"`
+	Attributes map[string]string `json:"Attributes"`
+}
+
+// schedulerPickResponse mirrors sdk/pluginapi.SchedulerPickResponse (the SDK
+// decodes both PascalCase and snake_case field names).
+type schedulerPickResponse struct {
+	AuthID          string `json:"AuthID,omitempty"`
+	DelegateBuiltin string `json:"DelegateBuiltin,omitempty"`
+	Handled         bool   `json:"Handled"`
+	Reject          bool   `json:"Reject,omitempty"`
+	RejectReason    string `json:"RejectReason,omitempty"`
+	RejectCode      string `json:"RejectCode,omitempty"`
+}
+
+// activeRegistry returns the pool registry used by the model provider handlers.
+// Overridable in tests to isolate fixture state from the process singleton.
+var activeRegistry = func() *PoolRegistry { return DefaultRegistry() }
+
+// baselineAntigravityModels is the standard Antigravity catalog published
+// natively for credentials without pool membership. It keeps free accounts
+// serving their native family while the plugin owns the provider catalog.
+var baselineAntigravityModels = []pluginModelInfo{
+	{ID: "gemini-3-flash", Object: "model", OwnedBy: antigravityProviderKey, DisplayName: "Gemini 3 Flash"},
+	{ID: "gemini-3.1-flash-lite", Object: "model", OwnedBy: antigravityProviderKey, DisplayName: "Gemini 3.1 Flash Lite"},
+	{ID: "gemini-3.1-flash-image", Object: "model", OwnedBy: antigravityProviderKey, DisplayName: "Gemini 3.1 Flash Image"},
+	{ID: "gemini-3.1-pro-low", Object: "model", OwnedBy: antigravityProviderKey, DisplayName: "Gemini 3.1 Pro Low"},
+	{ID: "gemini-3.5-flash-lite", Object: "model", OwnedBy: antigravityProviderKey, DisplayName: "Gemini 3.5 Flash Lite"},
+	{ID: "gemini-3.6-flash-high", Object: "model", OwnedBy: antigravityProviderKey, DisplayName: "Gemini 3.6 Flash High"},
+	{ID: "gemini-3.7-flash-high", Object: "model", OwnedBy: antigravityProviderKey, DisplayName: "Gemini 3.7 Flash High"},
+	{ID: "gemini-3.8-flash-high", Object: "model", OwnedBy: antigravityProviderKey, DisplayName: "Gemini 3.8 Flash High"},
+	{ID: "gemini-pro-agent", Object: "model", OwnedBy: antigravityProviderKey, DisplayName: "Gemini Pro Agent"},
+}
+
+// cloneBaseline returns a copy of the baseline catalog.
+func cloneBaseline() []pluginModelInfo {
+	out := make([]pluginModelInfo, len(baselineAntigravityModels))
+	copy(out, baselineAntigravityModels)
+	return out
+}
+
+// cleanBareModelID strips any leading provider/pool prefixes (e.g. agy/agy/gemini-3-flash -> gemini-3-flash)
+func cleanBareModelID(id string) string {
+	cur := strings.TrimSpace(id)
+	for {
+		idx := strings.Index(cur, "/")
+		if idx >= 0 && idx < len(cur)-1 {
+			cur = cur[idx+1:]
+		} else {
+			break
+		}
+	}
+	return cur
+}
+
+// poolTargets extracts the pool's target model list (empty when unset).
+func poolTargets(pool PoolDefinition) []string {
+	if pool.Policy.DisableIsolation {
+		// Wildcard pools serve every family: no virtual catalog narrowing.
+		return nil
+	}
+	seen := make(map[string]struct{})
+	targets := make([]string, 0, len(pool.Policy.TargetModels))
+	for _, t := range pool.Policy.TargetModels {
+		bare := cleanBareModelID(t)
+		if bare != "" {
+			if _, dup := seen[bare]; !dup {
+				seen[bare] = struct{}{}
+				targets = append(targets, bare)
+			}
+		}
+	}
+	return targets
+}
+
+// prefixMatchesPool reports whether an auth disk prefix belongs to the pool
+// base prefix (exact or numeric reserve suffix).
+func prefixMatchesPool(prefix, basePrefix string) bool {
+	prefix = strings.TrimSpace(prefix)
+	base := strings.TrimSpace(basePrefix)
+	if prefix == "" || base == "" {
+		return false
+	}
+	if prefix == base {
+		return true
+	}
+	if !strings.HasPrefix(prefix, base+"_") {
+		return false
+	}
+	suffix := strings.TrimPrefix(prefix, base+"_")
+	return poolReserveNumberPattern.MatchString("_" + suffix)
+}
+
+// poolContainsAuth reports whether the auth file is a member of the pool.
+func poolContainsAuth(pool PoolDefinition, authFileName string) bool {
+	name := strings.TrimSpace(authFileName)
+	if name == "" {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(pool.LeaderAuth), name) {
+		return true
+	}
+	for _, reserve := range pool.Reserves {
+		if strings.EqualFold(strings.TrimSpace(reserve), name) {
+			return true
+		}
+	}
+	return false
+}
+
+// memberPoolsForAuth returns the pools whose membership includes the auth.
+func memberPoolsForAuth(registry *PoolRegistry, authFileName string) []PoolDefinition {
+	all := registry.ListPools()
+	members := make([]PoolDefinition, 0, len(all))
+	for _, pool := range all {
+		if poolContainsAuth(pool, authFileName) {
+			members = append(members, pool)
+		}
+	}
+	return members
+}
+
+// sortModelsByID orders models deterministically by ID.
+func sortModelsByID(models []pluginModelInfo) {
+	sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
+}
+
+// modelCatalogForAuth computes the complete model catalog the host must
+// register for one auth, derived from its pool memberships:
+//   - auth without pools → baseline catalog (native-equivalent).
+//   - member of a pool whose base prefix matches its disk prefix (disk-backed)
+//     → the pool's bare target models (native naming preserved).
+//   - member of a registry-only pool (2N dual-family) → the bare target models
+//     plus the pool-prefixed virtual routes, all served by the same credential.
+func modelCatalogForAuth(diskPrefix string, memberPools []PoolDefinition) []pluginModelInfo {
+	if len(memberPools) == 0 {
+		return cloneBaseline()
+	}
+
+	seen := make(map[string]struct{})
+	models := make([]pluginModelInfo, 0, 16)
+	add := func(id string) {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return
+		}
+		if _, dup := seen[id]; dup {
+			return
+		}
+		seen[id] = struct{}{}
+		display := id
+		if slash := strings.Index(id, "/"); slash >= 0 && slash < len(id)-1 {
+			display = id[slash+1:]
+		}
+		models = append(models, pluginModelInfo{
+			ID:          id,
+			Object:      "model",
+			OwnedBy:     antigravityProviderKey,
+			DisplayName: display,
+		})
+	}
+
+	for _, pool := range memberPools {
+		targets := poolTargets(pool)
+		diskBacked := prefixMatchesPool(diskPrefix, pool.BasePrefix)
+		for _, target := range targets {
+			add(target)
+			if !diskBacked {
+				add(pool.BasePrefix + "/" + target)
+			}
+		}
+	}
+
+	sortModelsByID(models)
+	return models
+}
+
+// poolPrefixedCatalog computes the static catalog of virtual pool routes:
+// "<base>/<target>" for every pool target, plus the baseline when no pools
+// exist (keeps the provider match key armed at host sweep time).
+func poolPrefixedCatalog(registry *PoolRegistry) []pluginModelInfo {
+	pools := registry.ListPools()
+	models := make([]pluginModelInfo, 0, 16)
+	for _, pool := range pools {
+		for _, target := range poolTargets(pool) {
+			models = append(models, pluginModelInfo{
+				ID:          pool.BasePrefix + "/" + target,
+				Object:      "model",
+				OwnedBy:     antigravityProviderKey,
+				DisplayName: target,
+			})
+		}
+	}
+	if len(models) == 0 {
+		return cloneBaseline()
+	}
+	sortModelsByID(models)
+	return models
+}
+
+// routeDecisionFor resolves a model.route request: when the requested model
+// targets a registered pool route ("<base>/<target>"), the plugin rewrites it
+// to the bare target model on the built-in antigravity provider so selection
+// matches the pool members' registered catalog and the upstream call uses the
+// provider-native model name.
+func routeDecisionFor(registry *PoolRegistry, requestedModel string) modelRouteResponse {
+	trimmed := strings.TrimSpace(requestedModel)
+	slash := strings.Index(trimmed, "/")
+	if slash <= 0 || slash >= len(trimmed)-1 {
+		return modelRouteResponse{}
+	}
+
+	base := trimmed[:slash]
+	rest := trimmed[slash+1:]
+	pool, ok := registry.GetPool(base)
+	if !ok {
+		return modelRouteResponse{}
+	}
+
+	for _, target := range poolTargets(pool) {
+		if strings.EqualFold(target, rest) {
+			return modelRouteResponse{
+				Handled:     true,
+				TargetKind:  "provider",
+				Target:      antigravityProviderKey,
+				TargetModel: rest,
+				Reason:      fmt.Sprintf("auto-switcher-pro 2N pool route (%s)", pool.BasePrefix),
+			}
+		}
+	}
+	return modelRouteResponse{}
+}
+
+// parseAuthDiskPrefix extracts the routing prefix from the auth file JSON
+// delivered in the model.for_auth request.
+func parseAuthDiskPrefix(storageJSON []byte) string {
+	if len(storageJSON) == 0 {
+		return ""
+	}
+	var payload struct {
+		Prefix string `json:"prefix"`
+	}
+	if err := json.Unmarshal(storageJSON, &payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.Prefix)
+}
+
+// handleModelStatic serves model.static: the static virtual pool route catalog.
+func handleModelStatic() modelResponse {
+	return modelResponse{
+		Provider: antigravityProviderKey,
+		Models:   poolPrefixedCatalog(activeRegistry()),
+	}
+}
+
+// handleModelForAuth serves model.for_auth: the per-auth model catalog.
+func handleModelForAuth(req modelForAuthRequest) modelResponse {
+	authID := strings.TrimSpace(req.AuthID)
+	diskPrefix := parseAuthDiskPrefix(req.StorageJSON)
+	memberPools := memberPoolsForAuth(activeRegistry(), authID)
+	return modelResponse{
+		Provider: antigravityProviderKey,
+		Models:   modelCatalogForAuth(diskPrefix, memberPools),
+	}
+}
+
+// handleModelRoute serves model.route.
+func handleModelRoute(req modelRouteRequest) modelRouteResponse {
+	return routeDecisionFor(activeRegistry(), req.RequestedModel)
+}
+
+// schedulerPickCascade resolves auth selection for pool requests with the
+// Líder -> Cascading Reserves semantics: the leader serves while available and
+// reserves take over in cascade order. The host delivers Candidates already
+// filtered by availability (cooldowns excluded) and model support, so picking
+// the first cascade member present IS quota-aware failover.
+func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) schedulerPickResponse {
+	// 1) Pool identity from the original client model ("clau/claude-sonnet-4-6")
+	// carried by the host in the requested_model metadata key.
+	originalModel := ""
+	if req.Options.Metadata != nil {
+		if v, ok := req.Options.Metadata["requested_model"]; ok {
+			if s, ok := v.(string); ok {
+				originalModel = strings.TrimSpace(s)
+			}
+		}
+	}
+	var pool *PoolDefinition
+	if slash := strings.Index(originalModel, "/"); slash > 0 {
+		if candidate, ok := registry.GetPool(originalModel[:slash]); ok {
+			rest := originalModel[slash+1:]
+			for _, target := range poolTargets(candidate) {
+				if strings.EqualFold(target, rest) {
+					pool = &candidate
+					break
+				}
+			}
+		}
+	}
+	if pool == nil {
+		// Not a pool request (native credential or non-pool model): native scheduler.
+		return schedulerPickResponse{Handled: false}
+	}
+	// 2) Cascade order: leader first, reserves in registration order.
+	cascade := make([]string, 0, 1+len(pool.Reserves))
+	if leader := strings.TrimSpace(pool.LeaderAuth); leader != "" {
+		cascade = append(cascade, leader)
+	}
+	for _, reserve := range pool.Reserves {
+		if trimmed := strings.TrimSpace(reserve); trimmed != "" {
+			cascade = append(cascade, trimmed)
+		}
+	}
+
+	// 3) Pick the first cascade member present among the available candidates.
+	available := make(map[string]string, len(req.Candidates))
+	for _, candidate := range req.Candidates {
+		if strings.TrimSpace(candidate.ID) != "" {
+			available[strings.ToLower(candidate.ID)] = candidate.ID
+		}
+	}
+	for _, authFile := range cascade {
+		if exactID, ok := available[strings.ToLower(authFile)]; ok {
+			return schedulerPickResponse{
+				Handled: true,
+				AuthID:  exactID,
+			}
+		}
+	}
+
+	// 4) No cascade member available: delegate to the builtin scheduler.
+	return schedulerPickResponse{Handled: false}
+}
+
+// handleSchedulerPick serves scheduler.pick.
+func handleSchedulerPick(req schedulerPickRequest) schedulerPickResponse {
+	return schedulerPickCascade(activeRegistry(), req)
+}
+
+// isModelProviderMethod reports whether the plugin method belongs to the
+// model provider, router or scheduler RPC surface.
+func isModelProviderMethod(method string) bool {
+	switch method {
+	case methodModelStatic, methodModelRegister, methodModelForAuth, methodModelRoute, methodSchedulerPick:
+		return true
+	}
+	return false
+}
