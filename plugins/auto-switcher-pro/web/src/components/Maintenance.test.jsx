@@ -122,6 +122,35 @@ describe('Maintenance Component - Centro Dinámico de Acciones y Resolución', (
     });
   });
 
+  it('displays incident card and purges when orphan build artifacts are detected', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.spyOn(managementClient, 'scanSystemHealth').mockResolvedValue({
+      ok: true,
+      total_auth_files: 4,
+      active_pools_count: 2,
+      orphan_artifacts: ['plugins/auto-switcher-pro/auto-switcher-pro-linux-amd64.h'],
+    });
+    const cleanSpy = vi.spyOn(managementClient, 'cleanSystemResidues').mockResolvedValue({
+      ok: true,
+      purged_artifacts: ['plugins/auto-switcher-pro/auto-switcher-pro-linux-amd64.h'],
+      message: 'Artefactos purgados con éxito',
+    });
+
+    render(<Maintenance />);
+    fireEvent.click(screen.getByTestId('btn-scan-health'));
+
+    const incidentCard = await screen.findByTestId('incident-orphan-artifacts');
+    expect(incidentCard).toBeTruthy();
+    expect(screen.getByText('plugins/auto-switcher-pro/auto-switcher-pro-linux-amd64.h')).toBeTruthy();
+
+    const cleanBtn = screen.getByTestId('btn-clean-orphan-artifacts');
+    fireEvent.click(cleanBtn);
+
+    await waitFor(() => {
+      expect(cleanSpy).toHaveBeenCalled();
+    });
+  });
+
   it('invokes deleteAuthFile on orphan purge click after confirmation', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     vi.spyOn(managementClient, 'scanSystemHealth').mockResolvedValue({

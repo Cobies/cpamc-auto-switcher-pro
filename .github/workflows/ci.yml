@@ -27,6 +27,15 @@ jobs:
       - name: go test
         working-directory: ${{ matrix.module }}
         run: go test ./...
+      - name: Verify no orphan build artifacts in source tree
+        run: |
+          set -euo pipefail
+          STRAY=$(find plugins/ -type f \( -name "*.h" -o -name "*.so" \) ! -path "*/bin/*" || true)
+          if [ -n "$STRAY" ]; then
+            echo "Error: Orphan build artifacts detected outside bin/:"
+            echo "$STRAY"
+            exit 1
+          fi
 
   web:
     name: Web tests

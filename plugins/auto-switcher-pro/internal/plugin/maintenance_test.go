@@ -108,3 +108,43 @@ func TestMaintenanceHTTPDispatch(t *testing.T) {
 		t.Fatalf("expected envelope ok=true, got %v", env)
 	}
 }
+
+func TestMaintenanceOrphanArtifactsDetectionAndClean(t *testing.T) {
+	tempPluginDir := t.TempDir()
+	t.Setenv("AUTO_SWITCHER_PLUGIN_DIR", tempPluginDir)
+
+	// Create dummy orphan header and shared library in source directory
+	headerFile := filepath.Join(tempPluginDir, "auto-switcher-pro-linux-amd64.h")
+	soFile := filepath.Join(tempPluginDir, "auto-switcher-pro-linux-amd64.so")
+	_ = os.WriteFile(headerFile, []byte("// orphan header"), 0644)
+	_ = os.WriteFile(soFile, []byte("ELF binary dummy"), 0755)
+
+	// Scan should detect both orphan artifacts
+	orphans := scanOrphanArtifacts()
+	if len(orphans) < 2 {
+		t.Fatalf("expected at least 2 orphan artifacts, got %d (%v)", len(orphans), orphans)
+	}
+
+	// Clean should purge them
+	purged := cleanOrphanArtifacts(orphans)
+	if len(purged) < 2 {
+		t.Fatalf("expected at least 2 purged artifacts, got %d (%v)", len(purged), purged)
+	}
+
+	// Confirm files are physically deleted
+	if _, err := os.Stat(headerFile); !os.IsNotExist(err) {
+		t.Fatalf("expected header file to be deleted, but it still exists")
+	}
+	if _, err := os.Stat(soFile); !os.IsNotExist(err) {
+		t.Fatalf("expected so file to be deleted, but it still exists")
+	}
+
+	// Rescan should find 0 orphans
+	orphansAfter := scanOrphanArtifacts()
+	for _, o := range orphansAfter {
+		if o == headerFile || o == soFile {
+			t.Fatalf("orphan %s was not cleaned properly", o)
+		}
+	}
+}
+

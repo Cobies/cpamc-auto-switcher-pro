@@ -351,6 +351,7 @@ export default function Maintenance({ onReloadRequested }) {
   // Identificación dinámica de todos los casos de incidentes
   const residualAccountsCount = scanResult?.residual_accounts?.length || 0;
   const orphanClonesCount = scanResult?.orphan_clones?.length || 0;
+  const orphanArtifactsCount = scanResult?.orphan_artifacts?.length || 0;
   const poolsCount = scanResult?.active_pools_count ?? 0;
   const isZeroPools = scanResult && phases.pools && poolsCount === 0;
   const hasConsoleUpdate = Boolean(scanResult?.console_update_available);
@@ -359,6 +360,7 @@ export default function Maintenance({ onReloadRequested }) {
   const totalIncidents =
     (phases.models ? residualAccountsCount : 0) +
     (phases.auth ? orphanClonesCount : 0) +
+    orphanArtifactsCount +
     (isZeroPools ? 1 : 0) +
     (phases.console && hasConsoleUpdate ? 1 : 0);
 
@@ -759,6 +761,10 @@ export default function Maintenance({ onReloadRequested }) {
                     <span>🚀 Consola:</span>
                     <strong>Sincronizada con el canal oficial</strong>
                   </div>
+                  <div className="healthy-detail-item">
+                    <span>⚙️ Artefactos de Código:</span>
+                    <strong>Código fuente limpio (0 archivos huérfanos fuera de bin/)</strong>
+                  </div>
                 </div>
 
                 <button
@@ -868,6 +874,55 @@ export default function Maintenance({ onReloadRequested }) {
                         {isPurgingOrphans
                           ? 'Eliminando archivos...'
                           : `Purgar ${orphanClonesCount} Archivo(s) Huérfano(s)`}
+                      </span>
+                    </button>
+                  </div>
+                )}
+
+                {/* CASO 3.3: Artefactos de compilación huérfanos fuera de bin/ */}
+                {orphanArtifactsCount > 0 && (
+                  <div className="incident-card" data-testid="incident-orphan-artifacts">
+                    <div className="incident-card-head">
+                      <div className="incident-title-row">
+                        <span className="incident-icon">⚙️</span>
+                        <div>
+                          <strong className="incident-name">Artefactos de Compilación Huérfanos</strong>
+                          <span className="incident-meta">{orphanArtifactsCount} archivo(s) fuera de bin/</span>
+                        </div>
+                      </div>
+                      <span className="tag-warning">Limpieza de Código Fuente</span>
+                    </div>
+                    <p className="incident-desc">
+                      Se detectaron archivos de cabecera (.h) o bibliotecas (.so) generados en carpetas de código fuente. Estos artefactos deben residir únicamente en <code>bin/</code>.
+                    </p>
+                    <div className="incident-sample-table-wrap">
+                      <table className="results-table">
+                        <thead>
+                          <tr>
+                            <th>Archivo Huérfano Detectado</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {scanResult.orphan_artifacts.map((art) => (
+                            <tr key={art}>
+                              <td style={{ fontFamily: 'monospace', color: '#cbd5e1' }}>{art}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-clean"
+                      onClick={handleClean}
+                      disabled={isCleaning}
+                      data-testid="btn-clean-orphan-artifacts"
+                    >
+                      <span>{isCleaning ? '⏳' : '✨'}</span>
+                      <span>
+                        {isCleaning
+                          ? 'Purgando artefactos...'
+                          : `Limpiar ${orphanArtifactsCount} Artefacto(s) Huérfano(s)`}
                       </span>
                     </button>
                   </div>

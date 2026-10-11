@@ -30,6 +30,7 @@ type ScanResult struct {
 	TotalAuthFiles      int                   `json:"total_auth_files"`
 	ResidualAccounts    []ResidualAccountInfo `json:"residual_accounts"`
 	OrphanClones        []string              `json:"orphan_clones"`
+	OrphanArtifacts     []string              `json:"orphan_artifacts,omitempty"`
 	ActivePoolsCount    int                   `json:"active_pools_count"`
 	ConsoleVersionLocal string                `json:"console_version_local"`
 	ConsoleLatestGithub string                `json:"console_latest_github"`
@@ -45,10 +46,11 @@ type ResidualAccountInfo struct {
 }
 
 type CleanResult struct {
-	Ok           bool     `json:"ok"`
-	CleanedFiles []string `json:"cleaned_files"`
-	PurgedClones []string `json:"purged_clones"`
-	Message      string   `json:"message"`
+	Ok              bool     `json:"ok"`
+	CleanedFiles    []string `json:"cleaned_files"`
+	PurgedClones    []string `json:"purged_clones"`
+	PurgedArtifacts []string `json:"purged_artifacts,omitempty"`
+	Message         string   `json:"message"`
 }
 
 type UpdateConsoleResult struct {
@@ -137,6 +139,58 @@ func isForeignModel(model string) bool {
 	// Everything else in CPAMC is from third-party non-antigravity providers
 	// (OpenCode, NVIDIA NIM, GLM, Grok, Moonshot/Kimi, DeepSeek, Qwen, etc.)
 	return true
+}
+
+// scanOrphanArtifacts searches for stray build headers and shared libraries
+// (.h, .so) located in plugin source directories instead of the designated bin/ output.
+func scanOrphanArtifacts() []string {
+	var candidates []string
+	seen := make(map[string]struct{})
+
+	targetDirs := []string{}
+	if envDir := os.Getenv("AUTO_SWITCHER_PLUGIN_DIR"); envDir != "" {
+		targetDirs = append(targetDirs, envDir)
+	}
+	targetDirs = append(targetDirs,
+		"plugins/auto-switcher-pro",
+		"plugins",
+		".",
+	)
+
+	for _, dir := range targetDirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if strings.HasSuffix(name, ".h") || strings.HasSuffix(name, ".so") {
+				if strings.Contains(name, "auto-switcher") || strings.Contains(name, "visual-profile") {
+					fullPath := filepath.Join(dir, name)
+					cleanPath := filepath.Clean(fullPath)
+					if _, already := seen[cleanPath]; !already {
+						seen[cleanPath] = struct{}{}
+						candidates = append(candidates, cleanPath)
+					}
+				}
+			}
+		}
+	}
+	return candidates
+}
+
+// cleanOrphanArtifacts purges any detected orphan build artifacts.
+func cleanOrphanArtifacts(artifacts []string) []string {
+	var purged []string
+	for _, art := range artifacts {
+		if err := os.Remove(art); err == nil {
+			purged = append(purged, art)
+		}
+	}
+	return purged
 }
 
 func scanHealth(authDir, staticDir string) (ScanResult, error) {
@@ -247,6 +301,8 @@ func scanHealth(authDir, staticDir string) (ScanResult, error) {
 		res.ConsoleUpdateAvail = true
 	}
 
+	res.OrphanArtifacts = scanOrphanArtifacts()
+
 	res.Message = fmt.Sprintf("Escaneo completado: %d cuentas con residuos detectadas.", len(res.ResidualAccounts))
 	return res, nil
 }
@@ -330,6 +386,15 @@ func cleanHealth(authDir string) (CleanResult, error) {
 	}
 
 	res.Message = fmt.Sprintf("Se limpiaron %d archivo(s) de credenciales y el estado de los pools quedó saneado.", len(res.CleanedFiles))
+
+	orphans := scanOrphanArtifacts()
+	if len(orphans) > 0 {
+		res.PurgedArtifacts = cleanOrphanArtifacts(orphans)
+		if len(res.PurgedArtifacts) > 0 {
+			res.Message += fmt.Sprintf(" Se purgaron %d artefacto(s) de compilación huérfano(s).", len(res.PurgedArtifacts))
+		}
+	}
+
 	return res, nil
 }
 
