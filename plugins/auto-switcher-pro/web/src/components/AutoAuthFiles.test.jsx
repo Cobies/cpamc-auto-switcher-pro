@@ -462,9 +462,63 @@ describe('AutoAuthFiles Component - Dedicated View & Lifecycle Engine', () => {
       expect(multipurposeBadges.length).toBeGreaterThanOrEqual(1);
     });
 
-    // Assert hero-model-name shows default model (gemini-2.5-pro or claude-3-7-sonnet)
+    // Assert hero-model-name shows multipurpose indication with count
     const heroModelNames = screen.getAllByTestId('hero-model-name');
-    expect(heroModelNames.some((el) => el.textContent.includes('gemini-2.5-pro'))).toBe(true);
+    expect(heroModelNames.some((el) => el.textContent.includes('Todos los modelos'))).toBe(true);
+    expect(screen.getAllByText(/Modo multipropósito abierto/i).length).toBeGreaterThanOrEqual(1);
+  });
+
+  // Cross-Check Contingency Regression Test: Card Banner vs SpecialistModal
+  it('guarantees strict synchronization between Card Multipurpose Banner and SpecialistModal opening state', async () => {
+    const catalog = ['gemini-3.8-flash-high', 'gemini-3.1-pro-low', 'gemini-2.5-flash'];
+    mockPools([
+      {
+        family: 'gemini_pure',
+        base_prefix: 'agy',
+        leader_auth: 'antigravity-sync@gmail.com.json',
+        reserves: [],
+      },
+    ]);
+    const testNodes = [
+      {
+        id: 'sync-test-card',
+        data: {
+          fileName: 'antigravity-sync@gmail.com.json',
+          email: 'sync@gmail.com',
+          prefix: 'agy',
+          provider: 'antigravity',
+          excluded_models: [],
+        },
+      },
+    ];
+
+    render(<AutoAuthFiles nodes={testNodes} catalogModels={catalog} />);
+
+    // 1. Outside Card: Must honestly show Multipurpose / Todos los modelos
+    await waitFor(() => {
+      const bannerName = screen.getByTestId('hero-model-name');
+      expect(bannerName.textContent).toContain('Todos los modelos');
+      expect(screen.getByText(/Modo multipropósito abierto/i)).toBeTruthy();
+      expect(screen.getByText(/Predeterminado preferente: gemini-3.8-flash-high/i)).toBeTruthy();
+    });
+
+    // 2. Click Gear button ⚙️
+    const gearBtn = screen.getByTestId('btn-gear-gemini-0');
+    fireEvent.click(gearBtn);
+
+    // 3. Inside Modal: Must be strictly synchronized in Multipurpose / Permitir todos mode
+    await waitFor(() => {
+      expect(screen.getByTestId('specialist-modal-dialog')).toBeTruthy();
+    });
+
+    const multipurposeBtn = screen.getByTestId('mode-btn-multipurpose');
+    expect(multipurposeBtn.className).toContain('selected');
+    expect(screen.getByTestId('multipurpose-banner')).toBeTruthy();
+    expect(screen.getByTestId('multipurpose-banner').textContent).toContain('Todos los modelos');
+
+    // The single specialist radio for gemini-3.8-flash-high must NOT be checked
+    const radio38 = screen.getByLabelText(/gemini-3.8-flash-high/i);
+    expect(radio38.checked).toBe(false);
   });
 
   // MINI-003 Quota Telemetry Homologation & Refresh

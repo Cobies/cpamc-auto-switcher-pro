@@ -171,14 +171,9 @@ jobs:
         run: go test -v ./...
 
       - name: Build Linux amd64 shared library
-        working-directory: plugins/auto-switcher-pro
-        env:
-          CGO_ENABLED: '1'
-          GOOS: linux
-          GOARCH: amd64
         run: |
-          go build -buildmode=c-shared -ldflags="-s -w" -o auto-switcher-pro-linux-amd64.so .
-          test -f auto-switcher-pro-linux-amd64.so
+          ./scripts/build-plugin.sh amd64
+          test -f bin/auto-switcher-pro-linux-amd64.so
 
       - name: Install arm64 cross-compilation toolchain
         run: |
@@ -186,18 +181,12 @@ jobs:
           sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
 
       - name: Build Linux arm64 shared library
-        working-directory: plugins/auto-switcher-pro
-        env:
-          CGO_ENABLED: '1'
-          GOOS: linux
-          GOARCH: arm64
-          CC: aarch64-linux-gnu-gcc
         run: |
-          go build -buildmode=c-shared -ldflags="-s -w" -o auto-switcher-pro-linux-arm64.so .
-          test -f auto-switcher-pro-linux-arm64.so
+          ./scripts/build-plugin.sh arm64
+          test -f bin/auto-switcher-pro-linux-arm64.so
 
       - name: Verify ELF binary architecture and glibc linkage
-        working-directory: plugins/auto-switcher-pro
+        working-directory: bin
         run: |
           set -euo pipefail
 
@@ -213,7 +202,7 @@ jobs:
           test -f auto-switcher-pro-linux-arm64.so
           file auto-switcher-pro-linux-arm64.so
           readelf -h auto-switcher-pro-linux-arm64.so
-          readelf -h auto-switcher-pro-linux-arm64.so | grep -q "ELF64"
+          readelf -h auto-switcher-pro-linux-arm64.so | grep "ELF64"
           readelf -h auto-switcher-pro-linux-arm64.so | grep -q -E "AArch64|aarch64"
           readelf -d auto-switcher-pro-linux-arm64.so | grep -q -E "NEEDED.*libc\.so\.6"
 
@@ -233,14 +222,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: auto-switcher-pro-linux-amd64
-          path: plugins/auto-switcher-pro/auto-switcher-pro-linux-amd64.so
+          path: bin/auto-switcher-pro-linux-amd64.so
           if-no-files-found: error
 
       - name: Upload Linux arm64 binary artifact (.so only)
         uses: actions/upload-artifact@v4
         with:
           name: auto-switcher-pro-linux-arm64
-          path: plugins/auto-switcher-pro/auto-switcher-pro-linux-arm64.so
+          path: bin/auto-switcher-pro-linux-arm64.so
           if-no-files-found: error
 
   publish:

@@ -342,7 +342,7 @@ export default function AutoAuthFiles({
     [quotasMap, deriveNativeQuotaGroups, loadingQuotaKeys]
   );
 
-  const renderHeroBanner = (specState, defaultModel, poolStyle) => {
+  const renderHeroBanner = (specState, defaultModel, poolStyle, modelsCount = 0) => {
     const bannerStyle = poolStyle ? {
       borderColor: poolStyle.border,
       background: poolStyle.bg,
@@ -386,16 +386,17 @@ export default function AutoAuthFiles({
         </div>
       );
     }
+    const countLabel = modelsCount > 0 ? ` (${modelsCount})` : '';
     return (
       <div className="hero-model-banner multipurpose" data-testid="hero-model-banner">
         <div className="hero-model-badge-row">
           <span className="badge-multipurpose-default">✨ MODELO PREDETERMINADO (MULTIPROPÓSITO)</span>
         </div>
         <div className="hero-model-name" data-testid="hero-model-name">
-          {defaultModel}
+          Todos los modelos{countLabel}
         </div>
         <div className="hero-model-helper">
-          Modo multipropósito balanceado · Tráfico distribuido entre modelos disponibles
+          Modo multipropósito abierto · Predeterminado preferente: {defaultModel}
         </div>
       </div>
     );
@@ -960,7 +961,8 @@ export default function AutoAuthFiles({
                     : cardInherited.find((m) => m.includes('3.7') || m.includes('sonnet'))
                     || cardInherited[0]
                     || 'claude-3-7-sonnet',
-                  poolGroupStyle
+                  poolGroupStyle,
+                  cardInherited.length
                 )}
 
                 <div className="auto-auth-badges-row">
