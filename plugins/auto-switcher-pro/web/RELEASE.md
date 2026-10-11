@@ -1,18 +1,18 @@
-# Visual Profile Plugin (Linux amd64 & arm64) Release Guide
+# Auto Switcher Pro Plugin (Linux amd64 & arm64) Release Guide
 
-This document defines the release architecture, access control model, verification pipeline, and operational procedures for publishing pre-compiled Linux amd64 and Linux arm64 (glibc) shared library binaries (`.so`) of the `visual-profile` plugin.
+This document defines the release architecture, access control model, verification pipeline, and operational procedures for publishing pre-compiled Linux amd64 and Linux arm64 (glibc) shared library binaries (`.so`) of the `auto-switcher-pro` plugin.
 
 ---
 
 ## 1. Overview & Architecture
 
 Releases are published strictly through manual dispatch via the GitHub Actions workflow:
-`.github/workflows/visual-profile-release.yml`
+`.github/workflows/auto-switcher-pro-release.yml`
 
 ### Execution Model: Manual Dispatch Only
 - **Trigger**: The workflow is triggered exclusively via `workflow_dispatch` from the `main` branch (`refs/heads/main`).
 - **No Push Triggers**: Pushing commits or tags to the repository does **not** trigger any release workflow.
-- **Workflow Presence on `main`**: On GitHub Actions, `workflow_dispatch` workflows are only available and runnable once the workflow definition file (`.github/workflows/visual-profile-release.yml`) is committed and merged into `main`.
+- **Workflow Presence on `main`**: On GitHub Actions, `workflow_dispatch` workflows are only available and runnable once the workflow definition file (`.github/workflows/auto-switcher-pro-release.yml`) is committed and merged into `main`.
 - **New Release Tag Input**: The operator enters a **new** release version tag matching `vX.Y.Z` (e.g. `v0.1.0`) directly into the workflow dispatch input.
 - **No Local Tag Push Required**: Operators do **not** create or push any git tag beforehand (no local tag push required). Git tags are created directly by GitHub during release creation at the tested commit.
 
@@ -26,10 +26,10 @@ Releases are published strictly through manual dispatch via the GitHub Actions w
   Both `build` and `publish` stages check that neither the git tag (via `git ls-remote --exit-code`) nor the GitHub release (via `gh api repos/${REPO}/releases/tags/${TAG}`) exists on remote origin. The check is strictly fail-closed: execution proceeds only when the tag check returns exit code 2 (not found) and the release API returns HTTP 404. Any collision (HTTP 200 / exit 0), auth failure, rate limit, or transport error aborts the workflow immediately.
 - **Multi-Component Version Parity**:
   The workflow validates that the release tag strictly matches:
-  - Go plugin version: `plugins/visual-profile/internal/version/version.go` (`const Version = "X.Y.Z"`)
-  - Web package version: `plugins/visual-profile/web/package.json` (`"version": "X.Y.Z"`)
+  - Go plugin version: `plugins/auto-switcher-pro/internal/version/version.go` (`const Version = "X.Y.Z"`)
+  - Web package version: `plugins/auto-switcher-pro/web/package.json` (`"version": "X.Y.Z"`)
 - **Embedded Web Asset Parity Check**:
-  Frontend assets are built with `npm run build` from lockfile (`npm ci`) and compared against tracked assets via `git diff --exit-code -- plugins/visual-profile/internal/web/assets/index.html` to guarantee that the single-file UI embedded in the Go binary matches the committed source.
+  Frontend assets are built with `npm run build` from lockfile (`npm ci`) and compared against tracked assets via `git diff --exit-code -- plugins/auto-switcher-pro/internal/web/assets/index.html` to guarantee that the single-file UI embedded in the Go binary matches the committed source.
 - **Automated Validation**:
   Full test suites run before compilation: frontend unit tests (`npm test -- --run`) and Go package tests (`go test -v ./...`).
 - **Least-Privilege Token Permissions**:
@@ -49,7 +49,7 @@ Releases are published strictly through manual dispatch via the GitHub Actions w
 - **Exclusion of C Header Artifacts**:
   Go C-shared compilation generates companion `.h` header files. The workflow explicitly uploads only `.so` shared library files, omitting unneeded header artifacts from releases.
 - **Cryptographic Checksumming**:
-  Per-architecture SHA-256 checksum files (`visual-profile-linux-amd64.so.sha256` and `visual-profile-linux-arm64.so.sha256`) are computed and attached to the GitHub Release alongside each binary.
+  Per-architecture SHA-256 checksum files (`auto-switcher-pro-linux-amd64.so.sha256` and `auto-switcher-pro-linux-arm64.so.sha256`) are computed and attached to the GitHub Release alongside each binary.
 - **Shell Injection Immunity**:
   All inputs and GitHub context variables are bound via environment variables (`env:`). Direct script interpolation (`${{ ... }}` inside `run:` blocks) is strictly forbidden.
 
@@ -82,7 +82,7 @@ To ensure release workflow definitions, version declarations, and embedded asset
 
 GitHub release creation with file attachments is a multi-step operation executed by GitHub CLI:
 1. GitHub creates the release record and the git tag pointing to `--target`. Because `gh release create` is executed without `--draft`, this produces an immediately published release (not a draft).
-2. GitHub CLI uploads attached release assets (`visual-profile-linux-amd64.so`, `visual-profile-linux-amd64.so.sha256`, `visual-profile-linux-arm64.so`, and `visual-profile-linux-arm64.so.sha256`) sequentially in separate requests. Creation and asset uploads are separate operations (there is no atomic tag+asset delivery).
+2. GitHub CLI uploads attached release assets (`auto-switcher-pro-linux-amd64.so`, `auto-switcher-pro-linux-amd64.so.sha256`, `auto-switcher-pro-linux-arm64.so`, and `auto-switcher-pro-linux-arm64.so.sha256`) sequentially in separate requests. Creation and asset uploads are separate operations (there is no atomic tag+asset delivery).
 
 ### Partial Failure Scenario
 If an asset upload fails midway (due to a transient network timeout, runner disruption, or GitHub asset service error) after the tag and release have been created:
@@ -153,17 +153,17 @@ The workflow executes two strictly isolated jobs:
 
 ### Step 1: Prepare Code and Version Parity on `main`
 1. Update internal version declarations to the target release version `X.Y.Z`:
-   - `plugins/visual-profile/internal/version/version.go`:
+   - `plugins/auto-switcher-pro/internal/version/version.go`:
      ```go
      const Version = "0.1.0"
      ```
-   - `plugins/visual-profile/web/package.json`:
+   - `plugins/auto-switcher-pro/web/package.json`:
      ```json
      "version": "0.1.0"
      ```
-   - Synchronize `package-lock.json`: Both the root `"version"` and `packages[""].version` in `plugins/visual-profile/web/package-lock.json` must match the web `package.json` version. Run `npm install --package-lock-only` (or `npm version <X.Y.Z> --no-git-tag-version`) before running `npm ci`, and commit the updated lockfile:
+   - Synchronize `package-lock.json`: Both the root `"version"` and `packages[""].version` in `plugins/auto-switcher-pro/web/package-lock.json` must match the web `package.json` version. Run `npm install --package-lock-only` (or `npm version <X.Y.Z> --no-git-tag-version`) before running `npm ci`, and commit the updated lockfile:
      ```bash
-     cd plugins/visual-profile/web
+     cd plugins/auto-switcher-pro/web
      npm install --package-lock-only
      ```
 2. Rebuild frontend assets and verify embedding:
@@ -172,11 +172,11 @@ The workflow executes two strictly isolated jobs:
    npm test -- --run
    npm run build
    cd ../../..
-   git diff --exit-code -- plugins/visual-profile/internal/web/assets/index.html
+   git diff --exit-code -- plugins/auto-switcher-pro/internal/web/assets/index.html
    ```
 3. Run Go tests locally:
    ```bash
-   cd plugins/visual-profile
+   cd plugins/auto-switcher-pro
    go test -v ./...
    cd ../..
    ```
@@ -185,7 +185,7 @@ The workflow executes two strictly isolated jobs:
 
 ### Step 2: Trigger the Release via `workflow_dispatch`
 1. In the GitHub repository, navigate to the **Actions** tab.
-2. In the left sidebar, select **Release Linux Visual Profile Plugin**.
+2. In the left sidebar, select **Release Linux Auto Switcher Pro Plugin**.
 3. Click the **Run workflow** dropdown on the right:
    - Ensure **Branch: main** is selected.
    - In the **Release version tag** input, enter the new version tag: `v0.1.0`.
@@ -205,28 +205,28 @@ After the workflow completes successfully, verify the published release:
 1. Check the GitHub Releases page for `v0.1.0`.
 2. Confirm the tag was created at the target commit on `main`.
 3. Confirm all four release assets are attached (no `.h` headers):
-   - `visual-profile-linux-amd64.so`
-   - `visual-profile-linux-amd64.so.sha256`
-   - `visual-profile-linux-arm64.so`
-   - `visual-profile-linux-arm64.so.sha256`
+   - `auto-switcher-pro-linux-amd64.so`
+   - `auto-switcher-pro-linux-amd64.so.sha256`
+   - `auto-switcher-pro-linux-arm64.so`
+   - `auto-switcher-pro-linux-arm64.so.sha256`
 4. Checksum verification commands for each architecture:
 
    **For Linux amd64**:
    ```bash
-   sha256sum -c visual-profile-linux-amd64.so.sha256
+   sha256sum -c auto-switcher-pro-linux-amd64.so.sha256
    ```
    Expected output:
    ```text
-   visual-profile-linux-amd64.so: OK
+   auto-switcher-pro-linux-amd64.so: OK
    ```
 
    **For Linux arm64 (glibc)**:
    ```bash
-   sha256sum -c visual-profile-linux-arm64.so.sha256
+   sha256sum -c auto-switcher-pro-linux-arm64.so.sha256
    ```
    Expected output:
    ```text
-   visual-profile-linux-arm64.so: OK
+   auto-switcher-pro-linux-arm64.so: OK
    ```
 
 5. Target Environment Compatibility:
@@ -236,5 +236,5 @@ After the workflow completes successfully, verify the published release:
      - AWS Graviton / Graviton2 / Graviton3 (Amazon Linux 2023, Ubuntu arm64)
      - Apple Silicon Docker containers running Linux/arm64 guests (e.g. `linux/arm64` container images on Docker Desktop, OrbStack, Colima)
    - **Unsupported Environments**:
-     - **macOS host native runtime**: The `visual-profile-linux-arm64.so` binary is an ELF shared library for Linux glibc. Native macOS (`darwin/arm64`) cannot load ELF `.so` files and requires Mach-O `.dylib` plugins.
+     - **macOS host native runtime**: The `auto-switcher-pro-linux-arm64.so` binary is an ELF shared library for Linux glibc. Native macOS (`darwin/arm64`) cannot load ELF `.so` files and requires Mach-O `.dylib` plugins.
      - **musl-based distributions**: Alpine Linux and other musl-libc environments cannot load glibc-linked shared libraries without compatibility layers (e.g. `gcompat`).

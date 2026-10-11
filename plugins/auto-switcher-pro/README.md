@@ -1,10 +1,10 @@
-# Visual Profile Plugin
+# Auto Switcher Pro Plugin
 
-Standalone CLIProxyAPI C-ABI plugin providing an embedded React Flow visual editor for prefix-based parent and child account routing.
+Standalone CLIProxyAPI C-ABI plugin providing an embedded React Flow visual editor and infrastructure management engine for prefix-based account routing and pool balancing.
 
 ## Overview
 
-The `visual-profile` plugin integrates with the CLIProxyAPI host via C-ABI version 1 and provides a management UI at `/profiles`. It enables visual management of parent/child profile topologies while strictly preserving full parent prefixes (such as `agy_p1`, `agy_p2`, or complex multi-underscore prefixes) when assigning child prefixes (`${parentPrefix}_${nextNumber}`).
+The `auto-switcher-pro` plugin integrates with the CLIProxyAPI host via C-ABI version 1 and provides a management UI at `/profiles`. It enables visual management of parent/child profile topologies while strictly preserving full parent prefixes (such as `agy_p1`, `agy_p2`, or complex multi-underscore prefixes) when assigning child prefixes (`${parentPrefix}_${nextNumber}`).
 
 ## Key Features
 
@@ -41,8 +41,8 @@ The `visual-profile` plugin integrates with the CLIProxyAPI host via C-ABI versi
 ## Project Structure
 
 ```
-plugins/visual-profile/
-├── go.mod               # Standalone Go module (visual-profile)
+plugins/auto-switcher-pro/
+├── go.mod               # Standalone Go module (auto-switcher-pro)
 ├── main.go              # C-ABI export functions (cliproxy_plugin_init, cliproxyPluginCall, etc.)
 ├── main_nocgo.go        # Pure Go fallback stub for non-CGO testing
 ├── main_test.go         # Integration tests for plugin methods, routing, and registration
@@ -70,7 +70,7 @@ plugins/visual-profile/
 ### Web Frontend Tests & Build
 
 ```bash
-cd plugins/visual-profile/web
+cd plugins/auto-switcher-pro/web
 
 # Run Vitest test suite
 npm test -- --run
@@ -82,7 +82,7 @@ npm run build
 ### Go Plugin Tests
 
 ```bash
-cd plugins/visual-profile
+cd plugins/auto-switcher-pro
 
 # Run all package unit and integration tests
 go test ./...
@@ -90,24 +90,24 @@ go test ./...
 
 ### Build the Linux AMD64 plugin with Docker
 
-Run one of these single-line commands **from `plugins/visual-profile`**. Both build a Linux `.so` for CLIProxyAPI, including when Docker runs on Windows. The embedded UI comes from `internal/web/assets`; after changing the frontend, run `npm run build` in `web/` first.
+Run one of these single-line commands **from `plugins/auto-switcher-pro`**. Both build a Linux `.so` for CLIProxyAPI, including when Docker runs on Windows. The embedded UI comes from `internal/web/assets`; after changing the frontend, run `npm run build` in `web/` first.
 
 **Linux (Bash):**
 
 ```bash
-docker run --rm --platform linux/amd64 -v "$(pwd):/src" -w /src golang:1.22 go build -buildmode=c-shared -ldflags="-s -w" -o visual-profile-linux-amd64.so .
+docker run --rm --platform linux/amd64 -v "$(pwd):/src" -w /src golang:1.26 go build -buildmode=c-shared -ldflags="-s -w" -o auto-switcher-pro-linux-amd64.so .
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-docker run --rm --platform linux/amd64 -v "${PWD}:/src" -w /src golang:1.22 go build -buildmode=c-shared '-ldflags=-s -w' -o visual-profile-linux-amd64.so .
+docker run --rm --platform linux/amd64 -v "${PWD}:/src" -w /src golang:1.26 go build -buildmode=c-shared '-ldflags=-s -w' -o auto-switcher-pro-linux-amd64.so .
 ```
 
 **Windows (Git Bash):**
 
 ```bash
-MSYS_NO_PATHCONV=1 docker run --rm --platform linux/amd64 -v "$(pwd -W):/src" -w /src golang:1.22 go build -buildmode=c-shared '-ldflags=-s -w' -o visual-profile-linux-amd64.so .
+MSYS_NO_PATHCONV=1 docker run --rm --platform linux/amd64 -v "$(pwd -W):/src" -w /src golang:1.26 go build -buildmode=c-shared '-ldflags=-s -w' -o auto-switcher-pro-linux-amd64.so .
 ```
 
-The resulting file is `plugins/visual-profile/visual-profile-linux-amd64.so` (Go also generates a `.h` file). Docker must be running; the build uses the Linux CGO toolchain inside the image, not a local Windows compiler. Git Bash requires `MSYS_NO_PATHCONV=1` to keep Docker's `/src` path from being rewritten as a Windows path.
+The resulting file is `plugins/auto-switcher-pro/auto-switcher-pro-linux-amd64.so` (Go also generates a `.h` file). Docker must be running; the build uses the Linux CGO toolchain inside the image, not a local Windows compiler. Git Bash requires `MSYS_NO_PATHCONV=1` to keep Docker's `/src` path from being rewritten as a Windows path.
