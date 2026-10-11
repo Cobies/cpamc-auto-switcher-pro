@@ -469,9 +469,13 @@ async function fetchAccountPrefixesAndExclusions(baseUrl: string, signal?: Abort
     }
 }
 
-const KNOWN_ACCOUNT_PREFIXES = new Set([
-    "agy", "agy2", "agy_son", "agy_opus", "agy_clau"
-]);
+function isKnownFallbackPrefix(prefix: string): boolean {
+    return /^agy\d*$/.test(prefix) ||
+        prefix === "agy_son" || /^agy_son\d+$/.test(prefix) ||
+        prefix === "agy_opus" || /^agy_opus\d+$/.test(prefix) ||
+        ((prefix.startsWith("clau") || prefix.startsWith("claude")) && !prefix.startsWith("agy_")) ||
+        prefix === "codex" || /^codex\d+$/.test(prefix);
+}
 
 function isCleanIncludedModel(id: string, filterData: {
     validPrefixes: Set<string>;
@@ -492,32 +496,36 @@ function isCleanIncludedModel(id: string, filterData: {
         return false;
     }
 
-    // 2. Comprobar validez de prefijo
+    // 2. Comprobar validez de prefijo (validPrefixes del backend o fallback por convención N -> ∞)
     if (filterData) {
         if (!filterData.validPrefixes.has(prefix)) {
             return false;
         }
-    } else if (!KNOWN_ACCOUNT_PREFIXES.has(prefix)) {
+    } else if (!isKnownFallbackPrefix(prefix)) {
         return false;
     }
 
-    // 3. Aislamiento estricto por familia de pool
+    // 3. Aislamiento estricto por familia de pool (Escalabilidad N -> ∞)
     const modelSlug = trimmed.slice(slashIndex + 1).toLowerCase();
-    const isAgyGemini = prefix === "agy" || prefix === "agy2" || /^agy\d+$/.test(prefix);
-    const isAgySonnet = prefix === "agy_son" || prefix === "agy_son2";
-    const isAgyOpus = prefix === "agy_opus" || prefix === "agy_opus2";
-    const isClaudeGeneric = prefix === "agy_clau" || prefix === "clau";
+    const isAgyGemini = /^agy\d*$/.test(prefix);
+    const isAgySonnet = prefix === "agy_son" || /^agy_son\d+$/.test(prefix);
+    const isAgyOpus = prefix === "agy_opus" || /^agy_opus\d+$/.test(prefix);
+    const isDirectClaude = (prefix.startsWith("clau") || prefix.startsWith("claude")) && !prefix.startsWith("agy_");
+    const isCodex = prefix === "codex" || /^codex\d+$/.test(prefix);
 
     if (isAgyGemini && !modelSlug.includes("gemini")) {
         return false;
     }
-    if (isAgySonnet && !modelSlug.includes("sonnet")) {
+    if (isAgySonnet && (!modelSlug.includes("sonnet") || modelSlug.includes("opus"))) {
         return false;
     }
-    if (isAgyOpus && !modelSlug.includes("opus")) {
+    if (isAgyOpus && (!modelSlug.includes("opus") || modelSlug.includes("sonnet"))) {
         return false;
     }
-    if (isClaudeGeneric && !modelSlug.includes("claude")) {
+    if (isDirectClaude && !modelSlug.includes("claude") && !modelSlug.includes("anthropic")) {
+        return false;
+    }
+    if (isCodex && !modelSlug.includes("codex") && !modelSlug.includes("gpt") && !modelSlug.includes("openai")) {
         return false;
     }
 
@@ -530,17 +538,9 @@ function isCleanIncludedModel(id: string, filterData: {
             if (exSet.has(unprefixed)) return false;
         }
 
-        // 5. Consolidación de Líder Ficticio: Si hay múltiples pools de la misma familia,
-        // solo el líder canónico activo representativo se expone a /model
-        if (filterData.prefixToFamily && filterData.familyActiveLeaderPrefix) {
-            const fam = filterData.prefixToFamily.get(prefix);
-            if (fam) {
-                const activeLeader = filterData.familyActiveLeaderPrefix.get(fam);
-                if (activeLeader && activeLeader !== prefix) {
-                    return false;
-                }
-            }
-        }
+        // INVARIANTE AGENTS.md (Escalabilidad N -> ∞):
+        // Cada pool activo registrado (base_prefix) es su propia fachada virtual independiente.
+        // NUNCA colapsar o sombrear pools hermanos (agy, agy2, agy3... codex, codex2... clau, clau2...).
     }
 
     return true;
