@@ -1,4 +1,4 @@
-name: Release Linux Visual Profile Plugin
+name: Release Linux Auto-Switcher-Pro Plugin
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ on:
         type: string
 
 concurrency:
-  group: visual-profile-release
+  group: auto-switcher-pro-release
   cancel-in-progress: false
 
 permissions:
@@ -120,16 +120,16 @@ jobs:
           fi
 
           # 5. Check internal Go plugin version
-          GO_VERSION=$(grep -E 'const Version = "[^"]+"' plugins/visual-profile/internal/version/version.go | sed -E 's/.*"([^"]+)".*/\1/')
+          GO_VERSION=$(grep -E 'const Version = "[^"]+"' plugins/auto-switcher-pro/internal/version/version.go | sed -E 's/.*"([^"]+)".*/\1/')
           if [ "${GO_VERSION}" != "${VERSION}" ]; then
-            echo "::error::Version mismatch: tag specifies '${VERSION}', but plugins/visual-profile/internal/version/version.go specifies '${GO_VERSION}'"
+            echo "::error::Version mismatch: tag specifies '${VERSION}', but plugins/auto-switcher-pro/internal/version/version.go specifies '${GO_VERSION}'"
             exit 1
           fi
 
           # 6. Check web package.json version
-          WEB_VERSION=$(node -p "require('./plugins/visual-profile/web/package.json').version" 2>/dev/null || grep -E '"version":' plugins/visual-profile/web/package.json | head -n 1 | sed -E 's/.*"version": "([^"]+)".*/\1/')
+          WEB_VERSION=$(node -p "require('./plugins/auto-switcher-pro/web/package.json').version" 2>/dev/null || grep -E '"version":' plugins/auto-switcher-pro/web/package.json | head -n 1 | sed -E 's/.*"version": "([^"]+)".*/\1/')
           if [ "${WEB_VERSION}" != "${VERSION}" ]; then
-            echo "::error::Version mismatch: tag specifies '${VERSION}', but plugins/visual-profile/web/package.json specifies '${WEB_VERSION}'"
+            echo "::error::Version mismatch: tag specifies '${VERSION}', but plugins/auto-switcher-pro/web/package.json specifies '${WEB_VERSION}'"
             exit 1
           fi
 
@@ -143,7 +143,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: plugins/visual-profile/web/package-lock.json
+          cache-dependency-path: plugins/auto-switcher-pro/web/package-lock.json
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -152,33 +152,33 @@ jobs:
           cache: false
 
       - name: Install web dependencies
-        working-directory: plugins/visual-profile/web
+        working-directory: plugins/auto-switcher-pro/web
         run: npm ci
 
       - name: Run web tests
-        working-directory: plugins/visual-profile/web
+        working-directory: plugins/auto-switcher-pro/web
         run: npm test -- --run
 
       - name: Build web assets
-        working-directory: plugins/visual-profile/web
+        working-directory: plugins/auto-switcher-pro/web
         run: npm run build
 
       - name: Verify committed web assets match generated UI
-        run: git diff --exit-code -- plugins/visual-profile/internal/web/assets/index.html
+        run: git diff --exit-code -- plugins/auto-switcher-pro/internal/web/assets/index.html
 
       - name: Run Go tests
-        working-directory: plugins/visual-profile
+        working-directory: plugins/auto-switcher-pro
         run: go test -v ./...
 
       - name: Build Linux amd64 shared library
-        working-directory: plugins/visual-profile
+        working-directory: plugins/auto-switcher-pro
         env:
           CGO_ENABLED: '1'
           GOOS: linux
           GOARCH: amd64
         run: |
-          go build -buildmode=c-shared -ldflags="-s -w" -o visual-profile-linux-amd64.so .
-          test -f visual-profile-linux-amd64.so
+          go build -buildmode=c-shared -ldflags="-s -w" -o auto-switcher-pro-linux-amd64.so .
+          test -f auto-switcher-pro-linux-amd64.so
 
       - name: Install arm64 cross-compilation toolchain
         run: |
@@ -186,43 +186,43 @@ jobs:
           sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
 
       - name: Build Linux arm64 shared library
-        working-directory: plugins/visual-profile
+        working-directory: plugins/auto-switcher-pro
         env:
           CGO_ENABLED: '1'
           GOOS: linux
           GOARCH: arm64
           CC: aarch64-linux-gnu-gcc
         run: |
-          go build -buildmode=c-shared -ldflags="-s -w" -o visual-profile-linux-arm64.so .
-          test -f visual-profile-linux-arm64.so
+          go build -buildmode=c-shared -ldflags="-s -w" -o auto-switcher-pro-linux-arm64.so .
+          test -f auto-switcher-pro-linux-arm64.so
 
       - name: Verify ELF binary architecture and glibc linkage
-        working-directory: plugins/visual-profile
+        working-directory: plugins/auto-switcher-pro
         run: |
           set -euo pipefail
 
           echo "=== Inspecting Linux amd64 binary ==="
-          test -f visual-profile-linux-amd64.so
-          file visual-profile-linux-amd64.so
-          readelf -h visual-profile-linux-amd64.so
-          readelf -h visual-profile-linux-amd64.so | grep -q "ELF64"
-          readelf -h visual-profile-linux-amd64.so | grep -q -E "Advanced Micro Devices X86-64|x86-64"
-          readelf -d visual-profile-linux-amd64.so | grep -q -E "NEEDED.*libc\.so\.6"
+          test -f auto-switcher-pro-linux-amd64.so
+          file auto-switcher-pro-linux-amd64.so
+          readelf -h auto-switcher-pro-linux-amd64.so
+          readelf -h auto-switcher-pro-linux-amd64.so | grep -q "ELF64"
+          readelf -h auto-switcher-pro-linux-amd64.so | grep -q -E "Advanced Micro Devices X86-64|x86-64"
+          readelf -d auto-switcher-pro-linux-amd64.so | grep -q -E "NEEDED.*libc\.so\.6"
 
           echo "=== Inspecting Linux arm64 binary ==="
-          test -f visual-profile-linux-arm64.so
-          file visual-profile-linux-arm64.so
-          readelf -h visual-profile-linux-arm64.so
-          readelf -h visual-profile-linux-arm64.so | grep -q "ELF64"
-          readelf -h visual-profile-linux-arm64.so | grep -q -E "AArch64|aarch64"
-          readelf -d visual-profile-linux-arm64.so | grep -q -E "NEEDED.*libc\.so\.6"
+          test -f auto-switcher-pro-linux-arm64.so
+          file auto-switcher-pro-linux-arm64.so
+          readelf -h auto-switcher-pro-linux-arm64.so
+          readelf -h auto-switcher-pro-linux-arm64.so | grep -q "ELF64"
+          readelf -h auto-switcher-pro-linux-arm64.so | grep -q -E "AArch64|aarch64"
+          readelf -d auto-switcher-pro-linux-arm64.so | grep -q -E "NEEDED.*libc\.so\.6"
 
           # Confirm neither binary links against musl
-          if readelf -d visual-profile-linux-amd64.so | grep -iq "musl"; then
+          if readelf -d auto-switcher-pro-linux-amd64.so | grep -iq "musl"; then
             echo "::error::amd64 binary appears to link against musl instead of glibc"
             exit 1
           fi
-          if readelf -d visual-profile-linux-arm64.so | grep -iq "musl"; then
+          if readelf -d auto-switcher-pro-linux-arm64.so | grep -iq "musl"; then
             echo "::error::arm64 binary appears to link against musl instead of glibc"
             exit 1
           fi
@@ -232,15 +232,15 @@ jobs:
       - name: Upload Linux amd64 binary artifact (.so only)
         uses: actions/upload-artifact@v4
         with:
-          name: visual-profile-linux-amd64
-          path: plugins/visual-profile/visual-profile-linux-amd64.so
+          name: auto-switcher-pro-linux-amd64
+          path: plugins/auto-switcher-pro/auto-switcher-pro-linux-amd64.so
           if-no-files-found: error
 
       - name: Upload Linux arm64 binary artifact (.so only)
         uses: actions/upload-artifact@v4
         with:
-          name: visual-profile-linux-arm64
-          path: plugins/visual-profile/visual-profile-linux-arm64.so
+          name: auto-switcher-pro-linux-arm64
+          path: plugins/auto-switcher-pro/auto-switcher-pro-linux-arm64.so
           if-no-files-found: error
 
   publish:
@@ -270,26 +270,26 @@ jobs:
       - name: Download Linux amd64 artifact
         uses: actions/download-artifact@v4
         with:
-          name: visual-profile-linux-amd64
+          name: auto-switcher-pro-linux-amd64
           path: release-assets
 
       - name: Download Linux arm64 artifact
         uses: actions/download-artifact@v4
         with:
-          name: visual-profile-linux-arm64
+          name: auto-switcher-pro-linux-arm64
           path: release-assets
 
       - name: Generate SHA256 checksums
         working-directory: release-assets
         run: |
           set -euo pipefail
-          test -f visual-profile-linux-amd64.so
-          test -f visual-profile-linux-arm64.so
-          sha256sum visual-profile-linux-amd64.so > visual-profile-linux-amd64.so.sha256
-          sha256sum visual-profile-linux-arm64.so > visual-profile-linux-arm64.so.sha256
+          test -f auto-switcher-pro-linux-amd64.so
+          test -f auto-switcher-pro-linux-arm64.so
+          sha256sum auto-switcher-pro-linux-amd64.so > auto-switcher-pro-linux-amd64.so.sha256
+          sha256sum auto-switcher-pro-linux-arm64.so > auto-switcher-pro-linux-arm64.so.sha256
           echo "SHA256 checksums:"
-          cat visual-profile-linux-amd64.so.sha256
-          cat visual-profile-linux-arm64.so.sha256
+          cat auto-switcher-pro-linux-amd64.so.sha256
+          cat auto-switcher-pro-linux-arm64.so.sha256
 
       - name: Recheck collisions and create GitHub Release
         env:
@@ -344,13 +344,13 @@ jobs:
 
           # 4. Generate release notes
           {
-            printf '## Visual Profile Plugin %s\n\n' "${RELEASE_TAG}"
-            printf 'Pre-built Linux amd64 and arm64 (glibc) shared libraries for CLIProxyAPI `visual-profile` plugin.\n\n'
+            printf '## Auto Switcher Pro Plugin %s\n\n' "${RELEASE_TAG}"
+            printf 'Pre-built Linux amd64 and arm64 (glibc) shared libraries for CLIProxyAPI `auto-switcher-pro` plugin.\n\n'
             printf '### Artifacts\n'
-            printf -- '- `visual-profile-linux-amd64.so`: Linux amd64 shared library plugin (`-buildmode=c-shared`)\n'
-            printf -- '- `visual-profile-linux-amd64.so.sha256`: SHA-256 checksum for amd64 binary\n'
-            printf -- '- `visual-profile-linux-arm64.so`: Linux arm64 (glibc) shared library plugin (`-buildmode=c-shared`)\n'
-            printf -- '- `visual-profile-linux-arm64.so.sha256`: SHA-256 checksum for arm64 binary\n\n'
+            printf -- '- `auto-switcher-pro-linux-amd64.so`: Linux amd64 shared library plugin (`-buildmode=c-shared`)\n'
+            printf -- '- `auto-switcher-pro-linux-amd64.so.sha256`: SHA-256 checksum for amd64 binary\n'
+            printf -- '- `auto-switcher-pro-linux-arm64.so`: Linux arm64 (glibc) shared library plugin (`-buildmode=c-shared`)\n'
+            printf -- '- `auto-switcher-pro-linux-arm64.so.sha256`: SHA-256 checksum for arm64 binary\n\n'
             printf '### Supported Architectures & Environments\n'
             printf -- '- **Linux amd64**: Standard x86_64 Linux distributions with glibc (Debian, Ubuntu, RHEL, CentOS, Fedora)\n'
             printf -- '- **Linux arm64**: ARM64 / AArch64 Linux distributions with glibc (Raspberry Pi OS 64-bit, AWS Graviton, Apple Silicon Docker Linux containers). *Note: Linux/glibc only; native macOS host runtime is not supported.*\n\n'
@@ -363,19 +363,19 @@ jobs:
             printf '### Verification\n'
             printf '```bash\n'
             printf '# For Linux amd64:\n'
-            printf 'sha256sum -c visual-profile-linux-amd64.so.sha256\n\n'
+            printf 'sha256sum -c auto-switcher-pro-linux-amd64.so.sha256\n\n'
             printf '# For Linux arm64:\n'
-            printf 'sha256sum -c visual-profile-linux-arm64.so.sha256\n'
+            printf 'sha256sum -c auto-switcher-pro-linux-arm64.so.sha256\n'
             printf '```\n'
           } > release-notes.md
 
           # 5. Create release and upload binaries + checksums using GitHub CLI
           # Note: --verify-tag is intentionally omitted so gh creates the tag at --target commit
           gh release create "${RELEASE_TAG}" \
-            release-assets/visual-profile-linux-amd64.so \
-            release-assets/visual-profile-linux-amd64.so.sha256 \
-            release-assets/visual-profile-linux-arm64.so \
-            release-assets/visual-profile-linux-arm64.so.sha256 \
+            release-assets/auto-switcher-pro-linux-amd64.so \
+            release-assets/auto-switcher-pro-linux-amd64.so.sha256 \
+            release-assets/auto-switcher-pro-linux-arm64.so \
+            release-assets/auto-switcher-pro-linux-arm64.so.sha256 \
             --target "${TARGET_COMMIT}" \
-            --title "Visual Profile Plugin ${RELEASE_TAG}" \
+            --title "Auto Switcher Pro Plugin ${RELEASE_TAG}" \
             --notes-file release-notes.md

@@ -4,3 +4,7 @@
 /odd
 *.so
 *.h
+
+# Node / build caches
+node_modules/
+.vite/
