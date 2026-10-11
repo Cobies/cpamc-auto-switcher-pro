@@ -1,0 +1,20 @@
+{
+  "name": "cpamc-auto-switcher",
+  "version": "1.0.0",
+  "description": "Extensión unificada de CPAMC para Gentle-Shell y Pi: Dynamic Provider, QuotaCard Sidebar, Picker y Auto-Failover",
+  "type": "module",
+  "main": "index.ts",
+  "pi": {
+    "extensions": [
+      "index.ts"
+    ]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  }
+}

@@ -1,0 +1,151 @@
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { initDynamicProvider } from "./src/provider.js";
+import { initFailoverHook, scheduleAutoSwitcher } from "./src/failover.js";
+import { registerModelPicker } from "./src/picker.js";
+import { CpamcTuiAdapter } from "./src/adapter.js";
+import { querySwitcherAccounts, checkProactivePoolRebalance } from "./src/store.js";
+
+/**
+ * CPAMC Auto-Switcher Unified Extension for Pi & Gentle-Shell
+ *
+ * Módulos integrados:
+ * 1. Dynamic Provider: Registra el proveedor `cpamc` con catálogo dinámico de CLIProxyAPI.
+ * 2. Failover Hook: Detección instantánea de 429 / Rate Limit y rotación forzada automática.
+ * 3. Runtime UI & Telemetry:
+ *    - Fullscreen Sidebar: QuotaCard reactiva calibrada a 36 cols con barras (▰▰▰▱▱▱).
+ *    - Regular Mode: Telemetría compacta en Footer.
+ *    - Selector interactivo de modelos `/cpamc-model`.
+ *
+ * 100% Autocontenida: lista para clonar o copiar en ~/.gentle-shell/agent/extensions/
+ */
+export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
+	// 1. Inicializar proveedor dinámico de modelos
+	try {
+		initDynamicProvider(pi);
+	} catch (err: any) {
+		console.error("cpamc-auto-switcher: fallo al registrar provider cpamc:", err?.message || err);
+	}
+
+	// 2. Inicializar hook de failover y rotación automática
+	try {
+		initFailoverHook(pi);
+	} catch (err: any) {
+		console.error("cpamc-auto-switcher: fallo al registrar failover hook:", err?.message || err);
+	}
+
+	// 3. Inicializar selector complementario /cpamc-model
+	registerModelPicker(pi);
+
+	// 4. Adaptador reactivo de UI (Sidebar QuotaCard + Footer)
+	let adapter: CpamcTuiAdapter | null = null;
+	let timer: NodeJS.Timeout | null = null;
+
+	const clearTimer = (): void => {
+		if (timer) {
+			clearInterval(timer);
+			timer = null;
+		}
+	};
+
+	pi.on("session_start", async (event: any, ctx: ExtensionContext) => {
+		clearTimer();
+
+		if (!adapter) {
+			adapter = new CpamcTuiAdapter(ctx);
+		} else {
+			adapter.setContext(ctx);
+		}
+
+		// Rebalanceo proactivo en fronteras de ciclo de vida (/new, /reload, inicio de sesión)
+		const reason = event?.reason;
+		if (reason === "new" || reason === "reload" || reason === "startup") {
+			try {
+				await querySwitcherAccounts(true);
+				const model = ctx.model;
+				if (model) {
+					const check = checkProactivePoolRebalance(model.id, model.provider);
+					if (check.shouldSwitch) {
+						scheduleAutoSwitcher(ctx, `proactive session rebalance (${reason})`, true);
+					}
+				}
+			} catch {
+				// Silencioso ante errores no críticos
+			}
+		}
+
+		// Capturar la instancia viva de TUI y Theme, y registrar el decorador del sidebar
+		if (ctx.hasUI) {
+			ctx.ui.setWidget("cpamc-tui-hook", (tui: any, theme: any) => {
+				adapter?.bindTui(tui, theme);
+				void adapter?.update(false, ctx);
+				return {
+					render: () => [],
+					invalidate: () => {},
+				};
+			});
+		}
+
+		// Actualización inicial segura
+		await adapter.update(false, ctx);
+
+		// Intervalo en segundo plano cada 25s protegido contra stale context
+		let ticks = 0;
+		timer = setInterval(async () => {
+			try {
+				await querySwitcherAccounts(true);
+				await adapter?.update(false);
+
+				// Cada ~75 segundos (3 ticks de 25s), refrescar catálogo de modelos en segundo plano
+				ticks++;
+				if (ticks % 3 === 0 && typeof ctx.modelRegistry?.refresh === "function") {
+					void ctx.modelRegistry.refresh({ allowNetwork: true }).catch(() => {});
+				}
+			} catch {
+				clearTimer();
+			}
+		}, 25_000);
+	});
+
+	// Reactividad ante eventos de sesión e interacción del usuario
+	pi.on("session_info_changed", async (_event: any, ctx: ExtensionContext) => {
+		await adapter?.update(false, ctx);
+	});
+
+	pi.on("ui_prompt_start", async (_event: any, ctx: ExtensionContext) => {
+		await adapter?.update(false, ctx);
+	});
+
+	pi.on("turn_start", async (_event: any, ctx: ExtensionContext) => {
+		await adapter?.update(true, ctx);
+	});
+
+	pi.on("turn_end", async (_event: any, ctx: ExtensionContext) => {
+		await adapter?.update(false, ctx);
+	});
+
+	// Limpieza en transiciones de sesión de Pi
+	pi.on("session_before_switch", async () => {
+		clearTimer();
+		adapter?.setContext(null);
+	});
+
+	pi.on("session_before_fork", async () => {
+		clearTimer();
+		adapter?.setContext(null);
+	});
+
+	pi.on("session_before_compact", async () => {
+		clearTimer();
+		adapter?.setContext(null);
+	});
+
+	pi.on("session_before_tree", async () => {
+		clearTimer();
+		adapter?.setContext(null);
+	});
+
+	pi.on("session_shutdown", async () => {
+		clearTimer();
+		adapter?.setContext(null);
+	});
+}
