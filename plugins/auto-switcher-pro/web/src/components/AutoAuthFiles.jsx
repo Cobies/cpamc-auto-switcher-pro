@@ -726,7 +726,9 @@ export default function AutoAuthFiles({
               className="auto-auth-metric-sub"
               data-testid="metric-managed-cards"
             >
-              2N gestionadas
+              {virtualAccounts.length > 0 || claudeCards.length > 0
+                ? `${managedCards.length} en pools (2N)`
+                : `${managedCards.length} en pools`}
             </span>
           </span>
         </div>
@@ -837,7 +839,11 @@ export default function AutoAuthFiles({
         <div className="auto-auth-section-header">
           <h3 className="auto-auth-section-title">
             <span>🔀</span>
-            <span>Cards Gestionadas en Pools (Modelo 2N: Gemini + Claude)</span>
+            <span>
+              {claudeCards.length > 0
+                ? 'Cards Gestionadas en Pools (Modelo 2N: Gemini + Claude)'
+                : 'Cards Gestionadas en Pools (Cuentas Activas)'}
+            </span>
           </h3>
           <span className="auto-auth-section-count">{managedCards.length} cards</span>
         </div>
@@ -945,12 +951,15 @@ export default function AutoAuthFiles({
                 {renderHeroBanner(
                   specState,
                   isGemini
-                    ? cardInherited.includes('gemini-2.5-pro')
-                      ? 'gemini-2.5-pro'
-                      : cardInherited[0] || 'gemini-2.5-pro'
+                    ? cardInherited.includes('gemini-3.8-flash-high')
+                      ? 'gemini-3.8-flash-high'
+                      : cardInherited.find((m) => m.includes('3.8'))
+                      || (cardInherited.includes('gemini-2.5-pro') ? 'gemini-2.5-pro' : cardInherited[0] || 'gemini-3.8-flash-high')
                     : cardInherited.includes('claude-3-7-sonnet')
                     ? 'claude-3-7-sonnet'
-                    : cardInherited[0] || 'claude-3-7-sonnet',
+                    : cardInherited.find((m) => m.includes('3.7') || m.includes('sonnet'))
+                    || cardInherited[0]
+                    || 'claude-3-7-sonnet',
                   poolGroupStyle
                 )}
 
@@ -990,7 +999,7 @@ export default function AutoAuthFiles({
                       {/* Serves badge */}
                       <span className="badge-target-family">
                         {isGemini
-                          ? '✨ Serves: Gemini 2.5 Pro & Flash'
+                          ? '✨ Serves: Gemini 3.x Flash & Pro'
                           : `✨ Serves: Claude Sonnet/Opus ${excludes55 ? '(4.6 Estable)' : '(4.6 & 5.5-high)'}`}
                       </span>
                     </>

@@ -66,7 +66,7 @@ func TestManagementResourceAndHandling(t *testing.T) {
 	}
 
 	// 2. management.handle serves index.html
-	reqJSON := []byte(`{"Method":"GET","Path":"/v0/resource/plugins/visual-profile/profiles"}`)
+	reqJSON := []byte(`{"Method":"GET","Path":"/v0/resource/plugins/auto-switcher-pro/profiles"}`)
 	rawHandle, err := plugin.HandlePluginMethod("management.handle", reqJSON)
 	if err != nil {
 		t.Fatalf("failed to call management.handle: %v", err)
@@ -131,7 +131,7 @@ func TestManagementResourceAndHandling(t *testing.T) {
 	}
 
 	// 4. Exact segment-scoped routing: non-matching segment returns 404
-	badRouteJSON := []byte(`{"Method":"GET","Path":"/v0/resource/plugins/visual-profile/profiles_extra"}`)
+	badRouteJSON := []byte(`{"Method":"GET","Path":"/v0/resource/plugins/auto-switcher-pro/profiles_extra"}`)
 	rawBadRoute, err := plugin.HandlePluginMethod("management.handle", badRouteJSON)
 	if err != nil {
 		t.Fatalf("failed to call management.handle: %v", err)
@@ -145,7 +145,7 @@ func TestManagementResourceAndHandling(t *testing.T) {
 	}
 
 	// 5. Method restrictions: POST returns 405 Method Not Allowed
-	postJSON := []byte(`{"Method":"POST","Path":"/v0/resource/plugins/visual-profile/profiles"}`)
+	postJSON := []byte(`{"Method":"POST","Path":"/v0/resource/plugins/auto-switcher-pro/profiles"}`)
 	rawPost, err := plugin.HandlePluginMethod("management.handle", postJSON)
 	if err != nil {
 		t.Fatalf("failed to call management.handle: %v", err)
@@ -159,7 +159,7 @@ func TestManagementResourceAndHandling(t *testing.T) {
 	}
 
 	// 6. Hostile path traversal returns 400 Bad Request
-	hostileJSON := []byte(`{"Method":"GET","Path":"/v0/resource/plugins/visual-profile/profiles/../../secret.txt"}`)
+	hostileJSON := []byte(`{"Method":"GET","Path":"/v0/resource/plugins/auto-switcher-pro/profiles/../../secret.txt"}`)
 	rawHostile, err := plugin.HandlePluginMethod("management.handle", hostileJSON)
 	if err != nil {
 		t.Fatalf("failed to call management.handle: %v", err)
@@ -177,8 +177,8 @@ func TestManagementResourceAndHandling(t *testing.T) {
 	profilesRoutes := []string{
 		"/profiles",  // Host registered slashless route (only supported host runtime path)
 		"/profiles/", // Internal isolation fallback
-		"/v0/resource/plugins/visual-profile/profiles",  // Internal isolation plugin path
-		"/v0/resource/plugins/visual-profile/profiles/", // Internal isolation plugin path with trailing slash
+		"/v0/resource/plugins/auto-switcher-pro/profiles",  // Internal isolation standard plugin path
+		"/v0/resource/plugins/auto-switcher-pro/profiles/", // Internal isolation standard plugin path with trailing slash
 	}
 	for _, p := range profilesRoutes {
 		routeReqJSON := []byte(fmt.Sprintf(`{"Method":"GET","Path":"%s"}`, p))
@@ -223,7 +223,7 @@ func TestManagementResourceAndHandling(t *testing.T) {
 	}
 
 	// 9. External subresource rejection: separate CSS/JS subpaths return 404
-	subresourceJSON := []byte(`{"Method":"GET","Path":"/v0/resource/plugins/visual-profile/profiles/assets/index.js"}`)
+	subresourceJSON := []byte(`{"Method":"GET","Path":"/v0/resource/plugins/auto-switcher-pro/profiles/assets/index.js"}`)
 	rawSub, err := plugin.HandlePluginMethod("management.handle", subresourceJSON)
 	if err != nil {
 		t.Fatalf("failed to call management.handle: %v", err)

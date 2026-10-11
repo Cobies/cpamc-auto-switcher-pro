@@ -164,11 +164,11 @@ func TestMatchProfilesRoute_ExactSegmentScoped(t *testing.T) {
 		{"/auto-auth-files", "index.html"},
 		{"/auto-auth-files/", "index.html"},
 		{"/v0/management/auto-auth-files", "index.html"},
-		{"/v0/resource/plugins/visual-profile/profiles", "index.html"},
-		{"/v0/resource/plugins/visual-profile/profiles/", "index.html"},
-		{"/v0/resource/plugins/visual-profile/profiles/index.html", "index.html"},
-		{"/v0/resource/plugins/visual-profile/profiles/assets/index.js", "assets/index.js"},
-		{"/v0/resource/plugins/visual-profile/pulse-tokens", "index.html"},
+		{"/v0/resource/plugins/auto-switcher-pro/profiles", "index.html"},
+		{"/v0/resource/plugins/auto-switcher-pro/profiles/", "index.html"},
+		{"/v0/resource/plugins/auto-switcher-pro/profiles/index.html", "index.html"},
+		{"/v0/resource/plugins/auto-switcher-pro/profiles/assets/index.js", "assets/index.js"},
+		{"/v0/resource/plugins/auto-switcher-pro/pulse-tokens", "index.html"},
 	}
 
 	for _, tc := range validCases {
@@ -185,9 +185,9 @@ func TestMatchProfilesRoute_ExactSegmentScoped(t *testing.T) {
 		"/profiles_extra",
 		"/profiles-attack/secret",
 		"/profiles_test/index.html",
-		"/v0/resource/plugins/visual-profile/profiles_extra",
-		"/v0/resource/plugins/visual-profile/notprofiles",
-		"/v0/resource/plugins/visual-profile/myprofiles",
+		"/v0/resource/plugins/auto-switcher-pro/profiles_extra",
+		"/v0/resource/plugins/auto-switcher-pro/notprofiles",
+		"/v0/resource/plugins/auto-switcher-pro/myprofiles",
 		"/myprofiles",
 		"/other/endpoint",
 		"",
@@ -202,7 +202,7 @@ func TestMatchProfilesRoute_ExactSegmentScoped(t *testing.T) {
 }
 
 func TestHandlePluginMethod_ManagementHandle_Index(t *testing.T) {
-	reqJSON := []byte(`{"Method":"GET","Path":"/v0/resource/plugins/visual-profile/profiles"}`)
+	reqJSON := []byte(`{"Method":"GET","Path":"/v0/resource/plugins/auto-switcher-pro/profiles"}`)
 	raw, err := HandlePluginMethod("management.handle", reqJSON)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -238,9 +238,9 @@ func TestHandlePluginMethod_ManagementHandle_Index(t *testing.T) {
 
 func TestHandlePluginMethod_ManagementHandle_ExactRouteScope(t *testing.T) {
 	hostileRoutes := []string{
-		"/v0/resource/plugins/visual-profile/profiles_test",
-		"/v0/resource/plugins/visual-profile/profiles-attack/secret",
-		"/v0/resource/plugins/visual-profile/myprofiles",
+		"/v0/resource/plugins/auto-switcher-pro/profiles_test",
+		"/v0/resource/plugins/auto-switcher-pro/profiles-attack/secret",
+		"/v0/resource/plugins/auto-switcher-pro/myprofiles",
 		"/other/route",
 	}
 
@@ -270,7 +270,7 @@ func TestHandlePluginMethod_ManagementHandle_ExactRouteScope(t *testing.T) {
 func TestHandlePluginMethod_ManagementHandle_MethodRestrictions(t *testing.T) {
 	disallowedMethods := []string{"POST", "PUT", "DELETE", "PATCH"}
 	for _, m := range disallowedMethods {
-		reqJSON := []byte(fmt.Sprintf(`{"Method":"%s","Path":"/v0/resource/plugins/visual-profile/profiles"}`, m))
+		reqJSON := []byte(fmt.Sprintf(`{"Method":"%s","Path":"/v0/resource/plugins/auto-switcher-pro/profiles"}`, m))
 		raw, err := HandlePluginMethod("management.handle", reqJSON)
 		if err != nil {
 			t.Fatalf("unexpected error for method %s: %v", m, err)
@@ -292,7 +292,7 @@ func TestHandlePluginMethod_ManagementHandle_MethodRestrictions(t *testing.T) {
 	}
 
 	// HEAD method should return 200 OK with empty body
-	headReqJSON := []byte(`{"Method":"HEAD","Path":"/v0/resource/plugins/visual-profile/profiles"}`)
+	headReqJSON := []byte(`{"Method":"HEAD","Path":"/v0/resource/plugins/auto-switcher-pro/profiles"}`)
 	rawHead, err := HandlePluginMethod("management.handle", headReqJSON)
 	if err != nil {
 		t.Fatalf("unexpected error for HEAD: %v", err)
@@ -321,12 +321,12 @@ func TestHandlePluginMethod_ManagementHandle_MethodRestrictions(t *testing.T) {
 
 func TestHandlePluginMethod_ManagementHandle_HostilePathsAndTraversal(t *testing.T) {
 	hostilePaths := []string{
-		"/v0/resource/plugins/visual-profile/profiles/../secret.txt",
-		"/v0/resource/plugins/visual-profile/profiles/../../etc/passwd",
-		"/v0/resource/plugins/visual-profile/profiles/%2e%2e%2fsecret",
-		"/v0/resource/plugins/visual-profile/profiles/assets/..%2f..%2fsecret",
-		"/v0/resource/plugins/visual-profile/profiles/..\\..\\windows\\win.ini",
-		"/v0/resource/plugins/visual-profile/profiles/index.html\x00.evil",
+		"/v0/resource/plugins/auto-switcher-pro/profiles/../secret.txt",
+		"/v0/resource/plugins/auto-switcher-pro/profiles/../../etc/passwd",
+		"/v0/resource/plugins/auto-switcher-pro/profiles/%2e%2e%2fsecret",
+		"/v0/resource/plugins/auto-switcher-pro/profiles/assets/..%2f..%2fsecret",
+		"/v0/resource/plugins/auto-switcher-pro/profiles/..\\..\\windows\\win.ini",
+		"/v0/resource/plugins/auto-switcher-pro/profiles/index.html\x00.evil",
 	}
 
 	for _, hp := range hostilePaths {
@@ -353,7 +353,7 @@ func TestHandlePluginMethod_ManagementHandle_HostilePathsAndTraversal(t *testing
 }
 
 func TestHandlePluginMethod_ManagementHandle_SingleFileSelfContainedHTML(t *testing.T) {
-	reqJSON := []byte(`{"Method":"GET","Path":"/v0/resource/plugins/visual-profile/profiles"}`)
+	reqJSON := []byte(`{"Method":"GET","Path":"/v0/resource/plugins/auto-switcher-pro/profiles"}`)
 	raw, err := HandlePluginMethod("management.handle", reqJSON)
 	if err != nil {
 		t.Fatalf("unexpected error fetching HTML: %v", err)
@@ -431,7 +431,7 @@ func TestHandlePluginMethod_ManagementHandle_SingleFileSelfContainedHTML(t *test
 }
 
 func TestHandlePluginMethod_ManagementHandle_NotFound(t *testing.T) {
-	reqJSON := []byte(`{"Method":"GET","Path":"/v0/resource/plugins/visual-profile/profiles/nonexistent.xyz"}`)
+	reqJSON := []byte(`{"Method":"GET","Path":"/v0/resource/plugins/auto-switcher-pro/profiles/nonexistent.xyz"}`)
 	raw, err := HandlePluginMethod("management.handle", reqJSON)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -505,11 +505,9 @@ func TestHandlePluginMethod_ManagementHandle_HostSlashlessVsInternalIsolation(t 
 		{"host registered slashless route (only supported host runtime path)", "/profiles"},
 		{"internal isolation trailing slash fallback", "/profiles/"},
 		{"internal isolation index.html fallback", "/profiles/index.html"},
-		{"internal isolation standard plugin path slashless", "/v0/resource/plugins/visual-profile/profiles"},
-		{"internal isolation standard plugin path slashful", "/v0/resource/plugins/visual-profile/profiles/"},
-		{"internal isolation standard plugin path index.html", "/v0/resource/plugins/visual-profile/profiles/index.html"},
-		{"internal isolation linux-amd64 binary path slashless", "/v0/resource/plugins/visual-profile-linux-amd64/profiles"},
-		{"internal isolation linux-amd64 binary path slashful", "/v0/resource/plugins/visual-profile-linux-amd64/profiles/"},
+		{"internal isolation standard plugin path slashless", "/v0/resource/plugins/auto-switcher-pro/profiles"},
+		{"internal isolation standard plugin path slashful", "/v0/resource/plugins/auto-switcher-pro/profiles/"},
+		{"internal isolation standard plugin path index.html", "/v0/resource/plugins/auto-switcher-pro/profiles/index.html"},
 		{"internal isolation auto-switcher-pro-linux-amd64 binary path slashless", "/v0/resource/plugins/auto-switcher-pro-linux-amd64/profiles"},
 		{"internal isolation auto-switcher-pro-linux-amd64 binary path slashful", "/v0/resource/plugins/auto-switcher-pro-linux-amd64/profiles/"},
 		{"internal isolation arbitrary binary name slashless", "/v0/resource/plugins/custom-agent-profile-v2/profiles"},
@@ -582,9 +580,8 @@ func TestHandlePluginMethod_ManagementHandle_SubresourceRejection(t *testing.T) 
 	subresourcePaths := []string{
 		"/profiles/assets/index.js",
 		"/profiles/assets/index.css",
-		"/v0/resource/plugins/visual-profile/profiles/assets/index.js",
-		"/v0/resource/plugins/visual-profile/profiles/assets/style.css",
-		"/v0/resource/plugins/visual-profile-linux-amd64/profiles/assets/app.js",
+		"/v0/resource/plugins/auto-switcher-pro/profiles/assets/index.js",
+		"/v0/resource/plugins/auto-switcher-pro/profiles/assets/style.css",
 		"/v0/resource/plugins/auto-switcher-pro-linux-amd64/profiles/assets/app.js",
 	}
 

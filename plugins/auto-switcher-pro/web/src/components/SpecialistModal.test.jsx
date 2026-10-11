@@ -59,21 +59,21 @@ describe('SpecialistModal Component', () => {
       />
     );
 
-    // Starts in single mode by default for Gemini
-    expect(screen.getByTestId('specialist-preview-banner')).toBeTruthy();
-
-    // Switch to multipurpose / allow all mode
-    const multipurposeOption = screen.getByTestId('mode-btn-multipurpose');
-    fireEvent.click(multipurposeOption);
-    expect(multipurposeOption.className).toContain('selected');
+    // Starts in multipurpose mode by default when card has no exclusions
     expect(screen.getByTestId('multipurpose-banner')).toBeTruthy();
 
-    // Select a specialist model again
+    // Select a specialist model
     const radioPro = screen.getByLabelText(/gemini-2.5-pro/i);
     fireEvent.click(radioPro);
 
     expect(screen.getByTestId('specialist-preview-banner')).toBeTruthy();
     expect(screen.getByTestId('specialist-preview-banner').textContent).toContain('gemini-2.5-pro');
+
+    // Switch back to multipurpose / allow all mode
+    const multipurposeOption = screen.getByTestId('mode-btn-multipurpose');
+    fireEvent.click(multipurposeOption);
+    expect(multipurposeOption.className).toContain('selected');
+    expect(screen.getByTestId('multipurpose-banner')).toBeTruthy();
   });
 
   it('allows selecting strictly ONE model in specialist mode and updates exclusion counter', () => {
@@ -173,7 +173,7 @@ describe('SpecialistModal Component', () => {
     expect(mockOnClose).toHaveBeenCalled();
   });
 
-  it('opens pre-selected in single mode with gemini-3.8 for gemini family cards by default', () => {
+  it('opens in multipurpose mode when card has no exclusions, highlighting 3.8 as recommended for gemini', () => {
     const models = [
       'gemini-3.1-pro-low',
       'gemini-3.8-flash-high',
@@ -189,7 +189,35 @@ describe('SpecialistModal Component', () => {
       />
     );
 
-    // Should be in single mode by default for Gemini
+    // Should truthfully reflect multipurpose mode when card has no exclusions
+    expect(screen.getByTestId('multipurpose-banner')).toBeTruthy();
+    const multipurposeOption = screen.getByTestId('mode-btn-multipurpose');
+    expect(multipurposeOption.className).toContain('selected');
+
+    // 3.8 should still be highlighted as recommended in the single model section
+    expect(screen.getByText('⭐ Recomendado')).toBeTruthy();
+  });
+
+  it('opens in single mode when card is already configured as a specialist', () => {
+    const models = [
+      'gemini-3.1-pro-low',
+      'gemini-3.8-flash-high',
+      'gemini-3-flash',
+    ];
+    const specialistCard = {
+      ...mockCard,
+      excluded_models: ['gemini-3.1-pro-low', 'gemini-3-flash'],
+    };
+
+    render(
+      <SpecialistModal
+        isOpen={true}
+        card={specialistCard}
+        inheritedModels={models}
+        onClose={vi.fn()}
+      />
+    );
+
     expect(screen.getByTestId('specialist-preview-banner')).toBeTruthy();
     expect(screen.getByTestId('specialist-preview-banner').textContent).toContain('gemini-3.8-flash-high');
     const radio38 = screen.getByLabelText(/gemini-3.8-flash-high/i);

@@ -14,8 +14,7 @@ import (
 )
 
 const (
-	poolsRoutePath       = "/auto-switcher-pro/pools"
-	legacyPoolsRoutePath = "/visual-profile/pools"
+	poolsRoutePath = "/auto-switcher-pro/pools"
 
 	defaultStatePath = "/CLIProxyAPI/plugins/auto-switcher-pro-state.json"
 	fallbackStateDir = "./"
@@ -388,7 +387,7 @@ func isPoolsPath(rawPath string) bool {
 		normalized = normalized[:idx]
 	}
 	normalized = strings.TrimRight(normalized, "/")
-	return strings.HasSuffix(normalized, poolsRoutePath) || strings.HasSuffix(normalized, legacyPoolsRoutePath)
+	return strings.HasSuffix(normalized, poolsRoutePath)
 }
 
 // handlePoolsHTTP dispatches GET, POST, DELETE operations on /v0/management/auto-switcher-pro/pools.

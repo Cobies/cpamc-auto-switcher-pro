@@ -27,7 +27,7 @@ export default function SpecialistModal({
   const isGeminiFamily = familyRole === 'gemini';
 
   // mode: 'single' (limitado) | 'all' (permitir todos)
-  const [mode, setMode] = useState(isGeminiFamily ? 'single' : 'all');
+  const [mode, setMode] = useState('all');
   const [selectedModel, setSelectedModel] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -60,16 +60,12 @@ export default function SpecialistModal({
       setMode('single');
       setSelectedModel(specialistInfo.activeSpecialistModel);
     } else {
-      // Si la tarjeta es de naturaleza Gemini, viene PREDETERMINADA en modo limitado a 3.8
-      if (isGeminiFamily) {
-        setMode('single');
-        const default38 = sortedInheritedModels.find((m) => m.includes('3.8')) || sortedInheritedModels[0] || '';
-        setSelectedModel(default38);
-      } else {
-        // Para Claude, Codex u otros proveedores, el orden es A-Z y su selección base es el primer modelo
-        setMode('all');
-        setSelectedModel(sortedInheritedModels[0] || '');
-      }
+      // Si la cuenta no está limitada en disco, reflejar fielmente el modo multipropósito abierto
+      setMode('all');
+      const defaultRecommendation = isGeminiFamily
+        ? (sortedInheritedModels.find((m) => m.includes('3.8')) || sortedInheritedModels[0] || '')
+        : (sortedInheritedModels[0] || '');
+      setSelectedModel(defaultRecommendation);
     }
   }, [isOpen, card, inheritedModels, sortedInheritedModels, isGeminiFamily]);
 

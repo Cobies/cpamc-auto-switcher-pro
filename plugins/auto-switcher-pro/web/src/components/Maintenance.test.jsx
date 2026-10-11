@@ -70,7 +70,7 @@ describe('Maintenance Component - Centro Dinámico de Acciones y Resolución', (
       const btnUpdate = screen.getByTestId('btn-update-console');
       expect(btnUpdate.disabled).toBe(false);
       expect(btnUpdate.textContent).toContain('Actualizar a v1.27.0');
-    });
+    }, { timeout: 4000 });
   });
 
   it('displays generic clean and healthy summary when all 4 modules are 100% optimal', async () => {

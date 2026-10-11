@@ -10,8 +10,8 @@ import (
 	"auto-switcher-pro/internal/web"
 )
 
-// DefaultProfilesBasePath defines the standard management resource path for the Visual Profile UI.
-const DefaultProfilesBasePath = "/v0/resource/plugins/visual-profile/profiles"
+// DefaultProfilesBasePath defines the standard management resource path for the Auto Switcher Pro UI.
+const DefaultProfilesBasePath = "/v0/resource/plugins/auto-switcher-pro/profiles"
 
 // DefaultSecurityHeaders returns standard HTTP security and cache headers.
 func DefaultSecurityHeaders(contentType string) map[string][]string {
@@ -22,7 +22,7 @@ func DefaultSecurityHeaders(contentType string) map[string][]string {
 	}
 }
 
-// ResourceHandler serves embedded web assets for the visual-profile plugin with security guards.
+// ResourceHandler serves embedded web assets for the auto-switcher-pro plugin with security guards.
 type ResourceHandler struct {
 	basePath string
 }

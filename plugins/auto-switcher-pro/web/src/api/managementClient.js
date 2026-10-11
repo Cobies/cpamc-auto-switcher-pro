@@ -1017,27 +1017,12 @@ export async function virtualizeAccount(input = {}, options = {}) {
     payload.excluded_models = input.excludedModels;
   }
 
-  let res;
-  try {
-    res = await apiFetch('/v0/management/auto-switcher-pro/virtualize', {
-      ...options,
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-  } catch (primaryErr) {
-    // Fallback defensivo a ruta legacy por si el host aún corre una versión previa
-    if (primaryErr?.message?.includes('404')) {
-      res = await apiFetch('/v0/management/visual-profile/virtualize', {
-        ...options,
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-    } else {
-      throw primaryErr;
-    }
-  }
+  const res = await apiFetch('/v0/management/auto-switcher-pro/virtualize', {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
 
   const data = await res.json();
   if (!data || data.ok !== true) {
@@ -1057,22 +1042,10 @@ export async function virtualizeAccount(input = {}, options = {}) {
  * @returns {Promise<{ ok: boolean, pools: Array<Object>, count: number }>}
  */
 export async function listPools(options = {}) {
-  let res;
-  try {
-    res = await apiFetch('/v0/management/auto-switcher-pro/pools', {
-      ...options,
-      method: 'GET',
-    });
-  } catch (primaryErr) {
-    if (primaryErr?.message?.includes('404')) {
-      res = await apiFetch('/v0/management/visual-profile/pools', {
-        ...options,
-        method: 'GET',
-      });
-    } else {
-      throw primaryErr;
-    }
-  }
+  const res = await apiFetch('/v0/management/auto-switcher-pro/pools', {
+    ...options,
+    method: 'GET',
+  });
 
   const data = await res.json();
   return {
@@ -1095,26 +1068,12 @@ export async function listPools(options = {}) {
  * @returns {Promise<{ ok: boolean, pool: Object, message: string }>}
  */
 export async function savePool(poolData = {}, options = {}) {
-  let res;
-  try {
-    res = await apiFetch('/v0/management/auto-switcher-pro/pools', {
-      ...options,
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(poolData),
-    });
-  } catch (primaryErr) {
-    if (primaryErr?.message?.includes('404')) {
-      res = await apiFetch('/v0/management/visual-profile/pools', {
-        ...options,
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(poolData),
-      });
-    } else {
-      throw primaryErr;
-    }
-  }
+  const res = await apiFetch('/v0/management/auto-switcher-pro/pools', {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(poolData),
+  });
 
   const data = await res.json();
   if (!data || data.ok !== true) {
@@ -1140,22 +1099,10 @@ export async function dissolvePool(basePrefix, options = {}) {
     throw new Error('basePrefix is required to dissolve pool');
   }
 
-  let res;
-  try {
-    res = await apiFetch(`/v0/management/auto-switcher-pro/pools?prefix=${encodeURIComponent(trimmed)}`, {
-      ...options,
-      method: 'DELETE',
-    });
-  } catch (primaryErr) {
-    if (primaryErr?.message?.includes('404')) {
-      res = await apiFetch(`/v0/management/visual-profile/pools?prefix=${encodeURIComponent(trimmed)}`, {
-        ...options,
-        method: 'DELETE',
-      });
-    } else {
-      throw primaryErr;
-    }
-  }
+  const res = await apiFetch(`/v0/management/auto-switcher-pro/pools?prefix=${encodeURIComponent(trimmed)}`, {
+    ...options,
+    method: 'DELETE',
+  });
 
   const data = await res.json();
   return {

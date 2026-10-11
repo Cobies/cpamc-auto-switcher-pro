@@ -21,10 +21,8 @@ const (
 
 // virtualizeRoutePath is the primary plugin-relative management route. The host resolves
 // it under /v0/management/, i.e. POST /v0/management/auto-switcher-pro/virtualize.
-// legacyVirtualizeRoutePath preserves backward compatibility with older clients.
 const (
-	virtualizeRoutePath       = "/auto-switcher-pro/virtualize"
-	legacyVirtualizeRoutePath = "/visual-profile/virtualize"
+	virtualizeRoutePath = "/auto-switcher-pro/virtualize"
 )
 
 var (
@@ -285,7 +283,7 @@ func isVirtualizePath(rawPath string) bool {
 		normalized = normalized[:idx]
 	}
 	normalized = strings.TrimRight(normalized, "/")
-	return strings.HasSuffix(normalized, virtualizeRoutePath) || strings.HasSuffix(normalized, legacyVirtualizeRoutePath)
+	return strings.HasSuffix(normalized, virtualizeRoutePath)
 }
 
 // VirtualizeResponse is the JSON payload returned by the virtualize route. It is
@@ -299,7 +297,7 @@ type VirtualizeResponse struct {
 	Message string `json:"message,omitempty"`
 }
 
-// handleVirtualizeHTTP serves POST /v0/management/visual-profile/virtualize.
+// handleVirtualizeHTTP serves POST /v0/management/auto-switcher-pro/virtualize.
 func handleVirtualizeHTTP(req ManagementRequestPayload) ([]byte, error) {
 	var payload VirtualizeRequest
 	if len(req.Body) > 0 {
