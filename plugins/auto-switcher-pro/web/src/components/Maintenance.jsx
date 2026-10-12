@@ -352,6 +352,7 @@ export default function Maintenance({ onReloadRequested }) {
   const residualAccountsCount = scanResult?.residual_accounts?.length || 0;
   const orphanClonesCount = scanResult?.orphan_clones?.length || 0;
   const orphanArtifactsCount = scanResult?.orphan_artifacts?.length || 0;
+  const orphanProvidersCount = scanResult?.orphan_providers?.length || 0;
   const poolsCount = scanResult?.active_pools_count ?? 0;
   const isZeroPools = scanResult && phases.pools && poolsCount === 0;
   const hasConsoleUpdate = Boolean(scanResult?.console_update_available);
@@ -361,6 +362,7 @@ export default function Maintenance({ onReloadRequested }) {
     (phases.models ? residualAccountsCount : 0) +
     (phases.auth ? orphanClonesCount : 0) +
     orphanArtifactsCount +
+    orphanProvidersCount +
     (isZeroPools ? 1 : 0) +
     (phases.console && hasConsoleUpdate ? 1 : 0);
 
@@ -923,6 +925,63 @@ export default function Maintenance({ onReloadRequested }) {
                         {isCleaning
                           ? 'Purgando artefactos...'
                           : `Limpiar ${orphanArtifactsCount} Artefacto(s) Huérfano(s)`}
+                      </span>
+                    </button>
+                  </div>
+                )}
+
+                {/* CASO 3.3.B: Proveedores huérfanos en config.yaml (universal y dinámico) */}
+                {orphanProvidersCount > 0 && (
+                  <div className="incident-card" data-testid="incident-orphan-providers">
+                    <div className="incident-card-head">
+                      <div className="incident-title-row">
+                        <span className="incident-icon">🔌</span>
+                        <div>
+                          <strong className="incident-name">Proveedores Huérfanos en config.yaml</strong>
+                          <span className="incident-meta">{orphanProvidersCount} proveedor(es) inflando el catálogo</span>
+                        </div>
+                      </div>
+                      <span className="tag-warning">Configuración Residual</span>
+                    </div>
+                    <p className="incident-desc">
+                      Se detectaron proveedores declarados en <code>config.yaml</code> que no tienen cuentas de autenticación en disco ni plugins activos. Estos registros inflan innecesariamente el catálogo global de modelos de CPAMC.
+                    </p>
+                    <div className="incident-sample-table-wrap">
+                      <table className="results-table">
+                        <thead>
+                          <tr>
+                            <th>Proveedor</th>
+                            <th>Prefijo</th>
+                            <th>Modelos Declarados</th>
+                            <th>Diagnóstico</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {scanResult.orphan_providers.map((p) => (
+                            <tr key={p.name}>
+                              <td style={{ fontWeight: 600, color: '#f8fafc' }}>{p.name}</td>
+                              <td>
+                                <code style={{ color: '#38bdf8' }}>{p.prefix ? `${p.prefix}/` : '(sin prefijo)'}</code>
+                              </td>
+                              <td>{p.models_count} modelo(s)</td>
+                              <td style={{ color: '#f59e0b', fontSize: '0.85rem' }}>{p.reason}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-clean"
+                      onClick={handleClean}
+                      disabled={isCleaning}
+                      data-testid="btn-clean-orphan-providers"
+                    >
+                      <span>{isCleaning ? '⏳' : '✨'}</span>
+                      <span>
+                        {isCleaning
+                          ? 'Purgando proveedores huérfanos...'
+                          : `Purgar ${orphanProvidersCount} Proveedor(es) de config.yaml`}
                       </span>
                     </button>
                   </div>

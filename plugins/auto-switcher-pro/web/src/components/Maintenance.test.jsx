@@ -151,6 +151,53 @@ describe('Maintenance Component - Centro Dinámico de Acciones y Resolución', (
     });
   });
 
+  it('renders universal orphan provider card dynamically and purges config.yaml providers', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.spyOn(managementClient, 'scanSystemHealth').mockResolvedValue({
+      ok: true,
+      total_auth_files: 4,
+      active_pools_count: 2,
+      orphan_providers: [
+        {
+          name: 'provider-xyz',
+          prefix: 'xyz',
+          models_count: 7,
+          reason: 'Sin cuentas de autenticación vinculadas en disco',
+        },
+        {
+          name: 'another-one',
+          prefix: '',
+          models_count: 3,
+          reason: 'Sin cuentas de autenticación vinculadas en disco',
+        },
+      ],
+    });
+    const cleanSpy = vi.spyOn(managementClient, 'cleanSystemResidues').mockResolvedValue({
+      ok: true,
+      purged_providers: ['provider-xyz', 'another-one'],
+      message: 'Se purgaron 2 proveedor(es) huérfano(s) de config.yaml.',
+    });
+
+    render(<Maintenance />);
+    fireEvent.click(screen.getByTestId('btn-scan-health'));
+
+    const incidentCard = await screen.findByTestId('incident-orphan-providers');
+    expect(incidentCard).toBeTruthy();
+    // Dinámico y agnóstico: cualquier proveedor futuro se lista sin hardcodeo
+    expect(screen.getByText('provider-xyz')).toBeTruthy();
+    expect(screen.getByText('another-one')).toBeTruthy();
+    expect(screen.getByText('7 modelo(s)')).toBeTruthy();
+    expect(screen.getByText('3 modelo(s)')).toBeTruthy();
+    expect(screen.getAllByText('Sin cuentas de autenticación vinculadas en disco').length).toBe(2);
+
+    const cleanBtn = screen.getByTestId('btn-clean-orphan-providers');
+    fireEvent.click(cleanBtn);
+
+    await waitFor(() => {
+      expect(cleanSpy).toHaveBeenCalled();
+    });
+  });
+
   it('invokes deleteAuthFile on orphan purge click after confirmation', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     vi.spyOn(managementClient, 'scanSystemHealth').mockResolvedValue({
