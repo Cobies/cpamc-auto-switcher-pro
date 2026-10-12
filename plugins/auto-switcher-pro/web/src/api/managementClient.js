@@ -1303,6 +1303,44 @@ export async function deleteAuthFile(fileName, options = {}) {
 }
 
 /**
+ * Canonical catalog of supported models by provider family.
+ * Ensures complete model visibility in specialist pickers and exclusion engines,
+ * even when the dynamic live /v1/models catalog is narrowed to active specialist routes.
+ */
+export const CANONICAL_PROVIDER_MODELS = {
+  gemini: [
+    'gemini-3.8-flash-high',
+    'gemini-3.7-flash-high',
+    'gemini-3.6-flash-high',
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-pro-low',
+    'gemini-3.1-flash-lite',
+    'gemini-3.1-flash-image',
+    'gemini-3-flash',
+    'gemini-pro-agent',
+    'gemini-2.5-pro',
+    'gemini-2.5-flash',
+    'gemini-2.0-flash',
+  ],
+  claude: [
+    'claude-3-7-sonnet',
+    'claude-3-5-sonnet',
+    'claude-3-5-haiku',
+    'claude-3-opus',
+    'claude-sonnet-4-6',
+    'claude-sonnet-5-5-high',
+    'claude-opus-4-6-thinking',
+    'claude-opus-5-5-high',
+  ],
+  codex: [
+    'gpt-4o',
+    'gpt-4o-mini',
+    'o1-preview',
+    'o3-mini',
+  ],
+};
+
+/**
  * Deterministically constructs Wilox's scalable 2N managed pool cards model from physical OAuth master accounts.
  *
  * For N physical OAuth master accounts, produces exactly 2N managed cards (N Gemini + N Claude).
@@ -1330,8 +1368,25 @@ export function buildManagedPoolCards(nodes = [], registeredPools = null) {
 
     const cards = [];
     registeredPools.forEach((pool) => {
-      const familyRole = (pool.family === 'gemini_pure' || (pool.family && pool.family.startsWith('gemini_pure'))) ? 'gemini' : 'claude';
+      const familyKey = String(pool.family || '');
+      // gemini_pure → Gemini puro; gemini_sonnet/opus/claude (Claude del Paquete agy_*) y claude → Claude; codex/gpt → Codex
+      const familyRole = familyKey.startsWith('gemini_pure')
+        ? 'gemini'
+        : (familyKey === 'codex' || familyKey.includes('codex') || familyKey.includes('openai') || familyKey.includes('gpt'))
+        ? 'codex'
+        : 'claude';
       const basePrefix = pool.base_prefix || '';
+
+      // Gobernanza virtual pura: la política del pool define el especialista de la tarjeta.
+      // 1 Pool = 1 Modelo aislado (disable_isolation: false + exactamente 1 target_model).
+      // Las tarjetas reflejan la política del registro aunque el disco no tenga exclusiones.
+      const poolTargets = Array.isArray(pool.policy?.target_models)
+        ? pool.policy.target_models
+        : [];
+      const specialistModel =
+        pool.policy?.disable_isolation === false && poolTargets.length === 1
+          ? String(poolTargets[0]).trim()
+          : null;
 
       const buildCardForAuth = (authFileName, poolRole, assignedPrefix) => {
         const matchingNode = nodes.find(
@@ -1371,9 +1426,15 @@ export function buildManagedPoolCards(nodes = [], registeredPools = null) {
         const accountExclusions = linkedVirtual?.excludedModels
           || classification.excludedModels
           || [];
-        const policyExclusions = accountExclusions.length > 0
-          ? accountExclusions
-          : (pool.policy?.excluded_models || []);
+        let policyExclusions = accountExclusions;
+        if (policyExclusions.length === 0) {
+          if (Array.isArray(pool.policy?.excluded_models) && pool.policy.excluded_models.length > 0) {
+            policyExclusions = pool.policy.excluded_models;
+          } else if (Array.isArray(pool.policy?.target_models) && pool.policy.target_models.length > 0) {
+            const familyCatalog = CANONICAL_PROVIDER_MODELS[familyRole] || [];
+            policyExclusions = computeSpecialistExclusions(familyCatalog, pool.policy.target_models[0]);
+          }
+        }
         const exclusionBadges = pool.policy?.exclude_55
           ? ['Excluye 5.5']
           : (linkedVirtual?.exclusionBadges || classification.exclusionBadges || []);
@@ -1386,6 +1447,9 @@ export function buildManagedPoolCards(nodes = [], registeredPools = null) {
           assignedPrefix,
           poolRole,
           activePoolBase: basePrefix,
+          specialistModel,
+          poolDisableIsolation: pool.policy?.disable_isolation === true,
+          poolTargetModels: poolTargets,
           exclusionBadges,
           excludedModels: policyExclusions,
           excluded_models: policyExclusions,

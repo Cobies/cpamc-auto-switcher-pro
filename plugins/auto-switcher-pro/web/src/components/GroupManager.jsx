@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   saveAuthFilePrefixes,
   listModels,
@@ -9,6 +9,8 @@ import {
   buildManagedPoolCards,
   savePool,
   dissolvePool,
+  resolveInheritedCardModels,
+  CANONICAL_PROVIDER_MODELS,
 } from '../api/managementClient';
 import '../GroupManager.css';
 
@@ -26,14 +28,14 @@ const poolFamilyRole = (family) => {
 // Familias principales soportadas por la convención de cuota del switcher (internal/quota/quota.go)
 const MODEL_FAMILIES = {
   gemini: {
-    label: 'Gemini (Paquete Antigravity)',
+    label: 'Google Gemini',
     icon: '✨',
     provider: 'antigravity',
     hasSubtypes: true,
     subtypes: {
       pure: {
         key: 'pure',
-        label: 'Gemini Puro',
+        label: 'Gemini Fleet',
         icon: '🔷',
         hintPrefix: 'agy',
         quota: 'Gemini Models',
@@ -60,30 +62,30 @@ const MODEL_FAMILIES = {
       },
       claude: {
         key: 'claude',
-        label: 'Claude del Paquete',
+        label: 'Antigravity Dual',
         icon: '🎭',
         hintPrefix: 'agy_clau',
         quota: 'Claude and GPT models',
         targetPatterns: ['claude', 'gpt'],
-        note: 'Pool multipropósito que rota tanto Sonnet como Opus bajo la misma cuota. Convención: agy_clau, agy_clau2...',
+        note: 'Pool dual que rota tanto Sonnet como Opus bajo la misma cuota. Convención: agy_clau, agy_clau2...',
       },
     },
   },
   claude: {
-    label: 'Claude Nativo / Individual',
+    label: 'Anthropic Claude',
     icon: '🤖',
     hintPrefix: 'clau',
     provider: 'antigravity',
     quota: 'Claude and GPT models',
-    note: 'Cuentas asignadas para vigilar cuota de Claude/GPT. Convención: clau, clau2...',
+    note: 'Cuentas directas oficiales Anthropic (prefijo clau*). Convención: clau, clau2...',
   },
   codex: {
-    label: 'Codex (ChatGPT)',
+    label: 'OpenAI Codex',
     icon: '🧩',
     hintPrefix: 'codex',
     provider: 'codex',
     quota: 'Codex',
-    note: 'Cuentas individuales Codex / OpenAI. Convención: codex, codex2...',
+    note: 'Cuentas individuales Codex / OpenAI (prefijo codex*). Convención: codex, codex2...',
   },
 };
 
@@ -185,7 +187,7 @@ export default function GroupManager({
   const [family, setFamily] = useState(null); // 'gemini' | 'claude' | 'codex' | null (libre)
   const [geminiSubtype, setGeminiSubtype] = useState('pure'); // 'pure' (agy) | 'claude' (agy_clau)
   const [excludeVersion55, setExcludeVersion55] = useState(false);
-  const [disableIsolation, setDisableIsolation] = useState(false);
+  const [selectedSpecialistModel, setSelectedSpecialistModel] = useState('');
   const [saveReport, setSaveReport] = useState(null); // { base, successful, failed }
   const [modelRoutes, setModelRoutes] = useState(null); // { base, routes: [] }
   const [copiedRoute, setCopiedRoute] = useState('');
@@ -193,6 +195,15 @@ export default function GroupManager({
   // Se resincroniza en cada reload de nodos (tras crear/disolver un pool).
   const [registeredPools, setRegisteredPools] = useState([]);
   const [catalogModels, setCatalogModels] = useState([]);
+  const feedbackTimeoutRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (feedbackTimeoutRef.current) {
+        clearTimeout(feedbackTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -321,6 +332,78 @@ export default function GroupManager({
     }
     return null;
   }, [effectiveFamily]);
+
+  // Modelos candidatos disponibles para el pool según la familia efectiva seleccionada
+  const availableSpecialistModels = useMemo(() => {
+    if (!effectiveFamily) return [];
+    const sourceModels = Array.isArray(catalogModels) && catalogModels.length > 0
+      ? catalogModels
+      : [];
+    const dummyCard = {
+      familyRole: targetFamilyRole || 'gemini',
+      assignedPrefix: effectiveFamily.hintPrefix,
+    };
+    let models = resolveInheritedCardModels(dummyCard, sourceModels);
+
+    // Si el catálogo aún no cargó o está vacío en tests, proveer los modelos canónicos conocidos
+    if (models.length === 0) {
+      if (effectiveFamily.key === 'gemini_pure') {
+        models = [
+          'gemini-3.8-flash-high',
+          'gemini-3.7-flash-high',
+          'gemini-3.6-flash-high',
+          'gemini-3.5-flash-lite',
+          'gemini-3.1-pro-low',
+          'gemini-3.1-flash-lite',
+          'gemini-3.1-flash-image',
+          'gemini-3-flash',
+          'gemini-pro-agent',
+        ];
+      } else if (effectiveFamily.key === 'gemini_sonnet') {
+        models = ['claude-sonnet-4-6', 'claude-sonnet-5-5-high'];
+      } else if (effectiveFamily.key === 'gemini_opus') {
+        models = ['claude-opus-4-6-thinking', 'claude-opus-5-5-high'];
+      } else if (effectiveFamily.key === 'gemini_claude' || effectiveFamily.key === 'claude') {
+        models = [
+          'claude-3-7-sonnet',
+          'claude-3-5-haiku',
+          'claude-sonnet-4-6',
+          'claude-opus-4-6-thinking',
+        ];
+      } else if (effectiveFamily.key === 'codex') {
+        models = ['gpt-4o', 'gpt-4o-mini', 'o1-preview', 'o3-mini'];
+      }
+    }
+
+    if (excludeVersion55) {
+      models = models.filter((m) => !m.includes('5-5') && !m.includes('5.5'));
+    }
+
+    // Ordenar con 3.8 primero para gemini, o A-Z para claude/otros
+    const isGemini = (targetFamilyRole || '') === 'gemini';
+    return [...models].sort((a, b) => {
+      if (isGemini) {
+        const a38 = a.includes('3.8');
+        const b38 = b.includes('3.8');
+        if (a38 && !b38) return -1;
+        if (!a38 && b38) return 1;
+      }
+      return a.localeCompare(b);
+    });
+  }, [effectiveFamily, catalogModels, targetFamilyRole, excludeVersion55]);
+
+  // Actualizar el modelo especialista predeterminado cuando cambie la familia o subtipo
+  useEffect(() => {
+    if (availableSpecialistModels.length > 0) {
+      setSelectedSpecialistModel((prev) => {
+        if (prev && availableSpecialistModels.includes(prev)) return prev;
+        const default38 = availableSpecialistModels.find((m) => m.includes('3.8'));
+        return default38 || availableSpecialistModels[0] || '';
+      });
+    } else {
+      setSelectedSpecialistModel('');
+    }
+  }, [availableSpecialistModels]);
 
   // ¿El prefijo corresponde al sub-tipo Gemini objetivo (mismo paquete)?
   const prefixMatchesEffectiveFamily = useCallback((prefix) => {
@@ -724,13 +807,24 @@ export default function GroupManager({
 
     queueAssignment(activeNode, trimmedBase);
     const assignedPrefixes = new Set();
+    const reserveFileNames = [];
     selectedReserveNodeIds.forEach((resId) => {
       const resNode = nodes.find((n) => n.id === resId);
-      if (resNode && (resNode.data?.fileName || resNode.name)) {
+      const resFileName = resNode?.data?.fileName || resNode?.name;
+      if (!resFileName) return;
+      reserveFileNames.push(resFileName);
+      // Invariante #5: Las cuentas de reserva NO reciben prefijo estampado en disco
+      // para evitar que CPAMC las publique como rutas de reserva (_1, _2...) en /model.
+      // Si la cuenta física tenía un prefijo residual antiguo, lo reseteamos a vacío.
+      if (registryMemberFileNames.has(resFileName)) {
+        registryOnlyFiles.push(resFileName);
+      } else if (isVirtualSource(resNode)) {
         const reserveNum = nextReserveNumber(nodes, trimmedBase, assignedPrefixes);
         const reservePrefix = `${trimmedBase}_${reserveNum}`;
         assignedPrefixes.add(reservePrefix);
-        queueAssignment(resNode, reservePrefix);
+        virtualJobs.push({ sourceFile: resFileName, prefix: reservePrefix, email: resNode.data?.email });
+      } else if (resNode.data?.prefix) {
+        updates.push({ name: resFileName, prefix: '' });
       }
     });
 
@@ -761,26 +855,45 @@ export default function GroupManager({
 
         const targetSet = new Set();
         const oppositeSet = new Set();
+        const familyMatchingModels = [];
+
         models
           .map(toBaseModelId)
           .filter(Boolean)
           .filter(isAntigravityModel)
           .forEach((id) => {
-            if (disableIsolation) {
-              if (excludeVersion55 && (id.includes('5-5') || id.includes('5.5'))) {
-                oppositeSet.add(id);
-              } else {
-                targetSet.add(id);
-              }
-            } else if (matchesFamilyModel(trimmedBase, id, excludeVersion55)) {
-              targetSet.add(id);
-            } else {
-              oppositeSet.add(id);
+            if (matchesFamilyModel(trimmedBase, id, excludeVersion55)) {
+              familyMatchingModels.push(id);
             }
           });
+
+        // REGLA ARQUITECTÓNICA SAGRADA (Especialista Único por Pool):
+        // Cada pool creado es estrictamente especialista de 1 solo modelo.
+        // El modelo elegido queda como único target y el resto de la familia como opuesto/bloqueado.
+        const effectiveSpecialist = selectedSpecialistModel ||
+          familyMatchingModels.find((m) => m.includes('3.8')) ||
+          familyMatchingModels[0] ||
+          '';
+
+        if (effectiveSpecialist) {
+          targetSet.add(effectiveSpecialist);
+          models
+            .map(toBaseModelId)
+            .filter(Boolean)
+            .filter(isAntigravityModel)
+            .forEach((id) => {
+              if (id !== effectiveSpecialist) {
+                oppositeSet.add(id);
+              }
+            });
+        } else {
+          // Fallback seguro si no hay modelos coincidentes detectados
+          familyMatchingModels.forEach((id) => targetSet.add(id));
+        }
+
         targetModels = [...targetSet];
         oppositeModels = [...oppositeSet];
-        allBaseModels = [...new Set(models.map(toBaseModelId).filter(Boolean))];
+        allBaseModels = [...new Set(models.map(toBaseModelId).filter(Boolean).filter(isAntigravityModel))];
       } catch {
         // Model listing is non-blocking
       }
@@ -809,10 +922,6 @@ export default function GroupManager({
           });
         });
         files.forEach((file) => {
-          if (disableIsolation) {
-            exclusionsByFile.set(file, []);
-            return;
-          }
           const union = new Set(newPoolTargets || []);
           (poolsByFile.get(file) || []).forEach((p) => {
             (p.policy?.target_models || []).forEach((m) => union.add(m));
@@ -834,12 +943,9 @@ export default function GroupManager({
         base_prefix: trimmedBase,
         leader_auth: activeNode.data?.fileName || activeNode.name,
         leader_email: activeNode.data?.email || '',
-        reserves: selectedReserveNodeIds.map((resId) => {
-          const rNode = nodes.find((n) => n.id === resId);
-          return rNode?.data?.fileName || rNode?.name || '';
-        }).filter(Boolean),
+        reserves: reserveFileNames,
         policy: {
-          disable_isolation: Boolean(disableIsolation),
+          disable_isolation: false,
           exclude_55: Boolean(excludeVersion55),
           target_models: targetModels,
           excluded_models: oppositeModels,
@@ -852,23 +958,13 @@ export default function GroupManager({
         console.warn('savePool error in registry:', poolErr);
       }
 
-      // [2N] Parche de exclusiones union-aware para TODAS las cuentas asignadas:
-      // excluido = catálogo base − unión de los target_models de TODOS los pools a los
-      // que pertenece la cuenta (así una cuenta que sirve Gemini + Claude en paralelo
-      // no ve sus modelos filtrados por la exclusión de la otra familia).
-      // Para cuentas solo en este pool equivale a la lista opuesta de la familia (legacy).
-      const assignedFiles = [
-        ...updates.map((item) => item.name),
-        ...registryOnlyFiles,
-      ].filter(Boolean);
-      if (assignedFiles.length > 0) {
-        const unionExclusionsByFile = await computeUnionExclusions(assignedFiles, targetModels);
-        await Promise.allSettled(
-          assignedFiles.map((file) =>
-            patchAuthFileExclusions(file, unionExclusionsByFile.get(file) || [])
-          )
-        );
-      }
+      // NOTA ARQUITECTÓNICA (Gobernanza Virtual Pura):
+      // Las cuentas físicas en disco NO deben mutar su `excluded_models`.
+      // Si se inyecta `excluded_models` en el archivo .json, CPAMC nativo oculta y mutila
+      // el catálogo de modelos de la credencial en su vista nativa de Auth Files.
+      // El aislamiento de modelo especialista (1 Pool = 1 Modelo) lo gestiona 100% el plugin
+      // a través de `poolPayload.policy` y el enrutador virtual `model.route` / `scheduler.pick`.
+      // Por ende, NUNCA sobreescribimos las exclusiones físicas del disco al crear pools.
 
       const successful = [
         ...patchReport.successful,
@@ -903,13 +999,14 @@ export default function GroupManager({
           await onReloadRequested();
         }
       }
-      setTimeout(() => setSuccessFeedback(''), 4000);
+      if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
+      feedbackTimeoutRef.current = setTimeout(() => setSuccessFeedback(''), 4000);
     } catch (err) {
       setErrorMessage(`Error al guardar pool: ${err.message}`);
     } finally {
       setIsSubmitting(false);
     }
-  }, [groupBasePrefix, selectedActiveNodeId, selectedReserveNodeIds, nodes, onReloadRequested, effectiveFamily, excludeVersion55, disableIsolation, isVirtualSource, registryMemberFileNames, registryMembersByRole]);
+  }, [groupBasePrefix, selectedActiveNodeId, selectedReserveNodeIds, nodes, onReloadRequested, effectiveFamily, excludeVersion55, selectedSpecialistModel, isVirtualSource, registryMemberFileNames, registryMembersByRole]);
 
   // Reintentar solo las cuentas que fallaron en el último guardado
   const handleRetryFailed = useCallback(async () => {
@@ -967,7 +1064,8 @@ export default function GroupManager({
         } catch {
           setModelRoutes(null);
         }
-        setTimeout(() => setSuccessFeedback(''), 4000);
+        if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
+        feedbackTimeoutRef.current = setTimeout(() => setSuccessFeedback(''), 4000);
       }
     } catch (err) {
       setErrorMessage(`Error al reintentar: ${err.message}`);
@@ -1097,17 +1195,20 @@ export default function GroupManager({
     }
   }, [nodes, onReloadRequested]);
 
+  const providerAuraClass = family ? `provider-${family}` : 'provider-neutral';
+
   return (
-    <div className="group-manager-container" data-testid="group-manager-view">
-      {/* Header Principal */}
+    <div className={`group-manager-container ${providerAuraClass}`} data-testid="group-manager-view">
+      {/* Header Principal Bento 2027 */}
       <div className="group-manager-header">
         <div className="group-manager-title-area">
           <div className="group-manager-title-row">
-            <span className="group-manager-icon">🛠️</span>
-            <h2 className="group-manager-title">Crear Group / Perfiles</h2>
+            <span className="group-manager-icon">⚡</span>
+            <h2 className="group-manager-title">Constructor de Pools</h2>
+            <span className="group-manager-badge-2027">v2027 · Failover Engine</span>
           </div>
           <p className="group-manager-desc">
-            Orquesta pools de balanceo de carga y alta disponibilidad (Leader / Cascading Reserves) para enrutamiento en CPAMC.
+            Orquesta pools virtuales de balanceo de carga y alta disponibilidad para CPAMC con failover automático y cero downtime.
           </p>
         </div>
       </div>
@@ -1257,7 +1358,7 @@ export default function GroupManager({
                               onClick={() => handleSelectGeminiSubtype('claude')}
                               data-testid="subfamily-gemini-claude"
                             >
-                              <span className="group-subfamily-label">🎭 Multipropósito</span>
+                              <span className="group-subfamily-label">🎭 Antigravity Dual</span>
                               <span className="group-subfamily-hint">Prefijo: agy_clau... · Cuota: Claude & GPT</span>
                             </button>
                           </>
@@ -1274,46 +1375,46 @@ export default function GroupManager({
                     </p>
                   )}
 
-                  {/* ⚙️ Opciones de Filtrado de Modelos (Casillas Contextuales) */}
+                  {/* 🎯 Selección Obligatoria de Modelo Especialista (Invariante Sagrado: 1 Pool = 1 Modelo) */}
                   {family && (
                     <div
-                      className="group-model-policy-card"
+                      className="group-model-policy-card bento-specialist-card"
                       data-testid="model-policy-card"
-                      style={{
-                        background: 'rgba(15, 23, 42, 0.65)',
-                        border: '1px solid rgba(148, 163, 184, 0.2)',
-                        borderRadius: 8,
-                        padding: '10px 14px',
-                        marginTop: 10,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 8,
-                      }}
                     >
-                      <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                        ⚙️ Opciones de Filtrado de Modelos en el Pool:
+                      <div className="bento-specialist-header">
+                        <div className="bento-specialist-title">
+                          <span className="bento-specialist-icon">🎯</span>
+                          <span>Modelo Especialista Aislado</span>
+                        </div>
+                        <span className="bento-specialist-badge">1 Pool = 1 Modelo</span>
                       </div>
+                      <select
+                        className="group-select bento-select"
+                        value={selectedSpecialistModel}
+                        onChange={(e) => setSelectedSpecialistModel(e.target.value)}
+                        data-testid="select-specialist-model"
+                      >
+                        {availableSpecialistModels.map((m) => (
+                          <option key={m} value={m}>
+                            {m}{m.includes('3.8') ? ' ⭐ (Recomendado)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="bento-specialist-hint">
+                        🔒 Este pool responderá <strong>únicamente</strong> a <code>{selectedSpecialistModel || 'este modelo'}</code>. Los restantes {Math.max(0, availableSpecialistModels.length - 1)} modelos de su familia quedan automáticamente bloqueados para aislar la cuota.
+                      </p>
                       {/* Casilla 5.5 solo visible para familias de Claude donde existe dicha versión */}
                       {effectiveFamily && (effectiveFamily.key.includes('claude') || effectiveFamily.key.includes('sonnet') || effectiveFamily.key.includes('opus')) && (
-                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#e2e8f0', cursor: 'pointer' }}>
+                        <label className="bento-checkbox-label">
                           <input
                             type="checkbox"
                             data-testid="checkbox-exclude-55"
                             checked={excludeVersion55}
                             onChange={(e) => setExcludeVersion55(e.target.checked)}
                           />
-                          <span>Excluir versiones 5.5 (Mantener solo versión 4.6 / Estable sin duplicidad)</span>
+                          <span>Excluir versiones 5.5 (Mantener solo versión 4.6 / Estable)</span>
                         </label>
                       )}
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#e2e8f0', cursor: 'pointer' }}>
-                        <input
-                          type="checkbox"
-                          data-testid="checkbox-disable-isolation"
-                          checked={disableIsolation}
-                          onChange={(e) => setDisableIsolation(e.target.checked)}
-                        />
-                        <span>Desactivar aislamiento (Modo Comodín / Servir todas las familias sin bloqueo)</span>
-                      </label>
                     </div>
                   )}
                 </div>
@@ -1331,12 +1432,12 @@ export default function GroupManager({
                   );
                 })()}
 
-                {/* ② Cuenta Principal + ③ Prefijo Base (lado a lado) */}
+                {/* Cuenta Principal + Prefijo Base */}
                 <div className="group-inline-row">
                   <div className="group-field group-field-account">
-                    <label className="group-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <label className="group-label">
                       <span>👑</span>
-                      <span>② Cuenta Principal (Activa / Leader):</span>
+                      <span>Titular del Pool (Líder Activo):</span>
                     </label>
                     <select
                       className="group-select"
@@ -1347,8 +1448,8 @@ export default function GroupManager({
                     >
                       <option value="">
                         {family
-                          ? '-- Selecciona la cuenta principal libre --'
-                          : '⚠️ Elige primero la familia de modelos (①)'}
+                          ? '-- Selecciona la cuenta titular libre --'
+                          : '⚠️ Elige primero la familia de modelos'}
                       </option>
                       {leaderCandidates.map(({ node: n, virtual }) => {
                         const email = n.data?.email || n.data?.fileName || n.id;
@@ -1369,7 +1470,10 @@ export default function GroupManager({
                   </div>
 
                   <div className="group-field group-field-prefix">
-                    <label className="group-label">③ Prefijo Base del Grupo (Pool):</label>
+                    <label className="group-label">
+                      <span>🏷️</span>
+                      <span>Prefijo Virtual (Ruta de Pool):</span>
+                    </label>
                     <input
                       type="text"
                       className="group-input"
@@ -1439,7 +1543,8 @@ export default function GroupManager({
                 {/* Cuentas de Reserva */}
                 <div className="group-field">
                   <label className="group-label">
-                    Cuentas de Reserva (Mismo Proveedor en Cascada):
+                    <span>🛡️</span>
+                    <span>Banco de Suplentes (Reservas Invisibles en /model):</span>
                   </label>
                   {reserveCandidates.length === 0 ? (
                     <div style={{ color: '#64748b', fontSize: 12, padding: 8 }}>
@@ -1447,7 +1552,7 @@ export default function GroupManager({
                         ? 'No hay más cuentas libres compatibles con esta familia para agregar como reservas.'
                         : family
                           ? 'Selecciona primero una cuenta principal.'
-                          : 'Elige primero la familia de modelos (①).'}
+                          : 'Elige primero la familia de modelos.'}
                     </div>
                   ) : (
                     <div className="group-reserves-container" data-testid="reserves-container">
@@ -1455,6 +1560,7 @@ export default function GroupManager({
                         const isChecked = selectedReserveNodeIds.includes(n.id);
                         const email = n.data?.email || n.data?.fileName || n.id;
                         const file = n.data?.fileName || '';
+                        const reserveIdx = selectedReserveNodeIds.indexOf(n.id);
                         return (
                           <div
                             key={n.id}
@@ -1475,8 +1581,8 @@ export default function GroupManager({
                               <span className="group-reserve-sub">{file}</span>
                             </div>
                             {isChecked && (
-                              <span style={{ fontSize: 11, fontWeight: 700, color: '#c084fc' }}>
-                                _{selectedReserveNodeIds.indexOf(n.id) + 1}
+                              <span className="bento-reserve-order-badge">
+                                🛡️ {reserveIdx + 1}º Suplente
                               </span>
                             )}
                           </div>

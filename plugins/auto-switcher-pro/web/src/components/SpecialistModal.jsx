@@ -26,8 +26,6 @@ export default function SpecialistModal({
   const familyRole = (card?.familyRole || card?.family || card?.role || 'gemini').toLowerCase();
   const isGeminiFamily = familyRole === 'gemini';
 
-  // mode: 'single' (limitado) | 'all' (permitir todos)
-  const [mode, setMode] = useState('all');
   const [selectedModel, setSelectedModel] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -57,11 +55,8 @@ export default function SpecialistModal({
 
     const specialistInfo = detectSpecialistState(card, inheritedModels);
     if (specialistInfo.isSpecialist && specialistInfo.activeSpecialistModel) {
-      setMode('single');
       setSelectedModel(specialistInfo.activeSpecialistModel);
     } else {
-      // Si la cuenta no está limitada en disco, reflejar fielmente el modo multipropósito abierto
-      setMode('all');
       const defaultRecommendation = isGeminiFamily
         ? (sortedInheritedModels.find((m) => m.includes('3.8')) || sortedInheritedModels[0] || '')
         : (sortedInheritedModels[0] || '');
@@ -80,12 +75,12 @@ export default function SpecialistModal({
   }, [card]);
 
   const previewExclusions = useMemo(() => {
-    if (mode !== 'single' || !selectedModel) return [];
+    if (!selectedModel) return [];
     const sourcePool = Array.isArray(allCatalogModels) && allCatalogModels.length > 0
       ? allCatalogModels
       : inheritedModels;
     return computeSpecialistExclusions(sourcePool, selectedModel);
-  }, [mode, selectedModel, allCatalogModels, inheritedModels]);
+  }, [selectedModel, allCatalogModels, inheritedModels]);
 
   if (!isOpen || !card) {
     return null;
@@ -97,12 +92,7 @@ export default function SpecialistModal({
     }
   };
 
-  const handleSelectAllowAll = () => {
-    setMode('all');
-  };
-
   const handleSelectLimitSingle = (m) => {
-    setMode('single');
     setSelectedModel(m);
   };
 
@@ -116,28 +106,10 @@ export default function SpecialistModal({
     setErrorMessage('');
 
     try {
-      let exclusionsToSave = [];
-      if (mode === 'single') {
-        const sourcePool = Array.isArray(allCatalogModels) && allCatalogModels.length > 0
-          ? allCatalogModels
-          : inheritedModels;
-        exclusionsToSave = computeSpecialistExclusions(sourcePool, selectedModel);
-      } else {
-        // En modo permitir todos, restaurar exclusión de modelos ajenos a la familia de la tarjeta
-        if (Array.isArray(allCatalogModels) && allCatalogModels.length > 0) {
-          const inheritedSet = new Set(inheritedModels);
-          exclusionsToSave = computeSpecialistExclusions(
-            allCatalogModels.filter((m) => {
-              let clean = typeof m === 'string' ? m.trim() : (m?.id || m?.name || '').trim();
-              while (clean.includes('/')) clean = clean.slice(clean.indexOf('/') + 1);
-              return !inheritedSet.has(clean);
-            }),
-            ''
-          );
-        } else {
-          exclusionsToSave = [];
-        }
-      }
+      const sourcePool = Array.isArray(allCatalogModels) && allCatalogModels.length > 0
+        ? allCatalogModels
+        : inheritedModels;
+      const exclusionsToSave = computeSpecialistExclusions(sourcePool, selectedModel);
 
       const dispatchPatch = patchFn || patchAuthFileExclusions;
       await dispatchPatch(targetFileName, exclusionsToSave);
@@ -146,8 +118,8 @@ export default function SpecialistModal({
         onSaved({
           fileName: targetFileName,
           exclusions: exclusionsToSave,
-          mode: mode === 'single' ? 'specialist' : 'multipurpose',
-          targetModel: mode === 'single' ? selectedModel : null,
+          mode: 'specialist',
+          targetModel: selectedModel,
         });
       }
       onClose();
@@ -157,8 +129,6 @@ export default function SpecialistModal({
       setIsSaving(false);
     }
   };
-
-  const isAllowAll = mode === 'all';
 
   return (
     <div
@@ -182,7 +152,7 @@ export default function SpecialistModal({
                 Filtro de Modelos Permitidos en esta Cuenta
               </h3>
               <p className="specialist-subtitle">
-                Decide si esta cuenta responderá a cualquier modelo de su familia o si debe limitarse a uno solo para proteger su cuota.
+                Decide qué modelo de su familia responderá esta cuenta para proteger su cuota.
               </p>
             </div>
           </div>
@@ -231,7 +201,7 @@ export default function SpecialistModal({
         <div className="specialist-body" data-testid="specialist-models-container">
           <div className="specialist-list-header">
             <span className="specialist-section-label">
-              Elige el comportamiento de esta cuenta:
+              Elige el modelo predeterminado para esta cuenta:
             </span>
             <span className="specialist-family-count">
               {inheritedModels.length} modelos en familia
@@ -239,47 +209,13 @@ export default function SpecialistModal({
           </div>
 
           <div className="specialist-models-list">
-            {/* OPCIÓN 1: Permitir todos los modelos (Sin restricciones) */}
-            <label
-              className={`specialist-model-option multipurpose-option ${isAllowAll ? 'selected' : ''}`}
-              data-testid="mode-btn-multipurpose"
-            >
-              <input
-                type="radio"
-                name="model-scope-choice"
-                value="__allow_all__"
-                checked={isAllowAll}
-                onChange={handleSelectAllowAll}
-                disabled={isSaving}
-              />
-              <span className="model-radio-circle" />
-              <div className="model-info-block">
-                <div className="model-title-row">
-                  <span className="model-multipurpose-icon">🔓</span>
-                  <span className="model-radio-name primary">
-                    Permitir todos los modelos de {card.familyRole || 'Gemini'} (Sin restricciones)
-                  </span>
-                </div>
-                <span className="model-desc-hint">
-                  La cuenta responderá a cualquier petición de los {inheritedModels.length} modelos disponibles sin bloquear ninguno.
-                </span>
-              </div>
-              {isAllowAll && <span className="model-active-pill pill-green">Abierto</span>}
-            </label>
-
-            {/* SEPARADOR EXPLICATIVO */}
-            <div className="specialist-subgroup-divider">
-              <span>O LIMÍTALO EXCLUSIVAMENTE A UN SOLO MODELO:</span>
-            </div>
-
-            {/* OPCIONES 2..N: Modelos individuales (con 3.8 destacado solo si es Gemini) */}
             {sortedInheritedModels.length === 0 ? (
               <div className="specialist-empty-notice">
                 No se encontraron modelos disponibles para la familia {card.familyRole || 'gemini'}.
               </div>
             ) : (
               sortedInheritedModels.map((m) => {
-                const isSelected = mode === 'single' && selectedModel === m;
+                const isSelected = selectedModel === m;
                 const is38Gemini = isGeminiFamily && m.includes('3.8');
                 return (
                   <label
@@ -316,7 +252,7 @@ export default function SpecialistModal({
           </div>
 
           {/* Resumen dinámico en vivo */}
-          {mode === 'single' && selectedModel ? (
+          {selectedModel && (
             <div className="specialist-preview-banner" data-testid="specialist-preview-banner">
               <span className="preview-icon">🔒</span>
               <div className="preview-text">
@@ -325,18 +261,6 @@ export default function SpecialistModal({
                 </div>
                 <div className="preview-sub">
                   🚫 {blockedCount} {blockedCount === 1 ? 'modelo' : 'modelos'} de {card.familyRole || 'esta familia'} {blockedCount === 1 ? 'bloqueado' : 'bloqueados'} automáticamente para proteger la cuota.
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="specialist-preview-banner multipurpose-preview" data-testid="multipurpose-banner">
-              <span className="preview-icon">🔓</span>
-              <div className="preview-text">
-                <div>
-                  Acceso Total: <strong>Todos los modelos ({inheritedModels.length}) permitidos</strong>
-                </div>
-                <div className="preview-sub">
-                  Ningún modelo bloqueado. La cuenta responderá a cualquier petición de su familia.
                 </div>
               </div>
             </div>
@@ -358,14 +282,12 @@ export default function SpecialistModal({
             type="button"
             className="btn-modal-save"
             onClick={handleSave}
-            disabled={isSaving || (mode === 'single' && !selectedModel)}
+            disabled={isSaving || !selectedModel}
             data-testid="btn-save-specialist"
           >
             {isSaving
               ? 'Guardando...'
-              : mode === 'single'
-              ? `Guardar: Limitar a ${selectedModel}`
-              : 'Guardar: Permitir Todos'}
+              : `Guardar: Limitar a ${selectedModel || 'Modelo'}`}
           </button>
         </div>
       </div>

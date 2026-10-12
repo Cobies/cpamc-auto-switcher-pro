@@ -12,6 +12,7 @@ import {
   computeAccountTelemetry,
   classifyCooldowns,
   formatRemainingDuration,
+  CANONICAL_PROVIDER_MODELS,
 } from '../api/managementClient';
 import SpecialistModal from './SpecialistModal';
 import './AutoAuthFiles.css';
@@ -172,16 +173,13 @@ export default function AutoAuthFiles({
 
   const effectiveCatalogModels = useMemo(() => {
     if (Array.isArray(catalogModels) && catalogModels.length > 0) return catalogModels;
-    if (fetchedCatalog.length > 0) return fetchedCatalog;
-    return [
-      'gemini-2.5-pro',
-      'gemini-2.5-flash',
-      'gemini-2.0-flash',
-      'claude-3-7-sonnet',
-      'claude-3-5-sonnet',
-      'claude-3-5-haiku',
-      'claude-opus-4',
+    const fetched = Array.isArray(fetchedCatalog) && fetchedCatalog.length > 0 ? fetchedCatalog : [];
+    const canonicalList = [
+      ...CANONICAL_PROVIDER_MODELS.gemini,
+      ...CANONICAL_PROVIDER_MODELS.claude,
+      ...CANONICAL_PROVIDER_MODELS.codex,
     ];
+    return Array.from(new Set([...canonicalList, ...fetched]));
   }, [catalogModels, fetchedCatalog]);
 
   const handleOpenSpecialist = useCallback(
@@ -886,7 +884,19 @@ export default function AutoAuthFiles({
             const virtualFileToDelete = card.virtualFileName;
             const claudeIdx = claudeCards.indexOf(card);
             const cardInherited = resolveInheritedCardModels(card, effectiveCatalogModels);
-            const specState = detectSpecialistState(card, cardInherited);
+            // Gobernanza virtual pura: la política del pool manda. Si el pool define un
+            // especialista aislado (1 Pool = 1 Modelo), la tarjeta lo refleja sin depender
+            // del catálogo heredado ni de exclusiones físicas en disco (CPAMC nativo intacto).
+            const specState = card.specialistModel
+              ? {
+                  isSpecialist: true,
+                  activeSpecialistModel: card.specialistModel,
+                  excludedCount:
+                    cardInherited.length > 1
+                      ? cardInherited.length - 1
+                      : (card.excludedModels || []).length,
+                }
+              : detectSpecialistState(card, cardInherited);
             const poolGroupStyle = getPoolGroupStyle(card.assignedPrefix);
 
             return (
@@ -911,7 +921,11 @@ export default function AutoAuthFiles({
                       className={poolGroupStyle.className}
                       style={poolGroupStyle.style}
                     >
-                      {card.assignedPrefix ? `[${card.assignedPrefix}]` : 'Sin Asignar'}
+                      {card.activePoolBase
+                        ? `[${card.activePoolBase}]`
+                        : card.assignedPrefix
+                        ? `[${card.assignedPrefix}]`
+                        : 'Sin Asignar'}
                     </span>
                     <button
                       type="button"
@@ -967,7 +981,7 @@ export default function AutoAuthFiles({
 
                 <div className="auto-auth-badges-row">
                   <span className="badge-pool-prefix" style={poolGroupStyle.statusBadgeStyle || {}}>
-                    Estado: {poolStatusBadge} {card.assignedPrefix ? `[${card.assignedPrefix}]` : ''}
+                    Estado: {poolStatusBadge} {card.activePoolBase ? `[${card.activePoolBase}]` : ''}
                   </span>
 
                   {specState.isSpecialist ? (

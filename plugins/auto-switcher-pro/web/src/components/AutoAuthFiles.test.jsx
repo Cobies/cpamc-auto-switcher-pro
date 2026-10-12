@@ -210,6 +210,80 @@ describe('AutoAuthFiles Component - Dedicated View & Lifecycle Engine', () => {
     });
   });
 
+  it('reflects pool specialist policy on cards: isolated banner and pool-base reserve status (N accounts, pure virtual governance)', async () => {
+    const catalog = [
+      'gemini-3.8-flash-high',
+      'gemini-3.7-flash-high',
+      'gemini-3.6-flash-high',
+      'gemini-3.5-flash-lite',
+      'gemini-3.1-pro-low',
+      'gemini-2.5-pro',
+    ];
+    mockPools([
+      {
+        family: 'gemini_pure',
+        base_prefix: 'agy',
+        leader_auth: 'antigravity-poli-lead@gmail.com.json',
+        reserves: ['antigravity-poli-res@gmail.com.json'],
+        policy: {
+          disable_isolation: false,
+          exclude_55: false,
+          target_models: ['gemini-3.8-flash-high'],
+          excluded_models: [
+            'gemini-3.7-flash-high',
+            'gemini-3.6-flash-high',
+            'gemini-3.5-flash-lite',
+            'gemini-3.1-pro-low',
+            'gemini-2.5-pro',
+          ],
+        },
+      },
+    ]);
+    // Gobernanza virtual pura: cuentas en disco SIN exclusiones ni prefijos (CPAMC nativo intacto)
+    const policyNodes = [
+      {
+        id: 'lead',
+        data: {
+          fileName: 'antigravity-poli-lead@gmail.com.json',
+          email: 'polilead@gmail.com',
+          prefix: '',
+          provider: 'antigravity',
+        },
+      },
+      {
+        id: 'res',
+        data: {
+          fileName: 'antigravity-poli-res@gmail.com.json',
+          email: 'polires@gmail.com',
+          prefix: '',
+          provider: 'antigravity',
+        },
+      },
+    ];
+
+    render(<AutoAuthFiles nodes={policyNodes} catalogModels={catalog} />);
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId(/gemini-card-/)).toHaveLength(2);
+    });
+
+    // Ambas tarjetas (líder y reserva) muestran el especialista aislado definido en la
+    // política del pool, sin depender de exclusiones físicas en disco
+    const heroNames = screen.getAllByTestId('hero-model-name');
+    expect(heroNames).toHaveLength(2);
+    heroNames.forEach((el) => expect(el.textContent).toContain('gemini-3.8-flash-high'));
+    expect(screen.getAllByText('🎯 MODELO ESPECIALISTA ACTIVO').length).toBe(2);
+
+    // El estado refleja el pool base: reservas visibles como [agy] RESERVA,
+    // sin facades _N (invisibilidad de reservas en /model)
+    expect(screen.getByText(/Estado:\s*LÍDER\s*\[agy\]/)).toBeTruthy();
+    expect(screen.getByText(/Estado:\s*RESERVA\s*\[agy\]/)).toBeTruthy();
+    expect(screen.queryByText(/agy_1/)).toBeNull();
+
+    // Nunca banner multipropósito en pools con especialista aislado
+    expect(screen.queryByText(/MODELO PREDETERMINADO \(MULTIPROPÓSITO\)/)).toBeNull();
+  });
+
   it('shows strictly 0 cards and the empty banner when no pools are registered (GroupManager is the sole generator)', async () => {
     mockPools([]);
 
@@ -469,7 +543,7 @@ describe('AutoAuthFiles Component - Dedicated View & Lifecycle Engine', () => {
   });
 
   // Cross-Check Contingency Regression Test: Card Banner vs SpecialistModal
-  it('guarantees strict synchronization between Card Multipurpose Banner and SpecialistModal opening state', async () => {
+  it('guarantees strict synchronization between Card Specialist Banner and SpecialistModal opening state', async () => {
     const catalog = ['gemini-3.8-flash-high', 'gemini-3.1-pro-low', 'gemini-2.5-flash'];
     mockPools([
       {
@@ -494,11 +568,10 @@ describe('AutoAuthFiles Component - Dedicated View & Lifecycle Engine', () => {
 
     render(<AutoAuthFiles nodes={testNodes} catalogModels={catalog} />);
 
-    // 1. Outside Card: Must honestly show Multipurpose / Todos los modelos
+    // 1. Outside Card: When excluded_models is empty, Card shows "Todos los modelos" with preferred default in helper text
     await waitFor(() => {
       const bannerName = screen.getByTestId('hero-model-name');
       expect(bannerName.textContent).toContain('Todos los modelos');
-      expect(screen.getByText(/Modo multipropósito abierto/i)).toBeTruthy();
       expect(screen.getByText(/Predeterminado preferente: gemini-3.8-flash-high/i)).toBeTruthy();
     });
 
@@ -506,19 +579,16 @@ describe('AutoAuthFiles Component - Dedicated View & Lifecycle Engine', () => {
     const gearBtn = screen.getByTestId('btn-gear-gemini-0');
     fireEvent.click(gearBtn);
 
-    // 3. Inside Modal: Must be strictly synchronized in Multipurpose / Permitir todos mode
+    // 3. Inside Modal: Specialist modal opens with single model selector defaulting to gemini-3.8-flash-high
     await waitFor(() => {
       expect(screen.getByTestId('specialist-modal-dialog')).toBeTruthy();
     });
 
-    const multipurposeBtn = screen.getByTestId('mode-btn-multipurpose');
-    expect(multipurposeBtn.className).toContain('selected');
-    expect(screen.getByTestId('multipurpose-banner')).toBeTruthy();
-    expect(screen.getByTestId('multipurpose-banner').textContent).toContain('Todos los modelos');
+    expect(screen.getByTestId('specialist-preview-banner')).toBeTruthy();
+    expect(screen.getByTestId('specialist-preview-banner').textContent).toContain('gemini-3.8-flash-high');
 
-    // The single specialist radio for gemini-3.8-flash-high must NOT be checked
     const radio38 = screen.getByLabelText(/gemini-3.8-flash-high/i);
-    expect(radio38.checked).toBe(false);
+    expect(radio38.checked).toBe(true);
   });
 
   // MINI-003 Quota Telemetry Homologation & Refresh

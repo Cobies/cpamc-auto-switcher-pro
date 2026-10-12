@@ -153,7 +153,6 @@ describe('GroupManager Component - Dedicated Full Screen Pool & Group Engine', (
     await waitFor(() => {
       expect(patchSpy).toHaveBeenCalledWith([
         { name: 'account-free-1.json', prefix: 'g3' },
-        { name: 'account-free-2.json', prefix: 'g3_1' },
       ]);
     });
   });
@@ -341,7 +340,6 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
     await waitFor(() => {
       expect(patchSpy).toHaveBeenCalledWith([
         { name: 'free1.json', prefix: 'g9' },
-        { name: 'free2.json', prefix: 'g9_2' },
       ]);
     });
   });
@@ -626,9 +624,9 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
     fireEvent.click(screen.getByTestId('subfamily-gemini-sonnet'));
 
     const chk55 = screen.getByTestId('checkbox-exclude-55');
-    const chkIso = screen.getByTestId('checkbox-disable-isolation');
+    const selectSpec = screen.getByTestId('select-specialist-model');
     expect(chk55.checked).toBe(false);
-    expect(chkIso.checked).toBe(false);
+    expect(selectSpec).toBeTruthy();
 
     fireEvent.click(chk55);
     expect(chk55.checked).toBe(true);
@@ -639,15 +637,11 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
     fireEvent.click(screen.getByTestId('btn-save-group'));
 
     await waitFor(() => {
-      expect(capturedExclusions.length).toBeGreaterThan(0);
+      expect(screen.getByText(/creado y guardado con éxito/i)).toBeTruthy();
     });
 
-    // Con excludeVersion55=true, claude-sonnet-5-5-high DEBE estar excluido en el parche del master libre
-    expect(capturedExclusions).toContain('claude-sonnet-5-5-high');
-    expect(capturedExclusions).toContain('gemini-3.8-flash-high');
-    expect(capturedExclusions).not.toContain('claude-sonnet-4-6');
-
-    // Y la definición del pool en el registro del plugin guarda la política con exclusión de 5.5
+    // En gobernanza virtual pura, las exclusiones de modelos no mutilan el archivo físico
+    // sino que se guardan en la definición del pool en el registro del plugin
     await waitFor(() => expect(savePoolSpy).toHaveBeenCalledTimes(1));
     const savedPool = savePoolSpy.mock.calls[0][0];
     expect(savedPool.base_prefix).toBe('agy_son');
@@ -655,16 +649,12 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
     expect(savedPool.policy.excluded_models).toContain('claude-sonnet-5-5-high');
   });
 
-  it('allows disabling isolation for wildcard multipurpose pools (serving all families)', async () => {
-    let capturedExclusions = null;
+  it('enforces specialist model selection (1 Pool = 1 Specialist Model) and computes opposite models in pool policy', async () => {
     vi.spyOn(managementClient, 'saveAuthFilePrefixes').mockResolvedValue({
       successful: [{ name: 'leader.json', prefix: 'agy_son' }],
       failed: [],
     });
-    vi.spyOn(managementClient, 'patchAuthFileExclusions').mockImplementation((fileName, oppositeModels) => {
-      capturedExclusions = oppositeModels;
-      return Promise.resolve({ ok: true });
-    });
+    const patchExclusionsSpy = vi.spyOn(managementClient, 'patchAuthFileExclusions').mockResolvedValue({ ok: true });
     const savePoolSpy = vi.spyOn(managementClient, 'savePool').mockResolvedValue({
       ok: true,
       pool: { id: 'pool-1', base_prefix: 'agy_son' },
@@ -690,9 +680,9 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
     fireEvent.click(screen.getByTestId('family-gemini'));
     fireEvent.click(screen.getByTestId('subfamily-gemini-sonnet'));
 
-    const chkIso = screen.getByTestId('checkbox-disable-isolation');
-    fireEvent.click(chkIso);
-    expect(chkIso.checked).toBe(true);
+    const selectSpec = screen.getByTestId('select-specialist-model');
+    fireEvent.change(selectSpec, { target: { value: 'claude-sonnet-4-6' } });
+    expect(selectSpec.value).toBe('claude-sonnet-4-6');
 
     fireEvent.change(screen.getByTestId('select-active-account'), { target: { value: 'leader' } });
     fireEvent.click(screen.getByTestId('reserve-item-occup'));
@@ -703,15 +693,16 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
       expect(screen.getByText(/creado y guardado con éxito/i)).toBeTruthy();
     });
 
-    // In wildcard mode (disableIsolation=true) las exclusiones se LIMPIAN ([]):
-    // la cuenta sirve todas las familias sin bloqueo
-    expect(capturedExclusions).toEqual([]);
+    // En gobernanza virtual pura, NO se parchea excluded_models en el disco para no mutilar
+    // las credenciales nativas de CPAMC
+    expect(patchExclusionsSpy).not.toHaveBeenCalled();
 
-    // Y el registro del pool guarda disable_isolation: true con lista vacía de exclusiones
+    // Y el registro del pool guarda target_models con exactamente 1 modelo y disable_isolation: false
     await waitFor(() => expect(savePoolSpy).toHaveBeenCalledTimes(1));
     const savedPool = savePoolSpy.mock.calls[0][0];
-    expect(savedPool.policy.disable_isolation).toBe(true);
-    expect(savedPool.policy.excluded_models).toEqual([]);
+    expect(savedPool.policy.disable_isolation).toBe(false);
+    expect(savedPool.policy.target_models).toEqual(['claude-sonnet-4-6']);
+    expect(savedPool.policy.excluded_models).toContain('claude-sonnet-5-5-high');
   });
 
   it('unifies capacity calculation combining free and available accounts with accurate group count', () => {
@@ -1076,9 +1067,9 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
     vi.spyOn(managementClient, 'listPools').mockResolvedValue({
       ok: true, pools: registryGeminiPool, count: 1,
     });
-    // Catálogo base: 3 targets de familias (2 gemini del pool existente + 1 claude nuevo) + 1 junk
+    // Catálogo base: 3 targets de familias (2 gemini del pool existente + 1 claude nuevo) + 1 foreign antigravity junk
     vi.spyOn(managementClient, 'listModels').mockResolvedValue({
-      models: ['agy/gemini-3-flash', 'agy/gemini-3.8-flash-high', 'clau/claude-sonnet-4-6', 'agy/junk-model-1'],
+      models: ['agy/gemini-3-flash', 'agy/gemini-3.8-flash-high', 'clau/claude-sonnet-4-6', 'agy/gemini-junk-model-1'],
     });
     const savePoolSpy = vi.spyOn(managementClient, 'savePool').mockResolvedValue({
       ok: true, pool: { base_prefix: 'clau' }, message: 'Pool clau saved',
@@ -1116,18 +1107,9 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
     expect(virtualizeSpy).not.toHaveBeenCalled();
     expect(patchPrefixesSpy).not.toHaveBeenCalled();
 
-    // [F2] Exclusiones union-aware: excluido = catálogo base − unión de targets de
-    // todos los pools de la cuenta (gemini del pool agy + claude del nuevo pool clau).
-    // Solo el modelo junk queda excluido; los targets de ambas familias sobreviven.
-    await waitFor(() => expect(patchExclusionsSpy).toHaveBeenCalled());
-    const patchedFiles = patchExclusionsSpy.mock.calls.map((c) => c[0]).sort();
-    expect(patchedFiles).toEqual([
-      'antigravity-infosoytec@gmail.com.json',
-      'antigravity-maribelluzbonitaaquinocastro@gmail.com.json',
-    ]);
-    patchExclusionsSpy.mock.calls.forEach(([, exclusions]) => {
-      expect(exclusions).toEqual(['junk-model-1']);
-    });
+    // En gobernanza virtual pura, no mutamos los excluded_models en disco para no mutilar
+    // las credenciales nativas de CPAMC
+    expect(patchExclusionsSpy).not.toHaveBeenCalled();
   });
 
   it('still blocks accounts already in a same-family registered pool (gemini side)', async () => {

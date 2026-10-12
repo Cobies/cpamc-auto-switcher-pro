@@ -49,7 +49,7 @@ describe('SpecialistModal Component', () => {
     expect(screen.getByText(/Filtro de Modelos Permitidos/i)).toBeTruthy();
   });
 
-  it('allows toggling between Specialist Mode and Multipurpose Mode in unified list', () => {
+  it('allows switching between different models in the unified list', () => {
     render(
       <SpecialistModal
         isOpen={true}
@@ -59,8 +59,8 @@ describe('SpecialistModal Component', () => {
       />
     );
 
-    // Starts in multipurpose mode by default when card has no exclusions
-    expect(screen.getByTestId('multipurpose-banner')).toBeTruthy();
+    // Initial default model is selected in single mode
+    expect(screen.getByTestId('specialist-preview-banner')).toBeTruthy();
 
     // Select a specialist model
     const radioPro = screen.getByLabelText(/gemini-2.5-pro/i);
@@ -69,11 +69,10 @@ describe('SpecialistModal Component', () => {
     expect(screen.getByTestId('specialist-preview-banner')).toBeTruthy();
     expect(screen.getByTestId('specialist-preview-banner').textContent).toContain('gemini-2.5-pro');
 
-    // Switch back to multipurpose / allow all mode
-    const multipurposeOption = screen.getByTestId('mode-btn-multipurpose');
-    fireEvent.click(multipurposeOption);
-    expect(multipurposeOption.className).toContain('selected');
-    expect(screen.getByTestId('multipurpose-banner')).toBeTruthy();
+    // Switch to another model
+    const radioFlash = screen.getByLabelText(/gemini-2.0-flash/i);
+    fireEvent.click(radioFlash);
+    expect(screen.getByTestId('specialist-preview-banner').textContent).toContain('gemini-2.0-flash');
   });
 
   it('allows selecting strictly ONE model in specialist mode and updates exclusion counter', () => {
@@ -142,7 +141,7 @@ describe('SpecialistModal Component', () => {
     expect(mockOnClose).toHaveBeenCalled();
   });
 
-  it('dispatches empty exclusions when saving in multipurpose mode', async () => {
+  it('always saves exclusions isolating the selected model', async () => {
     const mockPatchFn = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     const mockOnSaved = vi.fn();
     const mockOnClose = vi.fn();
@@ -158,22 +157,23 @@ describe('SpecialistModal Component', () => {
       />
     );
 
-    fireEvent.click(screen.getByTestId('mode-btn-multipurpose'));
+    const radioFlash = screen.getByLabelText(/gemini-2.0-flash/i);
+    fireEvent.click(radioFlash);
     const saveBtn = screen.getByTestId('btn-save-specialist');
-    expect(saveBtn.textContent).toContain('Guardar: Permitir Todos');
+    expect(saveBtn.textContent).toContain('Guardar: Limitar a gemini-2.0-flash');
     fireEvent.click(saveBtn);
 
     await waitFor(() => {
       expect(mockPatchFn).toHaveBeenCalledWith(
         'antigravity-user@gmail.com.json',
-        []
+        ['gemini-2.5-flash', 'gemini-2.5-pro']
       );
     });
     expect(mockOnSaved).toHaveBeenCalled();
     expect(mockOnClose).toHaveBeenCalled();
   });
 
-  it('opens in multipurpose mode when card has no exclusions, highlighting 3.8 as recommended for gemini', () => {
+  it('opens with 3.8 selected and highlighted as recommended for gemini when card has no prior exclusions', () => {
     const models = [
       'gemini-3.1-pro-low',
       'gemini-3.8-flash-high',
@@ -189,10 +189,8 @@ describe('SpecialistModal Component', () => {
       />
     );
 
-    // Should truthfully reflect multipurpose mode when card has no exclusions
-    expect(screen.getByTestId('multipurpose-banner')).toBeTruthy();
-    const multipurposeOption = screen.getByTestId('mode-btn-multipurpose');
-    expect(multipurposeOption.className).toContain('selected');
+    expect(screen.getByTestId('specialist-preview-banner')).toBeTruthy();
+    expect(screen.getByTestId('specialist-preview-banner').textContent).toContain('gemini-3.8-flash-high');
 
     // 3.8 should still be highlighted as recommended in the single model section
     expect(screen.getByText('⭐ Recomendado')).toBeTruthy();
@@ -227,7 +225,7 @@ describe('SpecialistModal Component', () => {
     expect(saveBtn.textContent).toContain('Guardar: Limitar a gemini-3.8-flash-high');
   });
 
-  it('sorts strictly alphabetically A-Z and defaults to allow-all for claude cards', () => {
+  it('sorts strictly alphabetically A-Z and defaults to first model for claude cards', () => {
     const claudeCard = {
       ...mockCard,
       familyRole: 'claude',
@@ -248,13 +246,14 @@ describe('SpecialistModal Component', () => {
       />
     );
 
-    // Claude cards default to allow all mode
-    expect(screen.getByTestId('multipurpose-banner')).toBeTruthy();
+    // Claude cards default to first model alphabetically
+    expect(screen.getByTestId('specialist-preview-banner')).toBeTruthy();
+    expect(screen.getByTestId('specialist-preview-banner').textContent).toContain('claude-3-7-sonnet');
 
     // Models should be strictly A-Z without recommendation badges
     expect(screen.queryByText('⭐ Recomendado')).toBeNull();
     const saveBtn = screen.getByTestId('btn-save-specialist');
-    expect(saveBtn.textContent).toContain('Guardar: Permitir Todos');
+    expect(saveBtn.textContent).toContain('Guardar: Limitar a claude-3-7-sonnet');
   });
 
   it('prioritizes Gemini 3.8 at the top of the list with recommended badge', () => {

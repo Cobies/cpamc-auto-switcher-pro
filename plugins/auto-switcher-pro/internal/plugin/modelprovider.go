@@ -228,19 +228,13 @@ func sortModelsByID(models []pluginModelInfo) {
 }
 
 // modelCatalogForAuth computes the complete model catalog the host must
-// register for one auth, derived from its pool memberships:
-//   - auth without pools → baseline catalog (native-equivalent).
-//   - member of a pool whose base prefix matches its disk prefix (disk-backed)
-//     → the pool's bare target models (native naming preserved).
-//   - member of a registry-only pool (2N dual-family) → the bare target models
-//     plus the pool-prefixed virtual routes, all served by the same credential.
+// register for one auth, derived from its pool memberships and baseline models:
+//   - Preserves all native baseline models (gemini-3.8-flash-high, gemini-3.7-flash-high, etc.)
+//     so the native CPAMC "Auth Files Management" credential modal displays its full native catalog.
+//   - Adds any pool-prefixed virtual routes and bare targets for pools the account serves.
 func modelCatalogForAuth(diskPrefix string, memberPools []PoolDefinition) []pluginModelInfo {
-	if len(memberPools) == 0 {
-		return cloneBaseline()
-	}
-
 	seen := make(map[string]struct{})
-	models := make([]pluginModelInfo, 0, 16)
+	models := make([]pluginModelInfo, 0, 32)
 	add := func(id string) {
 		id = strings.TrimSpace(id)
 		if id == "" {
@@ -260,6 +254,11 @@ func modelCatalogForAuth(diskPrefix string, memberPools []PoolDefinition) []plug
 			OwnedBy:     antigravityProviderKey,
 			DisplayName: display,
 		})
+	}
+
+	// Always seed with the complete native Antigravity baseline catalog
+	for _, m := range baselineAntigravityModels {
+		add(m.ID)
 	}
 
 	for _, pool := range memberPools {
