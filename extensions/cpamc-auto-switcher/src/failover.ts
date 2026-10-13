@@ -10,11 +10,53 @@ const TERMINAL_STATUSES = new Set([
 	"interrupted",
 ]);
 
-const RATE_LIMIT_PATTERN = /\b429\b|rate.?limit|too many requests|quota|resource.?exhausted|\b502\b|\b503\b|service.?unavailable|bad.?gateway|UNAVAILABLE/i;
+const RATE_LIMIT_PATTERN =
+	/\b429\b|rate.?limit|too many requests|quota|resource.?exhausted|\b502\b|\b503\b|\b504\b|service.?unavailable|bad.?gateway|gateway.?timeout|UNAVAILABLE|terminated|UND_ERR_BODY_TERMINATED|socket.?hang.?up|ECONNRESET|connection.?reset|connection.?refused|broken.?pipe/i;
 
-function isRateLimitOrQuotaError(text: unknown): boolean {
+function isRateLimitOrNetworkError(text: unknown): boolean {
 	if (typeof text !== "string") return false;
 	return RATE_LIMIT_PATTERN.test(text);
+}
+
+function extractMessageText(message: any): string {
+	if (!message) return "";
+	if (typeof message.content === "string") return message.content;
+	if (Array.isArray(message.content)) {
+		return message.content
+			.filter((c: any) => c && c.type === "text" && typeof c.text === "string")
+			.map((c: any) => c.text)
+			.join("")
+			.trim();
+	}
+	return "";
+}
+
+function hasAnyToolCalls(message: any, toolResults?: unknown[]): boolean {
+	if (Array.isArray(toolResults) && toolResults.length > 0) return true;
+	if (Array.isArray(message?.content)) {
+		return message.content.some((c: any) => c && c.type === "toolCall");
+	}
+	return false;
+}
+
+const DANGLING_CONNECTOR_PATTERN =
+	/^(?:now|let'?s|let us|and|then|so|next|continuing|continuemos|a continuación|ahora|por lo tanto|procedo|procedemos|okay|ok|well)[.:,;…]?$/i;
+
+function isPrematureStop(message: any, toolResults?: unknown[]): boolean {
+	if (!message || message.role !== "assistant") return false;
+	if (message.stopReason !== "stop") return false;
+	if (hasAnyToolCalls(message, toolResults)) return false;
+
+	const text = extractMessageText(message).trim();
+	if (!text) return false;
+
+	// Si es una sola palabra colgante o frase ultra corta de transición
+	if (text.length <= 40) {
+		if (DANGLING_CONNECTOR_PATTERN.test(text)) return true;
+		if (/(?:^|\s)(?:now|let'?s|a continuación|procedo a|voy a|next:?)[.:,;…]?$/i.test(text)) return true;
+	}
+
+	return false;
 }
 
 type TaskMeta = {
@@ -128,68 +170,69 @@ function readTask(value: unknown): TaskMeta | undefined {
 	return Object.keys(task).length > 0 ? task : undefined;
 }
 
+// Module-level serialization and debouncing to prevent concurrent race conditions
+let globalQueue: Promise<void> = Promise.resolve();
+let lastForcedRunTime = 0;
+const FORCED_DEBOUNCE_MS = 3_000;
+
+function notify(ctx: any, message: string, level: "info" | "warning" = "info"): void {
+	try {
+		ctx?.ui?.notify?.(message, level);
+	} catch {
+		// Notifications are best-effort
+	}
+}
+
+function schedule(ctx: any, source: string, force = false): Promise<void> {
+	if (force) {
+		const now = Date.now();
+		if (now - lastForcedRunTime < FORCED_DEBOUNCE_MS) {
+			return globalQueue;
+		}
+		lastForcedRunTime = now;
+	}
+
+	const check = async (): Promise<void> => {
+		try {
+			const result = await runAutoSwitcher(ctx?.signal, force);
+			const output = (result.stdout || result.stderr).trim();
+
+			// If CLI returned no output (e.g. within cooldown timeout), do not show any notification
+			if (!output) {
+				return;
+			}
+
+			if (result.code !== 0) {
+				notify(ctx, `cpamc-auto-switcher: error after ${source}: ${output}`, "warning");
+				return;
+			}
+
+			if (output.startsWith("[ROTATED]")) {
+				notify(ctx, `🔄 ${output}`, "info");
+			} else {
+				const message = output.replace(/^\[OK\]\s*/, "").trim();
+				if (message) {
+					notify(ctx, message, "info");
+				}
+			}
+		} catch (err: any) {
+			// Manejo defensivo: si no está instalado, advertencia limpia y silenciosa
+			if (err?.code === "ENOENT") {
+				notify(ctx, "cpamc-auto-switcher no encontrado en PATH. Failover automático pausado.", "warning");
+			} else {
+				notify(ctx, `cpamc-auto-switcher (${source}): ${err?.message || err}`, "warning");
+			}
+		}
+	};
+
+	return (globalQueue = globalQueue.then(check, check));
+}
+
 export function scheduleAutoSwitcher(ctx: any, reason: string, force = false): void {
 	schedule(ctx, reason, force);
 }
 
 export function initFailoverHook(pi: ExtensionAPI): void {
-	// Serialize switcher executions to prevent concurrent race conditions when mutating prefixes
-	let queue: Promise<void> = Promise.resolve();
-	let lastForcedRunTime = 0;
-	const FORCED_DEBOUNCE_MS = 3_000;
-
-	function notify(ctx: any, message: string, level: "info" | "warning" = "info"): void {
-		try {
-			ctx?.ui?.notify?.(message, level);
-		} catch {
-			// Notifications are best-effort
-		}
-	}
-
-	function schedule(ctx: any, source: string, force = false): Promise<void> {
-		if (force) {
-			const now = Date.now();
-			if (now - lastForcedRunTime < FORCED_DEBOUNCE_MS) {
-				return queue;
-			}
-			lastForcedRunTime = now;
-		}
-
-		const check = async (): Promise<void> => {
-			try {
-				const result = await runAutoSwitcher(ctx?.signal, force);
-				const output = (result.stdout || result.stderr).trim();
-
-				// If CLI returned no output (e.g. within cooldown timeout), do not show any notification
-				if (!output) {
-					return;
-				}
-
-				if (result.code !== 0) {
-					notify(ctx, `cpamc-auto-switcher: error after ${source}: ${output}`, "warning");
-					return;
-				}
-
-				if (output.startsWith("[ROTATED]")) {
-					notify(ctx, `🔄 ${output}`, "info");
-				} else {
-					const message = output.replace(/^\[OK\]\s*/, "").trim();
-					if (message) {
-						notify(ctx, message, "info");
-					}
-				}
-			} catch (err: any) {
-				// Manejo defensivo: si no está instalado, advertencia limpia y silenciosa
-				if (err?.code === "ENOENT") {
-					notify(ctx, "cpamc-auto-switcher no encontrado en PATH. Failover automático pausado.", "warning");
-				} else {
-					notify(ctx, `cpamc-auto-switcher (${source}): ${err?.message || err}`, "warning");
-				}
-			}
-		};
-
-		return (queue = queue.then(check, check));
-	}
 
 	// 1. Immediate detection of HTTP 429 response from provider before stream consumption
 	pi.on("after_provider_response", (event: any, ctx: any) => {
@@ -199,13 +242,17 @@ export function initFailoverHook(pi: ExtensionAPI): void {
 		}
 	});
 
-	// 2. Assistant message error with 429 or quota exhaustion (SDK error stopReason)
+	// 2. Assistant message error with 429, network termination or quota exhaustion (SDK error stopReason)
 	pi.on("message_end", (event: any, ctx: any) => {
 		const message = event?.message;
 		if (message?.role === "assistant" && message?.stopReason === "error") {
-			if (isRateLimitOrQuotaError(message.errorMessage)) {
-				notify(ctx, `⚡ Error de cuota/429 detectado: ${message.errorMessage.split("\n")[0]}`, "warning");
-				schedule(ctx, "assistant message 429/quota error", true);
+			if (isRateLimitOrNetworkError(message.errorMessage)) {
+				const isTerminated = /terminated|socket|ECONNRESET|broken.?pipe/i.test(message.errorMessage || "");
+				const label = isTerminated
+					? `⚡ Conexión interrumpida (${message.errorMessage.split("\n")[0]}). Rotando cuenta para recuperar flujo...`
+					: `⚡ Error de cuota/429 detectado: ${message.errorMessage.split("\n")[0]}`;
+				notify(ctx, label, "warning");
+				schedule(ctx, isTerminated ? "network terminated error" : "assistant message 429/quota error", true);
 			}
 		}
 	});
@@ -213,11 +260,33 @@ export function initFailoverHook(pi: ExtensionAPI): void {
 	// 3. After every main agent assistant turn finishes
 	pi.on("turn_end", (event: any, ctx: any) => {
 		const message = event?.message;
-		if (message?.stopReason === "error" && isRateLimitOrQuotaError(message?.errorMessage)) {
-			schedule(ctx, "turn 429 error", true);
-		} else {
-			schedule(ctx, "agent turn", false);
+		const toolResults = event?.toolResults;
+
+		if (message?.stopReason === "error" && isRateLimitOrNetworkError(message?.errorMessage)) {
+			schedule(ctx, "turn network/429 error", true);
+			return;
 		}
+
+		// Detectar parálisis por falso stop (ej. el LLM escupió solo "Now" sin tools y se durmió)
+		if (isPrematureStop(message, toolResults)) {
+			const text = extractMessageText(message).trim();
+			notify(ctx, `⚡ Falso stop detectado ("${text}"). Auto-reanudando agente...`, "info");
+
+			// Contrato nativo de Pi en turn_end: BoundaryResult con continue: true y custom_message
+			return {
+				entries: [
+					{
+						type: "custom_message",
+						customType: "auto-recovery-prompt",
+						content: "Continúa directamente con la acción planificada.",
+						display: false,
+					},
+				],
+				continue: true,
+			};
+		}
+
+		schedule(ctx, "agent turn", false);
 	});
 
 	// 4. Synchronous task-mode subagent completions
@@ -239,7 +308,7 @@ export function initFailoverHook(pi: ExtensionAPI): void {
 			if ((task.effective_mode ?? task.mode) === "background") continue;
 			if (waitedIds && (!task.id || !waitedIds.has(task.id))) continue;
 
-			const hasRateLimit = task.status === "failed" && isRateLimitOrQuotaError(task.error || task.result);
+			const hasRateLimit = task.status === "failed" && isRateLimitOrNetworkError(task.error || task.result);
 			schedule(ctx, `subagent ${task.agent || task.id || "completed"}`, hasRateLimit);
 		}
 	});
@@ -249,7 +318,7 @@ export function initFailoverHook(pi: ExtensionAPI): void {
 		const message = event?.message;
 		if (message?.customType !== "subagent-completion") return;
 		const task = readTask(message?.details?.task);
-		const hasRateLimit = task?.status === "failed" && isRateLimitOrQuotaError(task?.error || task?.result);
+		const hasRateLimit = task?.status === "failed" && isRateLimitOrNetworkError(task?.error || task?.result);
 		schedule(ctx, `bg-subagent ${task?.agent || task?.id || "completed"}`, hasRateLimit);
 	});
 }

@@ -58,6 +58,9 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 
 		// Rebalanceo proactivo en fronteras de ciclo de vida (/new, /reload, inicio de sesión)
 		const reason = event?.reason;
+		if (reason === "compact" && ctx?.hasUI) {
+			ctx.ui.notify?.("✅ Contexto de sesión compactado y reanudado.", "info");
+		}
 		if (reason === "new" || reason === "reload" || reason === "startup") {
 			try {
 				await querySwitcherAccounts(true);
@@ -134,9 +137,16 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 		adapter?.setContext(null);
 	});
 
-	pi.on("session_before_compact", async () => {
+	pi.on("session_before_compact", async (_event: any, ctx?: ExtensionContext) => {
 		clearTimer();
 		adapter?.setContext(null);
+		try {
+			if (ctx?.hasUI) {
+				ctx.ui.notify?.("⚡ Optimizando contexto de sesión (compactación en curso)...", "info");
+			}
+		} catch {
+			// Silencioso
+		}
 	});
 
 	pi.on("session_before_tree", async () => {

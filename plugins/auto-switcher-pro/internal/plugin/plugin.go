@@ -117,6 +117,36 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 					"Path":        maintenanceUpdateRoutePath,
 					"Description": "Descarga y actualiza de forma segura management.html desde el release oficial con rollback",
 				},
+				{
+					"Method":      http.MethodGet,
+					"Path":        metricsRoutePath,
+					"Description": "Obtiene métricas y telemetría de rotaciones y failovers locales de pools",
+				},
+				{
+					"Method":      http.MethodGet,
+					"Path":        predictiveRoutePath,
+					"Description": "Obtiene estado y fatiga del motor de rebalanceo predictivo",
+				},
+				{
+					"Method":      http.MethodPost,
+					"Path":        predictiveRoutePath,
+					"Description": "Actualiza la configuración del motor de rebalanceo predictivo",
+				},
+				{
+					"Method":      http.MethodGet,
+					"Path":        healthRoutePath,
+					"Description": "Health check completo (licencia, upstream, pools activos)",
+				},
+				{
+					"Method":      http.MethodGet,
+					"Path":        readyRoutePath,
+					"Description": "Readiness check ligero (licencia, registry inicializado)",
+				},
+				{
+					"Method":      http.MethodGet,
+					"Path":        sseProxyRoutePath,
+					"Description": "SSE Proxy con keep-alive para streaming sin cortes (terminated)",
+				},
 			},
 			"resources": []map[string]any{
 				{
@@ -306,6 +336,41 @@ func HandleManagementHTTP(request []byte) ([]byte, error) {
 	// Maintenance API routes
 	if isMaintenancePath(req.Path) {
 		return handleMaintenanceHTTP(req)
+	}
+
+	// Extension installer routes
+	if isExtensionPath(req.Path) {
+		return handleExtensionHTTP(req)
+	}
+
+	// License management routes
+	if isLicensePath(req.Path) {
+		return handleLicenseHTTP(req)
+	}
+
+	// Metrics telemetry routes
+	if isMetricsPath(req.Path) {
+		return handleMetricsHTTP(req)
+	}
+
+	// Predictive rebalancing routes
+	if isPredictivePath(req.Path) {
+		return handlePredictiveHTTP(req)
+	}
+
+	// Health check routes
+	if isHealthPath(req.Path) {
+		return handleHealthHTTP(req)
+	}
+
+	// Readiness check routes
+	if isReadyPath(req.Path) {
+		return handleReadyHTTP(req)
+	}
+
+	// SSE Proxy routes
+	if isSSEProxyPath(req.Path) {
+		return handleSSEProxyHTTP(req)
 	}
 
 	// Virtualize route: POST for cloning, DELETE for removing virtual credential.
