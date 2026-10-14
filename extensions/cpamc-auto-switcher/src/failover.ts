@@ -11,7 +11,7 @@ const TERMINAL_STATUSES = new Set([
 ]);
 
 const RATE_LIMIT_PATTERN =
-	/\b429\b|rate.?limit|too many requests|quota|resource.?exhausted|\b502\b|\b503\b|\b504\b|service.?unavailable|bad.?gateway|gateway.?timeout|UNAVAILABLE|terminated|UND_ERR_BODY_TERMINATED|socket.?hang.?up|ECONNRESET|connection.?reset|connection.?refused|broken.?pipe/i;
+	/\b429\b|rate.?limit|too many requests|quota|resource.?exhausted|\b502\b|\b503\b|\b504\b|service.?unavailable|bad.?gateway|gateway.?timeout|UNAVAILABLE|terminated|UND_ERR_BODY_TERMINATED|socket.?hang.?up|ECONNRESET|connection.?reset|connection.?refused|broken.?pipe|unexpected.?eof|\beof\b/i;
 
 function isRateLimitOrNetworkError(text: unknown): boolean {
 	if (typeof text !== "string") return false;
@@ -263,8 +263,19 @@ export function initFailoverHook(pi: ExtensionAPI): void {
 		const toolResults = event?.toolResults;
 
 		if (message?.stopReason === "error" && isRateLimitOrNetworkError(message?.errorMessage)) {
-			schedule(ctx, "turn network/429 error", true);
-			return;
+			schedule(ctx, "turn network/unexpected EOF error", true);
+			notify(ctx, "⚡ Microcorte de streaming detectado. Rotando y auto-reanudando agente...", "warning");
+			return {
+				entries: [
+					{
+						type: "custom_message",
+						customType: "auto-recovery-prompt",
+						content: "Se detectó una interrupción de conexión o fin inesperado de flujo. Continúa directamente desde la última acción planificada.",
+						display: false,
+					},
+				],
+				continue: true,
+			};
 		}
 
 		// Detectar parálisis por falso stop (ej. el LLM escupió solo "Now" sin tools y se durmió)
