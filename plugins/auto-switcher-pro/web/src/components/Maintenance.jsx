@@ -75,9 +75,18 @@ export function computeSyncAudit(pools = [], authFiles = []) {
           catalog.push(b);
         }
       }
+      if (p?.member_models && typeof p.member_models === 'object') {
+        for (const m of Object.values(p.member_models)) {
+          const b = bareModelId(m);
+          if (b && !seen.has(b)) {
+            seen.add(b);
+            catalog.push(b);
+          }
+        }
+      }
     }
 
-    // Elección del Líder Virtual Activo: prefijo canónico más corto, luego alfabético.
+    // Orden de pools dentro de la familia: cada pool es soberano e independiente ($N -> inf)
     const sorted = [...famPools].sort((a, b) => {
       const la = a.base_prefix.trim().length;
       const lb = b.base_prefix.trim().length;
@@ -85,7 +94,8 @@ export function computeSyncAudit(pools = [], authFiles = []) {
       return a.base_prefix.trim().localeCompare(b.base_prefix.trim());
     });
     const elected = sorted[0];
-    const shadowed = sorted.slice(1).map((p) => p.base_prefix.trim());
+    // Pools hermanos autónomos activos (cada uno con su propia fachada independiente en /model)
+    const autonomousSiblings = sorted.slice(1).map((p) => p.base_prefix.trim());
 
     // Tuerca ⚙️: exclusiones físicas de la cuenta líder electa.
     const excludedSet = new Set(exclusionByAuthName.get(elected.leader_auth) || []);
@@ -112,7 +122,8 @@ export function computeSyncAudit(pools = [], authFiles = []) {
         leader_auth: elected.leader_auth || '',
         leader_email: elected.leader_email || '',
       },
-      shadowed,
+      shadowed: autonomousSiblings,
+      autonomousSiblings,
       catalogSize: isWildcard ? 0 : catalog.length,
       allowed,
       tuercaMode,
@@ -1146,10 +1157,10 @@ export default function Maintenance({ onReloadRequested }) {
                 <div className="sync-pillar-header">
                   <span className="sync-pillar-icon">🔀</span>
                   <div>
-                    <strong className="sync-pillar-title">Pilar 2 — Líder Virtual Activo por Familia</strong>
+                    <strong className="sync-pillar-title">Pilar 2 — Coordinación Soberana por Familia ($N \to \infty$)</strong>
                     <span className="sync-pillar-sub">
-                      Elección determinista (prefijo canónico más corto, luego alfabético). Los pools sombreados
-                      rotan como reservas bajo Auto Switcher Pro sin exponer rutas duplicadas.
+                      Cada pool registrado es autónomo e independiente. Enrutamiento canónico con soporte de pools
+                      hermanos bajo Auto Switcher Pro según el Mandamiento I ($N \to \infty$).
                     </span>
                   </div>
                   <span className="kpi-status-badge status-ok">🟢 Electo</span>
@@ -1159,9 +1170,9 @@ export default function Maintenance({ onReloadRequested }) {
                     <thead>
                       <tr>
                         <th>Familia</th>
-                        <th>Líder (ruta expuesta)</th>
+                        <th>Líder Principal</th>
                         <th>Cuenta Líder</th>
-                        <th>Pools Sombreados</th>
+                        <th>Pools Hermanos Autónomos</th>
                       </tr>
                     </thead>
                     <tbody>

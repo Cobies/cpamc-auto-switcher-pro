@@ -1,0 +1,18 @@
+services:
+  license-hub:
+    image: alpine:latest
+    container_name: cpamc-license-hub
+    restart: unless-stopped
+    ports:
+      - "8444:8444"
+    environment:
+      - PORT=8444
+      - DB_PATH=/data/licenses.json
+      - ADMIN_TOKEN=wilox-admin-secret-2026
+    volumes:
+      - ./license-server:/app/license-server
+      - license_data:/data
+    entrypoint: ["/app/license-server"]
+
+volumes:
+  license_data:

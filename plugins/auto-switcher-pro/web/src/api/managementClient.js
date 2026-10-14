@@ -636,10 +636,27 @@ export async function loadAuthFilesWithPrefixes(options = {}) {
  * @param {Array<{ name: string, prefix: string }>} authFiles
  * @returns {{ nodes: Array<Object>, edges: Array<Object> }}
  */
-export function buildGraphFromAuthFiles(authFiles = []) {
+export function buildGraphFromAuthFiles(authFiles = [], options = {}) {
   if (!Array.isArray(authFiles) || !authFiles.length) {
     return { nodes: [], edges: [] };
   }
+
+  const registeredPools = Array.isArray(options.registeredPools) ? options.registeredPools : [];
+  const poolByLeaderMap = new Map();
+  const poolByMemberMap = new Map();
+  registeredPools.forEach((p) => {
+    if (!p) return;
+    if (p.leader_auth) poolByLeaderMap.set(p.leader_auth, p);
+    const allMembers = [
+      ...(Array.isArray(p.members) ? p.members : []),
+      ...(Array.isArray(p.reserves) ? p.reserves : []),
+    ];
+    allMembers.forEach((m) => {
+      if (m && !poolByMemberMap.has(m)) {
+        poolByMemberMap.set(m, p);
+      }
+    });
+  });
 
   // Filter and sanitize input records to ensure only clean name and prefix are consumed
   // Preserves exact physical filename identity
@@ -699,31 +716,50 @@ export function buildGraphFromAuthFiles(authFiles = []) {
   // When duplicate parent prefix exists, graph inference must NOT invent parent edge (leave ambiguous nodes disconnected and visibly explain)
   cleanFiles.forEach((file) => {
     const childPrefix = file.prefix;
-    if (!childPrefix) return;
-
-    const match = childPrefix.match(/^(.*)_(\d+)$/);
-    if (match) {
-      const candidateParentPrefix = match[1];
-      const candidateParents = prefixToFilesMap.get(candidateParentPrefix) || [];
-      // Only infer an edge when candidate parent prefix is unambiguous (exactly 1 parent file)
-      if (candidateParents.length === 1) {
-        const parentFile = candidateParents[0];
-        if (parentFile.name !== file.name) {
-          childNodeIds.add(file.name);
-          edges.push({
-            id: `edge__${parentFile.name}-${file.name}`,
-            source: parentFile.name,
-            target: file.name,
-            animated: true,
-            style: { stroke: '#58a6ff', strokeWidth: 2 },
+    if (childPrefix) {
+      const match = childPrefix.match(/^(.*)_(\d+)$/);
+      if (match) {
+        const candidateParentPrefix = match[1];
+        const candidateParents = prefixToFilesMap.get(candidateParentPrefix) || [];
+        // Only infer an edge when candidate parent prefix is unambiguous (exactly 1 parent file)
+        if (candidateParents.length === 1) {
+          const parentFile = candidateParents[0];
+          if (parentFile.name !== file.name) {
+            childNodeIds.add(file.name);
+            edges.push({
+              id: `edge__${parentFile.name}-${file.name}`,
+              source: parentFile.name,
+              target: file.name,
+              animated: true,
+              style: { stroke: '#58a6ff', strokeWidth: 2 },
+            });
+            return;
+          }
+        } else if (candidateParents.length > 1) {
+          // Multiple candidate parents share candidateParentPrefix: leave disconnected and record ambiguity info
+          ambiguousChildMap.set(file.name, {
+            parentPrefix: candidateParentPrefix,
+            candidateCount: candidateParents.length,
+            candidateNames: candidateParents.map((p) => p.name),
           });
+          return;
         }
-      } else if (candidateParents.length > 1) {
-        // Multiple candidate parents share candidateParentPrefix: leave disconnected and record ambiguity info
-        ambiguousChildMap.set(file.name, {
-          parentPrefix: candidateParentPrefix,
-          candidateCount: candidateParents.length,
-          candidateNames: candidateParents.map((p) => p.name),
+      }
+    }
+
+    // Si la cuenta pertenece a un Pool Soberano registrado en el plugin
+    // y no es el líder del pool, vincular automáticamente la arista hacia el líder del pool
+    const assignedPool = poolByMemberMap.get(file.name);
+    if (assignedPool && assignedPool.leader_auth && assignedPool.leader_auth !== file.name) {
+      childNodeIds.add(file.name);
+      const edgeId = `edge__${assignedPool.leader_auth}-${file.name}`;
+      if (!edges.some((e) => e.id === edgeId)) {
+        edges.push({
+          id: edgeId,
+          source: assignedPool.leader_auth,
+          target: file.name,
+          animated: true,
+          style: { stroke: '#38bdf8', strokeWidth: 2 },
         });
       }
     }
@@ -732,9 +768,28 @@ export function buildGraphFromAuthFiles(authFiles = []) {
   // Build nodes with strictly whitelisted non-credential fields
   const rawNodes = cleanFiles.map((file) => {
     const fileName = file.name;
+    const assignedPool = poolByMemberMap.get(fileName);
+    const isPoolLeader = assignedPool?.leader_auth === fileName;
+    const isRAMLeader = assignedPool?.active_leader === fileName;
+
+    // Calcular prefijo virtual del pool para miembros/reservas que no tienen prefijo estampado en disco
+    let virtualPrefix = '';
+    if (assignedPool) {
+      if (isPoolLeader) {
+        virtualPrefix = assignedPool.base_prefix || '';
+      } else {
+        const reserveList = Array.isArray(assignedPool.reserves)
+          ? assignedPool.reserves
+          : (Array.isArray(assignedPool.members) ? assignedPool.members.filter((m) => m !== assignedPool.leader_auth) : []);
+        const rIdx = reserveList.indexOf(fileName);
+        const seq = rIdx >= 0 ? rIdx + 1 : 1;
+        virtualPrefix = `${assignedPool.base_prefix}_${seq}`;
+      }
+    }
+
     const prefix = file.prefix;
     const isChild = childNodeIds.has(fileName);
-    const isRoot = !isChild && Boolean(prefix);
+    const isRoot = !isChild && Boolean(prefix || isPoolLeader);
     const ambiguousParent = ambiguousChildMap.get(fileName) || null;
     const accountType = (file.type || file.provider || '').trim().toLowerCase();
     const maskedEmail = extractSafeMaskedEmail(file.email, fileName);
@@ -748,8 +803,9 @@ export function buildGraphFromAuthFiles(authFiles = []) {
       data: {
         fileName,
         prefix,
+        virtualPrefix,
         initialPrefix: prefix,
-        label: prefix || fileName,
+        label: prefix || (assignedPool ? `[${assignedPool.id}]` : fileName),
         isDirty: false,
         isRoot,
         isSynthetic: false, // Real auth-file node
@@ -769,6 +825,9 @@ export function buildGraphFromAuthFiles(authFiles = []) {
         success: file.success || 0,
         failed: file.failed || 0,
         next_retry_after: file.next_retry_after || '',
+        poolId: assignedPool?.id || null,
+        isRAMLeader,
+        isPoolLeader,
       },
     };
   });
@@ -1238,6 +1297,16 @@ export function classifyAuthAccount(fileOrNode) {
   const role = isVirtual ? 'virtual' : 'master';
   const effectiveEmailSource = masterOrigin || fileName;
   const maskedEmail = extractSafeMaskedEmail(email, effectiveEmailSource);
+
+  let rawEmail = email;
+  if ((!rawEmail || rawEmail.includes('...')) && effectiveEmailSource) {
+    const cleanSource = effectiveEmailSource.replace(SUFFIX_STRIP, '').trim();
+    const match = cleanSource.match(EMAIL_REGEX);
+    if (match && !match[0].includes('...')) {
+      rawEmail = match[0];
+    }
+  }
+
   const exclusionBadges = extractExclusionBadges(excludedModels);
 
   let derivedPrefix = prefix;
@@ -1251,6 +1320,7 @@ export function classifyAuthAccount(fileOrNode) {
 
   return {
     fileName,
+    email: rawEmail || maskedEmail,
     isVirtual,
     isMaster,
     role,
@@ -1378,12 +1448,10 @@ export function buildManagedPoolCards(nodes = [], registeredPools = null) {
       const basePrefix = pool.base_prefix || '';
 
       // Gobernanza virtual pura: la política del pool define el especialista de la tarjeta.
-      // 1 Pool = 1 Modelo aislado (disable_isolation: false + exactamente 1 target_model).
-      // Las tarjetas reflejan la política del registro aunque el disco no tenga exclusiones.
       const poolTargets = Array.isArray(pool.policy?.target_models)
         ? pool.policy.target_models
         : [];
-      const specialistModel =
+      const poolDefaultSpecialist =
         pool.policy?.disable_isolation === false && poolTargets.length === 1
           ? String(poolTargets[0]).trim()
           : null;
@@ -1397,6 +1465,14 @@ export function buildManagedPoolCards(nodes = [], registeredPools = null) {
         if (!matchingNode) {
           return null;
         }
+
+        // Independencia per-cuenta: Priorizar el modelo especialista configurado
+        // individualmente en pool.member_models[authFileName], con fallback al especialista global del pool.
+        const memberModel =
+          pool.member_models && pool.member_models[authFileName]
+            ? String(pool.member_models[authFileName]).trim()
+            : null;
+        const specialistModel = memberModel || poolDefaultSpecialist;
 
         const classification = classifyAuthAccount(matchingNode);
 
@@ -1439,13 +1515,34 @@ export function buildManagedPoolCards(nodes = [], registeredPools = null) {
           ? ['Excluye 5.5']
           : (linkedVirtual?.exclusionBadges || classification.exclusionBadges || []);
 
+        // Resolución simétrica del rol de liderazgo en RAM:
+        // Si el pool define un active_leader dinámico, exclusivamente esa cuenta es 'leader'.
+        // Todas las demás cuentas del pool (incluyendo el líder nominal si fue relevado) son 'reserve'.
+        const isDynamicRAMLeader = pool.active_leader
+          ? pool.active_leader === authFileName
+          : poolRole === 'leader';
+        const effectivePoolRole = pool.active_leader
+          ? (pool.active_leader === authFileName ? 'leader' : 'reserve')
+          : poolRole;
+
+        let fullEmail = classification.email;
+        if (!fullEmail || fullEmail.includes('...')) {
+          const match = authFileName.replace(SUFFIX_STRIP, '').trim().match(EMAIL_REGEX);
+          if (match && !match[0].includes('...')) {
+            fullEmail = match[0];
+          }
+        }
+
         return {
           cardId: `${authFileName}::${basePrefix}::${assignedPrefix}`,
+          poolId: pool.id || basePrefix,
+          isDynamicRAMLeader,
           masterFileName: authFileName,
+          email: fullEmail || classification.maskedEmail || extractSafeMaskedEmail('', authFileName),
           maskedEmail: classification.maskedEmail || extractSafeMaskedEmail('', authFileName),
           familyRole,
           assignedPrefix,
-          poolRole,
+          poolRole: effectivePoolRole,
           activePoolBase: basePrefix,
           specialistModel,
           poolDisableIsolation: pool.policy?.disable_isolation === true,
@@ -2409,6 +2506,32 @@ export async function updateManagementConsole(options = {}) {
   const res = await apiFetch('/v0/management/auto-switcher-pro/maintenance/update-console', {
     ...options,
     method: 'POST',
+  });
+  return res.json();
+}
+
+/**
+ * Obtiene el estado del motor de rebalanceo predictivo y la fatiga de las cuentas.
+ */
+export async function getPredictiveState(options = {}) {
+  const res = await apiFetch('/v0/management/auto-switcher-pro/predictive', {
+    ...options,
+    method: 'GET',
+  });
+  return res.json();
+}
+
+/**
+ * Actualiza la configuración del motor de rebalanceo predictivo.
+ */
+export async function updatePredictiveConfig(config, options = {}) {
+  const res = await apiFetch('/v0/management/auto-switcher-pro/predictive', {
+    ...options,
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(config),
   });
   return res.json();
 }

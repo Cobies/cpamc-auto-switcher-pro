@@ -159,11 +159,11 @@
   transform: none;
 }
 
-/* Section Containers */
+/* Sections */
 .auto-auth-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 16px;
 }
 
 .auto-auth-section-header {
@@ -171,16 +171,16 @@
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid rgba(51, 65, 85, 0.5);
-  padding-bottom: 5px;
+  padding-bottom: 6px;
 }
 
 .auto-auth-section-title {
   margin: 0;
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 700;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   color: #e2e8f0;
 }
 
@@ -188,23 +188,76 @@
   font-size: 10px;
   background: rgba(51, 65, 85, 0.8);
   color: #cbd5e1;
-  padding: 1px 7px;
+  padding: 2px 8px;
   border-radius: 12px;
   font-weight: 600;
+}
+
+/* Pool Group Container */
+.auto-auth-pool-group {
+  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid rgba(51, 65, 85, 0.5);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.auto-auth-pool-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px;
+  border-bottom: 1px dashed rgba(51, 65, 85, 0.4);
+}
+
+.auto-auth-pool-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.auto-auth-pool-title {
+  font-size: 13.5px;
+  font-weight: 800;
+  color: #f1f5f9;
+  letter-spacing: -0.01em;
+}
+
+.auto-auth-pool-badge {
+  font-family: monospace;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.auto-auth-pool-target {
+  font-size: 11px;
+  font-weight: 600;
+  color: #cbd5e1;
+  background: rgba(30, 41, 59, 0.7);
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(71, 85, 105, 0.5);
 }
 
 /* Cards Grid */
 .auto-auth-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+  gap: 12px;
 }
 
 .auto-auth-card {
-  background: rgba(30, 41, 59, 0.5);
-  border: 1px solid rgba(51, 65, 85, 0.6);
+  background: rgba(30, 41, 59, 0.55);
+  border: 1px solid rgba(51, 65, 85, 0.65);
   border-radius: 10px;
-  padding: 10px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -229,6 +282,18 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.badge-prefix-hero {
+  font-size: 13.5px;
+  font-weight: 800;
+  font-family: monospace;
+  padding: 3px 8px;
+  border-radius: 6px;
+  letter-spacing: 0.5px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.25);
+  border: 1px solid rgba(255,255,255,0.2);
+  white-space: nowrap;
 }
 
 .badge-role {
@@ -264,13 +329,19 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .auto-auth-email {
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 700;
   color: #f8fafc;
-  word-break: break-all;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  max-width: 100%;
 }
 
 .auto-auth-filename {
@@ -297,21 +368,60 @@
   font-size: 11px;
 }
 
-/* Badges List */
+/* Badges List & Operative Status */
 .auto-auth-badges-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(51, 65, 85, 0.4);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+.status-pill-group {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
 }
 
 .badge-pool-prefix {
   font-family: monospace;
-  font-size: 9.5px;
+  font-size: 10px;
   font-weight: 700;
-  background: rgba(59, 130, 246, 0.15);
-  color: #93c5fd;
-  border: 1px solid rgba(59, 130, 246, 0.3);
-  padding: 1px 5px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.badge-ram-leader {
+  background: rgba(234, 179, 8, 0.2);
+  color: #fde047;
+  border: 1px solid rgba(234, 179, 8, 0.4);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.isolation-pill-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.badge-isolation-tag {
+  font-size: 10px;
+  font-weight: 600;
+  color: #c084fc;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
   border-radius: 4px;
 }
 

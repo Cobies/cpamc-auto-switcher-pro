@@ -272,16 +272,83 @@ describe('AutoAuthFiles Component - Dedicated View & Lifecycle Engine', () => {
     const heroNames = screen.getAllByTestId('hero-model-name');
     expect(heroNames).toHaveLength(2);
     heroNames.forEach((el) => expect(el.textContent).toContain('gemini-3.8-flash-high'));
-    expect(screen.getAllByText('🎯 MODELO ESPECIALISTA ACTIVO').length).toBe(2);
+    expect(screen.getAllByText('🎯 MODELO ASIGNADO EN RAM').length).toBe(2);
 
-    // El estado refleja el pool base: reservas visibles como [agy] RESERVA,
-    // sin facades _N (invisibilidad de reservas en /model)
-    expect(screen.getByText(/Estado:\s*LÍDER\s*\[agy\]/)).toBeTruthy();
-    expect(screen.getByText(/Estado:\s*RESERVA\s*\[agy\]/)).toBeTruthy();
-    expect(screen.queryByText(/agy_1/)).toBeNull();
+    // El estado refleja la operatividad real en RAM:
+    // Líder activo despachando vs reserva en banquillo
+    expect(screen.getByText(/EN CALIENTE: DESPACHANDO EN RAM/)).toBeTruthy();
+    expect(screen.getByText(/EN BANQUILLO: RESERVA LISTA/)).toBeTruthy();
+    // Identificador de prefijo homologado visible en la cabecera destacada de la tarjeta
+    expect(screen.getByText(/🏷️\s*\[agy_1\]/)).toBeTruthy();
 
     // Nunca banner multipropósito en pools con especialista aislado
     expect(screen.queryByText(/MODELO PREDETERMINADO \(MULTIPROPÓSITO\)/)).toBeNull();
+  });
+
+  it('prominently renders unique individual prefix badges (badge-prefix-hero) and operational states for all pool member accounts', async () => {
+    mockPools([
+      {
+        id: 'Pool-02-gemini',
+        family: 'gemini_pure',
+        base_prefix: 'agy2',
+        leader_auth: 'antigravity-maribelluz@gmail.com.json',
+        active_leader: 'antigravity-maribelluz@gmail.com.json',
+        reserves: [
+          'antigravity-wilsonlavio11@gmail.com.json',
+          'antigravity-wilsonlavio7@gmail.com.json',
+        ],
+        policy: {
+          disable_isolation: false,
+          target_models: ['gemini-3.8-flash-high'],
+        },
+      },
+    ]);
+
+    const poolNodes = [
+      {
+        id: 'p1',
+        data: {
+          fileName: 'antigravity-maribelluz@gmail.com.json',
+          email: 'maribelluz@gmail.com',
+          prefix: '',
+          provider: 'antigravity',
+        },
+      },
+      {
+        id: 'p2',
+        data: {
+          fileName: 'antigravity-wilsonlavio11@gmail.com.json',
+          email: 'wilsonlavio11@gmail.com',
+          prefix: '',
+          provider: 'antigravity',
+        },
+      },
+      {
+        id: 'p3',
+        data: {
+          fileName: 'antigravity-wilsonlavio7@gmail.com.json',
+          email: 'wilsonlavio7@gmail.com',
+          prefix: '',
+          provider: 'antigravity',
+        },
+      },
+    ];
+
+    render(<AutoAuthFiles nodes={poolNodes} />);
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId(/gemini-card-/)).toHaveLength(3);
+    });
+
+    // Cada tarjeta exhibe en su cabecera su matrícula/prefijo individual único
+    expect(screen.getByTestId('badge-prefix-hero-0').textContent).toContain('[agy2]');
+    expect(screen.getByTestId('badge-prefix-hero-1').textContent).toContain('[agy2_1]');
+    expect(screen.getByTestId('badge-prefix-hero-2').textContent).toContain('[agy2_2]');
+
+    // Exactamente 1 líder activo en RAM y 2 en banquillo
+    expect(screen.getAllByText(/🟢 EN CALIENTE: DESPACHANDO EN RAM/)).toHaveLength(1);
+    expect(screen.getAllByText(/👑 Turno Activo/)).toHaveLength(1);
+    expect(screen.getAllByText(/⏸️ EN BANQUILLO: RESERVA LISTA/)).toHaveLength(2);
   });
 
   it('shows strictly 0 cards and the empty banner when no pools are registered (GroupManager is the sole generator)', async () => {
@@ -372,6 +439,11 @@ describe('AutoAuthFiles Component - Dedicated View & Lifecycle Engine', () => {
   it('clicking ⚙️ opens SpecialistModal and saving refreshes state via onReloadRequested', async () => {
     const catalog = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'];
     const reloadMock = vi.fn();
+    const savePoolSpy = vi.spyOn(managementClient, 'savePool').mockResolvedValue({
+      ok: true,
+      pool: {},
+      message: 'Pool saved successfully',
+    });
     const patchSpy = vi.spyOn(managementClient, 'patchAuthFileExclusions').mockResolvedValue({
       ok: true,
       status: 200,
@@ -401,9 +473,16 @@ describe('AutoAuthFiles Component - Dedicated View & Lifecycle Engine', () => {
     fireEvent.click(screen.getByTestId('btn-save-specialist'));
 
     await waitFor(() => {
-      expect(patchSpy).toHaveBeenCalledWith(
-        'antigravity-infosoytec@gmail.com.json',
-        ['gemini-2.0-flash', 'gemini-2.5-flash']
+      // In sovereign pool model, saving a pool card's specialist configuration updates
+      // the pool definition virtually via savePool without mutating credentials on disk.
+      expect(savePoolSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          base_prefix: 'agy',
+          policy: expect.objectContaining({
+            disable_isolation: false,
+            target_models: ['gemini-2.5-pro'],
+          }),
+        })
       );
       expect(reloadMock).toHaveBeenCalled();
     });
@@ -497,7 +576,7 @@ describe('AutoAuthFiles Component - Dedicated View & Lifecycle Engine', () => {
     });
 
     // Assert specialist badge inside hero banner
-    const specialistBadges = screen.getAllByText('🎯 MODELO ESPECIALISTA ACTIVO');
+    const specialistBadges = screen.getAllByText('🎯 MODELO ASIGNADO EN RAM');
     expect(specialistBadges.length).toBeGreaterThanOrEqual(1);
 
     // Assert hero-model-name displaying target specialist model

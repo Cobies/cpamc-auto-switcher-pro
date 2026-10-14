@@ -874,3 +874,134 @@ func TestRunInteractiveInitWithIO_ExistingConfig(t *testing.T) {
 		}
 	})
 }
+
+func TestListAccountsVirtualPoolHomologation(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.json")
+	stateFile := filepath.Join(tempDir, "auto-switcher-pro-state.json")
+
+	stateContent := `{
+		"pools": [
+			{
+				"id": "Pool-01-gemini",
+				"base_prefix": "agy",
+				"route_slug": "agy",
+				"leader_auth": "antigravity-infosoytec@gmail.com.json",
+				"active_leader": "antigravity-infowilsonlavio@gmail.com.json",
+				"members": [
+					"antigravity-infosoytec@gmail.com.json",
+					"antigravity-infowilsonlavio@gmail.com.json"
+				],
+				"reserves": [
+					"antigravity-infowilsonlavio@gmail.com.json"
+				]
+			},
+			{
+				"id": "Pool-02-gemini",
+				"base_prefix": "agy2",
+				"route_slug": "agy2",
+				"leader_auth": "antigravity-maribelluz@gmail.com.json",
+				"active_leader": "antigravity-maribelluz@gmail.com.json",
+				"members": [
+					"antigravity-maribelluz@gmail.com.json",
+					"antigravity-wilsonlavio11@gmail.com.json",
+					"antigravity-wilsonlavio7@gmail.com.json"
+				],
+				"reserves": [
+					"antigravity-wilsonlavio11@gmail.com.json",
+					"antigravity-wilsonlavio7@gmail.com.json"
+				]
+			}
+		]
+	}`
+	if err := os.WriteFile(stateFile, []byte(stateContent), 0644); err != nil {
+		t.Fatalf("failed to write test state file: %v", err)
+	}
+	t.Setenv("AUTO_SWITCHER_STATE_PATH", stateFile)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v0/management/auth-files":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"files": []map[string]any{
+					{"id": "f1", "name": "antigravity-infosoytec@gmail.com.json", "auth_index": "idx-1", "provider": "antigravity"},
+					{"id": "f2", "name": "antigravity-infowilsonlavio@gmail.com.json", "auth_index": "idx-2", "provider": "antigravity"},
+					{"id": "f3", "name": "antigravity-maribelluz@gmail.com.json", "auth_index": "idx-3", "provider": "antigravity"},
+					{"id": "f4", "name": "antigravity-wilsonlavio11@gmail.com.json", "auth_index": "idx-4", "provider": "antigravity"},
+					{"id": "f5", "name": "antigravity-wilsonlavio7@gmail.com.json", "auth_index": "idx-5", "provider": "antigravity"},
+				},
+			})
+		case "/v0/management/auth-files/download":
+			// Gobernanza virtual pura: todas las cuentas en disco devuelven prefijo vacío ""
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"prefix": "",
+			})
+		case "/v0/management/api-call":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"groups":[{"displayName":"Gemini Models","buckets":[{"displayName":"5-Hour Limit","remainingFraction":0.80}]}]}`))
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer server.Close()
+
+	cfg := &config.Config{
+		Endpoint:            server.URL,
+		ManagementKey:       "dummy-key",
+		Provider:            "antigravity",
+		ActivePrefix:        "agy",
+		ReservePrefixPrefix: "agy_",
+	}
+	if _, err := cfg.Save(configPath); err != nil {
+		t.Fatalf("failed to save config: %v", err)
+	}
+
+	cli, err := client.New(server.URL, "dummy-key")
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	sw := switcher.New(cfg, cli)
+
+	accounts, err := sw.ListAccounts(context.Background())
+	if err != nil {
+		t.Fatalf("ListAccounts failed: %v", err)
+	}
+
+	if len(accounts) != 5 {
+		t.Fatalf("expected 5 accounts, got %d", len(accounts))
+	}
+
+	prefixMap := make(map[string]string)
+	profileMap := make(map[string]string)
+	for _, acc := range accounts {
+		prefixMap[acc.Entry.Name] = acc.Prefix
+		profileMap[acc.Entry.Name] = acc.Profile
+	}
+
+	// Pool 01 checks
+	if prefixMap["antigravity-infosoytec@gmail.com.json"] != "agy" {
+		t.Errorf("expected infosoytec virtual prefix 'agy', got %s", prefixMap["antigravity-infosoytec@gmail.com.json"])
+	}
+	if prefixMap["antigravity-infowilsonlavio@gmail.com.json"] != "agy_1" {
+		t.Errorf("expected infowilsonlavio virtual prefix 'agy_1', got %s", prefixMap["antigravity-infowilsonlavio@gmail.com.json"])
+	}
+	if profileMap["antigravity-infosoytec@gmail.com.json"] != "default" {
+		t.Errorf("expected infosoytec profile 'default', got %s", profileMap["antigravity-infosoytec@gmail.com.json"])
+	}
+
+	// Pool 02 checks
+	if prefixMap["antigravity-maribelluz@gmail.com.json"] != "agy2" {
+		t.Errorf("expected maribelluz virtual prefix 'agy2', got %s", prefixMap["antigravity-maribelluz@gmail.com.json"])
+	}
+	if prefixMap["antigravity-wilsonlavio11@gmail.com.json"] != "agy2_1" {
+		t.Errorf("expected wilsonlavio11 virtual prefix 'agy2_1', got %s", prefixMap["antigravity-wilsonlavio11@gmail.com.json"])
+	}
+	if prefixMap["antigravity-wilsonlavio7@gmail.com.json"] != "agy2_2" {
+		t.Errorf("expected wilsonlavio7 virtual prefix 'agy2_2', got %s", prefixMap["antigravity-wilsonlavio7@gmail.com.json"])
+	}
+	if profileMap["antigravity-maribelluz@gmail.com.json"] != "2" {
+		t.Errorf("expected maribelluz profile '2', got %s", profileMap["antigravity-maribelluz@gmail.com.json"])
+	}
+}

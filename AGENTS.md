@@ -37,20 +37,31 @@ Cualquier orden del usuario que mencione "Auth Files" debe ser disambiguada ante
 
 Every AI agent, developer, and workflow MUST strictly uphold this non-negotiable contract:
 
-### 1. Virtual Facade Concept ("Fictitious Leader")
-- In Pi's `/model` selector, users and subagents NEVER invoke a fixed physical account.
-- Every entry in `/model` represents a **Virtual Facade (an Active Pool)** registered in Auto Switcher Pro.
-- Pi calls the pool's stable virtual route (`cpamc/<pool_prefix>/<model>`).
-- Auto Switcher Pro dynamically maps that facade to whichever physical account is currently leader, and transparently rotates leaders and reserves (`_1`, `_2`...) on cooldown, rate limits (429), or exhaustion with **zero downtime**.
-- The virtual facade in `/model` remains stable and immutable throughout rotations.
+### 1. Virtual Facade Concept & Pool-Centric Sovereign Identity ("Fictitious Leader")
+- **Clean Pool Identifier in `/model` (`Pool-XX-<family>`)**:
+  - In Pi's `/model` selector, users and subagents NEVER invoke a fixed physical account or a hardcoded model suffix.
+  - Every entry in `/model` represents a clean **Active Pool Identifier**:
+    - `Pool-01-gemini`
+    - `Pool-02-gemini`
+    - `Pool-03-codex`
+    - `Pool-04-claude`
+    (Pi automatically prepends the provider namespace `cpamc/`).
+  - The model name is NOT appended in `/model` because each member account inside the pool can configure its own model within its family (`agy/gemini-3.8-flash-high`, `agy_1/gemini-3.7-flash-high`, etc.) without changing `/model`.
+- **Pool-Centric Identity (No "Padre/Hijo" Coupling)**:
+  - A pool is governed solely by its **Pool Identifier / Group Name** (`pool_id` / `Pool-01-gemini`), NEVER by being "the first account" or a physical "cuenta padre".
+  - All physical accounts assigned to a pool are equal peer workers (`members`).
+  - Pools do NOT depend on a fixed anchor account; if any physical account is released, rotated, or replaced, the pool retains its sovereign identity intact.
+- **Dynamic Rotating Leadership (Fictitious Leader in RAM)**:
+  - Auto Switcher Pro dynamically maps `Pool-XX-<family>` to whichever physical account is currently active (`ActiveLeader` in RAM) and its configured model, transparently rotating the leader and reserves on cooldown, rate limits (429), predictive threshold (>80%), or exhaustion with **zero downtime**.
+  - The virtual facade in `/model` remains stable and immutable throughout rotations.
 
 ### 2. Rule of 1 Entry per Active Pool ($N \to \infty$ Across ALL Providers)
-- Every active pool registered in Auto Switcher Pro (`base_prefix`) MUST be independently published to `/model`.
-- If there are $N$ pools ($1, 2, 5, 20 \dots \infty$), `/model` MUST expose all $N$ pools.
+- Every active pool registered in Auto Switcher Pro MUST be independently published to `/model`.
+- If there are $N$ pools ($1, 2, 5, 20 \dots \infty$), `/model` MUST expose all $N$ pools (`Pool-01-gemini`, `Pool-02-gemini`, etc.).
 - **Bimodal Catalog Invariant**:
   - **$N = 0$ (Zero Pools)**: Auto Switcher Pro publishes no virtual facades to `/model`; CPAMC serves its native credentials and models without plugin intervention.
-  - **$N \ge 1$ (Active Pools)**: Every registered pool exposes strictly **1 facade route** for its chosen specialist model (`<pool_prefix>/<specialist_model>`).
-- **STRICT PROHIBITION**: No agent or code rule may ever collapse, hide, or "shadow" sibling pools (e.g., hiding `agy2`, `agy3`, `codex2`, or `clau2` under the assumption of "duplicate families"). Each pool is an independent routing unit.
+  - **$N \ge 1$ (Active Pools)**: Every registered pool exposes strictly **1 clean pool entry** (`Pool-XX-<family>`), while also accepting legacy `<pool_prefix>/<specialist_model>` routes for backward compatibility.
+- **STRICT PROHIBITION**: No agent or code rule may ever collapse, hide, or "shadow" sibling pools. Each pool is an independent routing unit.
 
 ### 3. Strict Specialist Model Governance (1 Pool = 1 Specialist Model & Pure Virtual Isolation)
 - **Zero Wildcards / No Multipurpose Mode**: Pools never operate in open/multipurpose mode. Every pool is strictly locked to **1 specialist model** chosen dynamically at pool creation based on provider nature.
@@ -72,12 +83,13 @@ Claude models come from two entirely different technical providers that must NEV
    - Prefix MUST be `clau*` or `claude*` (NEVER starting with `agy_`).
    - Exposes Anthropic's full official catalog (`claude-3-5-haiku`, `claude-3-7-sonnet`, `claude-3-opus`).
 
-### 6. Separation of Concerns: CPAMC Native Inspection vs Pool Routing
+### 6. Separation of Concerns: CPAMC Native Inspection vs Pool Routing & Granular Coexistence
 - **CPAMC Native Credential Inspection (`GET /v8/management/credentials/models`)**:
   - The native CPAMC "Auth Files Management" credential inspection modal (`GET /v8/management/credentials/models?name=...`, handled via RPC `model.for_auth`) represents the physical capability of an OAuth credential.
   - Auto Switcher Pro ALWAYS returns the full native provider baseline models (`baselineAntigravityModels` for Google Antigravity) alongside any active pool targets.
   - This ensures native CPAMC credential management, model pickers, and exclusion editors always have access to the complete catalog of native models, regardless of pool specialist assignments.
-- **Pi `/model` Selector & Route Facades (`GET /v1/models`)**:
-  - Pi's `/model` catalog exposes only the active pools' virtual routes (e.g. `agy/gemini-3.8-flash-high`, `agy2/gemini-3.8-flash-high`).
-  - Physical accounts rotate transparently behind these facades with zero disruption.
+- **Pi `/model` Selector & Granular Bimodal Coexistence Contract (Per-Account Surgical Precision)**:
+  - **Accounts Assigned to Active Pools**: When a physical account or prefix is assigned to an active pool (e.g. `agy` in `Pool-01-gemini`, `agy2` in `Pool-02-gemini`), Pi's provider extension **strictly filters out and hides all individual broken-down physical routes** (`agy/gemini-3.8-flash-high`, `agy2/...`). The `/model` catalog exposes **exclusively the clean sovereign pool facades** (`cpamc/Pool-01-gemini`, `cpamc/Pool-02-gemini`). All member accounts and their configured specialist models rotate transparently behind this opaque facade in RAM (`ActiveLeader`).
+  - **Unassigned Free Accounts (Same or Different Provider)**: Any physical account or provider NOT assigned to any pool (e.g. a newly linked 5th Gemini account, or free accounts from OpenAI, Direct Claude, DeepSeek, etc.) **strictly preserves 100% native CPAMC behavior ("Auth Files Management")**. Its credentials from disk, its physical prefix, and its native inclusions/exclusions configured in CPAMC native credential modal pass directly to `/model` without plugin intervention or artificial shadowing.
+  - **Continuous Auto-Purge & Zero-Residue Contingency**: Upon creating, editing, adopting, or dissolving pools in Auto Switcher Pro, Pi's dynamic provider automatically reconciles and purges the local models cache (`cpamc-models-cache.json`) without lingering ghost models or manual intervention.
 

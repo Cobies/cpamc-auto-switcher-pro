@@ -147,8 +147,7 @@ describe('App Host Component Integration', () => {
 
     fireEvent.click(tokensTab);
 
-    // After clicking Pulso Tokens, route badge updates to /pulse-tokens
-    expect(screen.getByText('/pulse-tokens')).toBeTruthy();
+    // After clicking Pulso Tokens, view is rendered (header is hidden on submenus)
     expect(await screen.findByTestId('pulse-tokens-view')).toBeTruthy();
   });
 
@@ -182,7 +181,6 @@ describe('App Host Component Integration', () => {
 
     fireEvent.click(groupTab);
 
-    expect(screen.getByText('/create-groups')).toBeTruthy();
     expect(await screen.findByTestId('group-manager-view')).toBeTruthy();
   });
 
@@ -197,7 +195,6 @@ describe('App Host Component Integration', () => {
 
     fireEvent.click(autoAuthTab);
 
-    expect(screen.getByText('/auto-auth-files')).toBeTruthy();
     expect(await screen.findByTestId('auto-auth-files-view')).toBeTruthy();
   });
 

@@ -112,7 +112,7 @@ export default function SpecialistModal({
       const exclusionsToSave = computeSpecialistExclusions(sourcePool, selectedModel);
 
       const dispatchPatch = patchFn || patchAuthFileExclusions;
-      await dispatchPatch(targetFileName, exclusionsToSave);
+      await dispatchPatch(targetFileName, exclusionsToSave, selectedModel);
 
       if (typeof onSaved === 'function') {
         onSaved({

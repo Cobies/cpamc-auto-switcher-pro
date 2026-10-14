@@ -1,27 +1,69 @@
-import React, { useState, useMemo, useCallback } from 'react';
-import { saveAuthFilePrefixes } from '../api/managementClient';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import { saveAuthFilePrefixes, listPools } from '../api/managementClient';
 import '../PrefixManager.css';
 
 /**
  * Helper para clasificar el rol del prefijo según la convención de Auto Switcher:
- * - Root / Principal (ej: agy, agy2, agy_clau, codex)
- * - Child / Reserva (ej: agy_1, agy2_1, agy_clau_1, codex_1)
- * - Salvavidas / Fijo (nv, ocgo)
- * - Libre / Sin Asignar
+ * - Líder de Pool Soberano
+ * - Reserva de Pool Soberano (con índice de suplente)
+ * - Root / Principal clásico en disco (ej: agy, agy2, codex)
+ * - Reserva clásica en disco (ej: agy_1, agy2_1, codex_1)
+ * - Libre / Sin Asignar (únicamente si no pertenece a ningún pool)
  */
-function classifyPrefixRole(prefix = '') {
+function classifyPrefixRole(prefix = '', memberPool = null, fileName = '') {
   const p = prefix.trim();
+
+  // Si la cuenta pertenece a un Pool Soberano registrado (máxima prioridad de verdad):
+  if (memberPool) {
+    const isLeader = memberPool.leader_auth === fileName;
+    if (isLeader) {
+      return {
+        role: 'leader',
+        label: `👑 LÍDER (${memberPool.id})`,
+        badgeClass: 'pm-role-leader',
+      };
+    }
+    // Si es reserva del pool, calcular su orden de suplente
+    const reserveList = Array.isArray(memberPool.reserves)
+      ? memberPool.reserves
+      : (Array.isArray(memberPool.members) ? memberPool.members.filter((m) => m !== memberPool.leader_auth) : []);
+    const resIdx = reserveList.indexOf(fileName);
+    const orderNum = resIdx >= 0 ? resIdx + 1 : 1;
+    return {
+      role: 'reserve',
+      label: `🛡️ RESERVA #${orderNum} (${memberPool.id})`,
+      badgeClass: 'pm-role-reserve',
+    };
+  }
+
+  // Cuentas fuera de pools (libres o con prefijos legacy)
   if (!p || p.startsWith('unlinked_')) {
-    return { role: 'free', label: '⚪ LIBRE / SIN ASIGNAR', badgeClass: 'pm-role-free' };
+    return {
+      role: 'free',
+      label: '⚪ CUENTA LIBRE (Disponible)',
+      badgeClass: 'pm-role-free',
+    };
   }
   if (p === 'nv' || p === 'ocgo') {
-    return { role: 'specialist', label: '⚡ SALVAVIDAS PERMANENTE', badgeClass: 'pm-role-specialist' };
+    return {
+      role: 'specialist',
+      label: '⚡ SALVAVIDAS PERMANENTE',
+      badgeClass: 'pm-role-specialist',
+    };
   }
   if (/_([0-9]+)$/.test(p)) {
     const match = p.match(/_([0-9]+)$/);
-    return { role: 'reserve', label: `🛡️ RESERVA ${match[1]}`, badgeClass: 'pm-role-reserve' };
+    return {
+      role: 'reserve',
+      label: `🛡️ RESERVA ${match[1]} (Disco)`,
+      badgeClass: 'pm-role-reserve',
+    };
   }
-  return { role: 'leader', label: '👑 CUENTA PRINCIPAL (ROOT)', badgeClass: 'pm-role-leader' };
+  return {
+    role: 'leader',
+    label: '👑 CUENTA PRINCIPAL (Disco)',
+    badgeClass: 'pm-role-leader',
+  };
 }
 
 export default function PrefixManager({ nodes = [], onReloadRequested }) {
@@ -32,6 +74,21 @@ export default function PrefixManager({ nodes = [], onReloadRequested }) {
   const [isSavingBatch, setIsSavingBatch] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [registeredPools, setRegisteredPools] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    listPools()
+      .then((res) => {
+        if (!cancelled && Array.isArray(res?.pools)) {
+          setRegisteredPools(res.pools);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Inicializar o sincronizar borradores
   const effectiveDrafts = useMemo(() => {
@@ -86,9 +143,18 @@ export default function PrefixManager({ nodes = [], onReloadRequested }) {
         if (!match) return false;
       }
 
-      // 2. Filtro por categoría / familia
+      // 2. Filtro por categoría / familia (compatible con prefijos en disco y con membresía en PoolRegistry)
+      const memberPool = registeredPools.find(
+        (p) =>
+          p.leader_auth === fileName ||
+          (Array.isArray(p.members) && p.members.includes(fileName)) ||
+          (Array.isArray(p.reserves) && p.reserves.includes(fileName))
+      );
+      const poolFam = (memberPool?.family || '').toLowerCase();
+
       if (filterCategory === 'all') return true;
       if (filterCategory === 'gemini') {
+        if (poolFam.startsWith('gemini_pure')) return true;
         // Gemini puro: agy, agy2, agy_1, agy2_1, g1, g2, g3, gemini
         // Exclude agy_clau (Claude del paquete)
         return (
@@ -97,6 +163,7 @@ export default function PrefixManager({ nodes = [], onReloadRequested }) {
         );
       }
       if (filterCategory === 'claude') {
+        if (poolFam.includes('claude') || poolFam.includes('sonnet') || poolFam.includes('opus')) return true;
         return (
           prefix.includes('son') ||
           prefix.includes('claude') ||
@@ -104,17 +171,33 @@ export default function PrefixManager({ nodes = [], onReloadRequested }) {
           prefix.includes('opus')
         );
       }
+      if (filterCategory === 'agy_son') {
+        if (poolFam.includes('sonnet')) return true;
+        return (
+          prefix.startsWith('agy_son') ||
+          fileName.includes('agy_son')
+        );
+      }
+      if (filterCategory === 'agy_opus') {
+        if (poolFam.includes('opus')) return true;
+        return (
+          prefix.startsWith('agy_opus') ||
+          fileName.includes('agy_opus')
+        );
+      }
       if (filterCategory === 'agy_clau') {
+        if (poolFam.includes('gemini_claude')) return true;
         return (
           prefix.startsWith('agy_clau') ||
           fileName.includes('agy_clau')
         );
       }
       if (filterCategory === 'codex') {
+        if (poolFam.includes('codex')) return true;
         return prov === 'codex' || prefix.includes('codex');
       }
       if (filterCategory === 'free') {
-        return !prefix || prefix.startsWith('unlinked_');
+        return !memberPool && (!prefix || prefix.startsWith('unlinked_'));
       }
       if (filterCategory === 'antigravity') {
         return prov === 'antigravity';
@@ -258,7 +341,23 @@ export default function PrefixManager({ nodes = [], onReloadRequested }) {
               onClick={() => setFilterCategory('agy_clau')}
               data-testid="filter-chip-agy-clau"
             >
-              🎭 agy_clau
+              🎭 Claude Suite (agy_son/opus)
+            </button>
+            <button
+              type="button"
+              className={`pm-filter-chip ${filterCategory === 'agy_son' ? 'active' : ''}`}
+              onClick={() => setFilterCategory('agy_son')}
+              data-testid="filter-chip-agy-son"
+            >
+              🔶 Sonnet (agy_son)
+            </button>
+            <button
+              type="button"
+              className={`pm-filter-chip ${filterCategory === 'agy_opus' ? 'active' : ''}`}
+              onClick={() => setFilterCategory('agy_opus')}
+              data-testid="filter-chip-agy-opus"
+            >
+              🔮 Opus (agy_opus)
             </button>
             <button
               type="button"
@@ -301,6 +400,7 @@ export default function PrefixManager({ nodes = [], onReloadRequested }) {
               <th>CUENTA / CORREO</th>
               <th>ARCHIVO FÍSICO (.JSON)</th>
               <th>ROL / TOPOLOGÍA</th>
+              <th>POOL ASIGNADO</th>
               <th>PREFIJO ASIGNADO</th>
               <th>ACCIÓN</th>
             </tr>
@@ -314,8 +414,22 @@ export default function PrefixManager({ nodes = [], onReloadRequested }) {
               const origVal = (n.data?.prefix || '').trim();
               const isDirty = currentVal.trim() !== origVal;
               const isCollision = (prefixCounts[currentVal.trim()] || 0) > 1;
-              const roleInfo = classifyPrefixRole(currentVal);
+              // Buscar si pertenece a un pool registrado
+              const memberPool = registeredPools.find(
+                (p) =>
+                  p.leader_auth === fileName ||
+                  (Array.isArray(p.members) && p.members.includes(fileName)) ||
+                  (Array.isArray(p.reserves) && p.reserves.includes(fileName))
+              );
+              const isRAMLeader = memberPool?.active_leader === fileName;
+              const assignedModel = memberPool?.member_models?.[fileName] || memberPool?.policy?.target_models?.[0] || '';
+              const roleInfo = classifyPrefixRole(currentVal, memberPool, fileName);
               const isSavingThis = savingRowId === n.id;
+
+              // Placeholder informativo inteligente para cuentas de pool sin prefijo en disco
+              const inputPlaceholder = memberPool && !currentVal
+                ? `🛡️ Protegido por ${memberPool.id}`
+                : 'e.g. agy, agy_1, codex';
 
               return (
                 <tr key={n.id} data-testid={`prefix-row-${n.id}`}>
@@ -340,32 +454,112 @@ export default function PrefixManager({ nodes = [], onReloadRequested }) {
                     </span>
                   </td>
                   <td>
-                    <div className="pm-prefix-input-group">
-                      <input
-                        type="text"
-                        value={currentVal}
-                        onChange={(e) => handleDraftChange(n.id, e.target.value)}
-                        placeholder="e.g. agy, agy_1, agy_clau, agy_clau_1"
-                        className={`pm-prefix-input ${isCollision ? 'collision' : ''} ${isDirty ? 'dirty' : ''}`}
-                        data-testid={`input-prefix-${n.id}`}
-                      />
-                      {isCollision && (
-                        <span title="¡Atención! Este prefijo está repetido en más de una cuenta" style={{ fontSize: 13, cursor: 'help' }}>
-                          ⚠️
+                    {memberPool ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: '#38bdf8' }}>
+                          📦 {memberPool.id}
                         </span>
-                      )}
-                    </div>
+                        {isRAMLeader && (
+                          <span style={{ fontSize: 9, fontWeight: 700, color: '#fde047', background: 'rgba(234, 179, 8, 0.15)', padding: '1px 4px', borderRadius: 3, width: 'fit-content' }}>
+                            👑 Activo en RAM
+                          </span>
+                        )}
+                        {assignedModel && (
+                          <span style={{ fontSize: 9, fontWeight: 600, color: '#a78bfa', background: 'rgba(167, 139, 250, 0.12)', padding: '1px 5px', borderRadius: 3, width: 'fit-content', border: '1px solid rgba(167, 139, 250, 0.25)' }}>
+                            🎯 {assignedModel}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span style={{ fontSize: 11, color: '#64748b' }}>—</span>
+                    )}
                   </td>
                   <td>
-                    <button
-                      type="button"
-                      onClick={() => handleSaveRow(n)}
-                      disabled={!isDirty || isSavingThis || isSavingBatch}
-                      className="pm-btn-save-row"
-                      data-testid={`btn-save-row-${n.id}`}
-                    >
-                      {isSavingThis ? '...' : isDirty ? '💾 Guardar' : '✓'}
-                    </button>
+                    {memberPool ? (
+                      <div className="pm-prefix-readonly-box" data-testid={`prefix-readonly-${n.id}`}>
+                        {roleInfo.role === 'leader' ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{
+                              fontFamily: 'ui-monospace, monospace',
+                              fontSize: 12,
+                              fontWeight: 700,
+                              color: '#38bdf8',
+                              background: 'rgba(56, 189, 248, 0.15)',
+                              padding: '3px 8px',
+                              borderRadius: 4,
+                              border: '1px solid rgba(56, 189, 248, 0.35)',
+                            }}>
+                              🏷️ {currentVal || memberPool.base_prefix}
+                            </span>
+                            <span style={{ fontSize: 10, color: '#94a3b8' }}>Ruta activa</span>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{
+                              fontFamily: 'ui-monospace, monospace',
+                              fontSize: 12,
+                              fontWeight: 600,
+                              color: '#cbd5e1',
+                              background: 'rgba(51, 65, 85, 0.4)',
+                              padding: '3px 8px',
+                              borderRadius: 4,
+                              border: '1px solid rgba(71, 85, 105, 0.5)',
+                            }}>
+                              🔒 {memberPool.base_prefix}_{roleInfo.label.match(/#(\d+)/)?.[1] || '1'} (Virtual)
+                            </span>
+                            <span style={{ fontSize: 10, color: '#64748b' }}>Failover en RAM</span>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="pm-prefix-input-group">
+                        <input
+                          type="text"
+                          value={currentVal}
+                          onChange={(e) => handleDraftChange(n.id, e.target.value)}
+                          placeholder="e.g. agy, agy_1, codex"
+                          className={`pm-prefix-input ${isCollision ? 'collision' : ''} ${isDirty ? 'dirty' : ''}`}
+                          data-testid={`input-prefix-${n.id}`}
+                        />
+                        {isCollision && (
+                          <span title="¡Atención! Este prefijo está repetido en más de una cuenta" style={{ fontSize: 13, cursor: 'help' }}>
+                            ⚠️
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </td>
+                  <td>
+                    {memberPool ? (
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color: '#34d399',
+                          background: 'rgba(16, 185, 129, 0.15)',
+                          padding: '4px 10px',
+                          borderRadius: 6,
+                          border: '1px solid rgba(16, 185, 129, 0.3)',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          whiteSpace: 'nowrap',
+                        }}
+                        title="Gestión automatizada por Auto Switcher Pro. No requiere ni admite edición manual."
+                      >
+                        🛡️ Blindado por Pool
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleSaveRow(n)}
+                        disabled={!isDirty || isSavingThis || isSavingBatch}
+                        className="pm-btn-save-row"
+                        data-testid={`btn-save-row-${n.id}`}
+                      >
+                        {isSavingThis ? '...' : isDirty ? '💾 Guardar' : '✓'}
+                      </button>
+                    )}
                   </td>
                 </tr>
               );

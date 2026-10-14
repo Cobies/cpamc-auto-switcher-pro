@@ -195,6 +195,10 @@ export default function GroupManager({
   // Se resincroniza en cada reload de nodos (tras crear/disolver un pool).
   const [registeredPools, setRegisteredPools] = useState([]);
   const [catalogModels, setCatalogModels] = useState([]);
+  const [adoptTargetPool, setAdoptTargetPool] = useState('');
+  const [adoptAccountNodeId, setAdoptAccountNodeId] = useState('');
+  const [adoptSpecialistModel, setAdoptSpecialistModel] = useState('');
+  const [cardAdoptSelections, setCardAdoptSelections] = useState({});
   const feedbackTimeoutRef = useRef(null);
 
   useEffect(() => {
@@ -551,7 +555,36 @@ export default function GroupManager({
         return;
       }
 
-      poolsMap.set(basePrefix, { basePrefix, root, reserves });
+      const activeLeaderAuth = pool.active_leader || pool.leader_auth || '';
+      const targetModel =
+        (Array.isArray(pool.policy?.target_models) && pool.policy.target_models[0]) || 'gemini-3.8-flash-high';
+      const poolIndex = poolsMap.size + 1;
+      const famStr = (pool.family || basePrefix || '').toLowerCase();
+      const famSuffix = famStr.includes('codex')
+        ? 'codex'
+        : famStr.includes('clau') || famStr.includes('son') || famStr.includes('opus')
+        ? 'claude'
+        : 'gemini';
+      const canonicalPoolName = `Pool-${String(poolIndex).padStart(2, '0')}-${famSuffix}`;
+      const poolId = pool.id || canonicalPoolName;
+      const displayName =
+        pool.display_name && pool.display_name.startsWith('Pool-')
+          ? pool.display_name
+          : canonicalPoolName;
+      const enabled = pool.enabled !== false;
+      const memberModels = pool.member_models || {};
+
+      poolsMap.set(basePrefix, {
+        id: poolId,
+        displayName,
+        enabled,
+        basePrefix,
+        root,
+        reserves,
+        activeLeaderAuth,
+        targetModel,
+        memberModels,
+      });
     });
 
     // 2) Pools legacy detectados solo por prefijos en disco (no cubiertos por el registro)
@@ -571,10 +604,23 @@ export default function GroupManager({
       const isReserve = !!reserveMatch;
 
       if (!poolsMap.has(baseKey)) {
+        const poolIndex = poolsMap.size + 1;
+        const bkLower = baseKey.toLowerCase();
+        const famSuffix = bkLower.includes('codex')
+          ? 'codex'
+          : bkLower.includes('clau') || bkLower.includes('son') || bkLower.includes('opus')
+          ? 'claude'
+          : 'gemini';
+        const canonicalPoolName = `Pool-${String(poolIndex).padStart(2, '0')}-${famSuffix}`;
         poolsMap.set(baseKey, {
+          id: canonicalPoolName,
+          displayName: canonicalPoolName,
+          enabled: true,
           basePrefix: baseKey,
           root: null,
           reserves: [],
+          targetModel: famSuffix === 'claude' ? 'claude-sonnet-4-6' : famSuffix === 'codex' ? 'gpt-4o' : 'gemini-3.8-flash-high',
+          memberModels: {},
         });
       }
 
@@ -938,10 +984,32 @@ export default function GroupManager({
 
       // Guardar definición de pool en el registro del plugin PRIMERO: el watcher de
       // archivos dispara re-registro (model.for_auth) que ya debe ver este pool.
+      const leaderFileName = activeNode.data?.fileName || activeNode.name;
+      const nextPoolIndex = existingPools.length + 1;
+      const famKey = (effectiveFamily?.key || trimmedBase || '').toLowerCase();
+      const famSuffix = famKey.includes('codex')
+        ? 'codex'
+        : famKey.includes('clau') || famKey.includes('son') || famKey.includes('opus')
+        ? 'claude'
+        : 'gemini';
+      const canonicalPoolName = `Pool-${String(nextPoolIndex).padStart(2, '0')}-${famSuffix}`;
+      const chosenModel = targetModels[0] || 'gemini-3.8-flash-high';
+      const memberModelsMap = { [leaderFileName]: chosenModel };
+      reserveFileNames.forEach((rf) => {
+        memberModelsMap[rf] = chosenModel;
+      });
       const poolPayload = {
+        id: canonicalPoolName,
+        name: canonicalPoolName,
+        display_name: canonicalPoolName,
+        route_slug: canonicalPoolName,
+        enabled: true,
         family: effectiveFamily?.key || 'gemini_pure',
         base_prefix: trimmedBase,
-        leader_auth: activeNode.data?.fileName || activeNode.name,
+        members: [leaderFileName, ...reserveFileNames],
+        member_models: memberModelsMap,
+        active_leader: leaderFileName,
+        leader_auth: leaderFileName,
         leader_email: activeNode.data?.email || '',
         reserves: reserveFileNames,
         policy: {
@@ -1139,32 +1207,15 @@ export default function GroupManager({
       // excluido = catálogo base − unión de los targets de los pools REMANENTES de la
       // cuenta (vacío cuando ya no pertenece a ningún pool: catálogo base completo).
       try {
-        const [poolsRes, modelsRes] = await Promise.allSettled([listPools(), listModels()]);
-        const remainingPools = poolsRes.status === 'fulfilled' && Array.isArray(poolsRes.value?.pools)
-          ? poolsRes.value.pools
-          : [];
-        const allBaseModels = modelsRes.status === 'fulfilled'
-          ? [...new Set((modelsRes.value?.models || []).map((id) => {
-              const slash = String(id).indexOf('/');
-              return slash > 0 ? String(id).slice(slash + 1) : String(id);
-            })).filter(Boolean)]
-          : [];
+        // Gobernanza Virtual Pura (Cero Mutación en Disco):
+        // Al disolver un pool NO inyectamos exclusiones físicas en disco (/root/.cli-proxy-api/*.json).
+        // Las credenciales físicas en disco deben mantener excluded_models: [] de fábrica para que
+        // CPAMC native "Auth Files Management" conserve el catálogo completo y el failover opere sin trabas.
         await Promise.allSettled(
-          [...memberMasterFiles].map((file) => {
-            const union = new Set();
-            remainingPools.forEach((p) => {
-              const members = [p.leader_auth, ...(Array.isArray(p.reserves) ? p.reserves : [])].filter(Boolean);
-              const isMember = members.some((m) => String(m).toLowerCase() === String(file).toLowerCase());
-              if (isMember && !p.policy?.disable_isolation) {
-                (p.policy?.target_models || []).forEach((m) => union.add(m));
-              }
-            });
-            const junk = allBaseModels.filter((m) => !union.has(m));
-            return patchAuthFileExclusions(file, junk);
-          })
+          [...memberMasterFiles].map((file) => patchAuthFileExclusions(file, []))
         );
       } catch (exclusionErr) {
-        console.warn('dissolve exclusion re-patch error:', exclusionErr);
+        console.warn('dissolve exclusion reset error:', exclusionErr);
       }
 
       const failedDeletions = deleteResults.filter((r) => r.status === 'rejected');
@@ -1194,6 +1245,187 @@ export default function GroupManager({
       setIsSubmitting(false);
     }
   }, [nodes, onReloadRequested]);
+
+  // Adoptar una cuenta libre dentro de un pool existente como nueva reserva
+  const handleAdoptAccountIntoPool = useCallback(async (targetPoolBase, targetNode, customSpecialistModel = '') => {
+    if (!targetPoolBase || !targetNode) return;
+    const fileName = targetNode.data?.fileName || targetNode.name || targetNode.id || '';
+    const email = targetNode.data?.email || fileName;
+    if (!fileName) return;
+
+    setIsSubmitting(true);
+    setErrorMessage('');
+    try {
+      const poolDef = registeredPools.find((p) => p.base_prefix === targetPoolBase);
+      const existingPool = existingPools.find((p) => p.basePrefix === targetPoolBase);
+
+      const currentReserves = poolDef?.reserves
+        ? [...poolDef.reserves]
+        : (existingPool?.reserves || [])
+            .map((r) => r.node?.data?.fileName || r.node?.name || r.node?.id)
+            .filter(Boolean);
+
+      const nextNum = Math.max(
+        nextReserveNumber(nodes, targetPoolBase),
+        currentReserves.length + 1
+      );
+      const newPrefix = `${targetPoolBase}_${nextNum}`;
+
+      try {
+        await saveAuthFilePrefixes([{ name: fileName, prefix: newPrefix }]);
+      } catch (patchErr) {
+        console.warn('saveAuthFilePrefixes warning on adopt:', patchErr);
+      }
+
+      if (!currentReserves.includes(fileName)) {
+        currentReserves.push(fileName);
+      }
+
+      const rootNode = existingPool?.root;
+      const leaderFile =
+        poolDef?.leader_auth ||
+        rootNode?.data?.fileName ||
+        rootNode?.name ||
+        rootNode?.id ||
+        '';
+      const leaderEmail = poolDef?.leader_email || rootNode?.data?.email || '';
+
+      const effectiveModel =
+        customSpecialistModel ||
+        (Array.isArray(poolDef?.policy?.target_models) && poolDef.policy.target_models[0]) ||
+        selectedSpecialistModel ||
+        (targetPoolBase.startsWith('clau') || targetPoolBase.startsWith('agy_son') || targetPoolBase.startsWith('agy_clau')
+          ? 'claude-sonnet-4-6'
+          : targetPoolBase.startsWith('agy_opus')
+          ? 'claude-opus-4-6-thinking'
+          : 'gemini-3.8-flash-high');
+
+      const updatedMemberModels = {
+        ...(poolDef?.member_models || existingPool?.memberModels || {}),
+        [fileName]: effectiveModel,
+      };
+
+      const poolPayload = {
+        id: poolDef?.id || existingPool?.id || `Pool-01-gemini`,
+        name: poolDef?.name || existingPool?.displayName || targetPoolBase,
+        display_name: poolDef?.display_name || existingPool?.displayName || `Pool-01-gemini`,
+        route_slug: poolDef?.route_slug || existingPool?.displayName || targetPoolBase,
+        enabled: poolDef?.enabled !== false,
+        family: poolDef?.family || effectiveFamily?.key || 'gemini_pure',
+        base_prefix: targetPoolBase,
+        members: [leaderFile, ...currentReserves].filter(Boolean),
+        member_models: updatedMemberModels,
+        active_leader: poolDef?.active_leader || leaderFile,
+        leader_auth: leaderFile,
+        leader_email: leaderEmail,
+        reserves: currentReserves,
+        policy: {
+          ...(poolDef?.policy || {}),
+          disable_isolation: false,
+          exclude_55: Boolean(poolDef?.policy?.exclude_55 ?? excludeVersion55),
+          target_models:
+            Array.isArray(poolDef?.policy?.target_models) && poolDef.policy.target_models.length > 0
+              ? poolDef.policy.target_models
+              : [effectiveModel],
+          excluded_models: poolDef?.policy?.excluded_models || [],
+        },
+      };
+
+      try {
+        await savePool(poolPayload);
+      } catch (poolErr) {
+        console.warn('savePool error on adopt:', poolErr);
+      }
+
+      setRegisteredPools((prev) => {
+        const exists = prev.some((p) => p.base_prefix === targetPoolBase);
+        if (exists) {
+          return prev.map((p) => (p.base_prefix === targetPoolBase ? poolPayload : p));
+        }
+        return [...prev, poolPayload];
+      });
+
+      setSuccessFeedback(
+        `✅ Cuenta "${email}" adoptada con éxito como Reserva en el pool "${targetPoolBase}" (prefijo [${newPrefix}] · Modelo: ${effectiveModel}).`
+      );
+      if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
+      feedbackTimeoutRef.current = setTimeout(() => setSuccessFeedback(''), 5000);
+
+      if (typeof onReloadRequested === 'function') {
+        await onReloadRequested();
+      }
+    } catch (err) {
+      setErrorMessage(`Error al adoptar cuenta en el pool: ${err.message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [registeredPools, existingPools, nodes, effectiveFamily, excludeVersion55, selectedSpecialistModel, onReloadRequested]);
+
+  // Liberar individualmente una reserva de un pool sin disolver el pool completo
+  const handleReleaseReserve = useCallback(async (targetPoolBase, reserveNode) => {
+    if (!targetPoolBase || !reserveNode) return;
+    const fileName = reserveNode.data?.fileName || reserveNode.name || reserveNode.id || '';
+    const email = reserveNode.data?.email || fileName;
+    if (!fileName) return;
+
+    const existingPool = existingPools.find((p) => p.basePrefix === targetPoolBase);
+    if (existingPool && existingPool.reserves.length <= 1) {
+      if (
+        !window.confirm(
+          `⚠️ Esta es la única reserva del pool "${targetPoolBase}". Si la liberas, el pool quedará sin suplentes de respaldo. ¿Deseas continuar?`
+        )
+      ) {
+        return;
+      }
+    } else {
+      if (
+        !window.confirm(
+          `¿Liberar la cuenta de reserva "${email}" del pool "${targetPoolBase}"? La cuenta volverá a estar libre.`
+        )
+      ) {
+        return;
+      }
+    }
+
+    setIsSubmitting(true);
+    setErrorMessage('');
+    try {
+      try {
+        await saveAuthFilePrefixes([{ name: fileName, prefix: '' }]);
+      } catch (patchErr) {
+        console.warn('saveAuthFilePrefixes warning on release reserve:', patchErr);
+      }
+
+      const poolDef = registeredPools.find((p) => p.base_prefix === targetPoolBase);
+      if (poolDef) {
+        const updatedReserves = (poolDef.reserves || []).filter((f) => f !== fileName);
+        const updatedPayload = {
+          ...poolDef,
+          reserves: updatedReserves,
+        };
+        try {
+          await savePool(updatedPayload);
+        } catch (poolErr) {
+          console.warn('savePool error on release reserve:', poolErr);
+        }
+        setRegisteredPools((prev) =>
+          prev.map((p) => (p.base_prefix === targetPoolBase ? updatedPayload : p))
+        );
+      }
+
+      setSuccessFeedback(`✓ Reserva "${email}" liberada del pool "${targetPoolBase}". Ahora está libre.`);
+      if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
+      feedbackTimeoutRef.current = setTimeout(() => setSuccessFeedback(''), 5000);
+
+      if (typeof onReloadRequested === 'function') {
+        await onReloadRequested();
+      }
+    } catch (err) {
+      setErrorMessage(`Error al liberar reserva: ${err.message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [registeredPools, existingPools, onReloadRequested]);
 
   const providerAuraClass = family ? `provider-${family}` : 'provider-neutral';
 
@@ -1244,7 +1476,7 @@ export default function GroupManager({
         </div>
       )}
 
-      {/* Navegación por Pestañas */}
+      {/* Navegación por Pestañas Bento */}
       <div className="group-manager-tabs">
         <button
           type="button"
@@ -1254,6 +1486,15 @@ export default function GroupManager({
         >
           <span>⚡</span>
           <span>Armar Nuevo Pool</span>
+        </button>
+        <button
+          type="button"
+          className={`group-manager-tab ${activeTab === 'adopt' ? 'active' : ''}`}
+          onClick={() => setActiveTab('adopt')}
+          data-testid="tab-adoptar-reserva"
+        >
+          <span>➕</span>
+          <span>Adoptar / Sumar Reservas ({freeNodes.length})</span>
         </button>
         <button
           type="button"
@@ -1422,33 +1663,45 @@ export default function GroupManager({
                 {/* Badge de Capacidad en Tiempo Real */}
                 {family && (() => {
                   const totalEligible = leaderCandidates.length;
-                  const freeCount = freeCardsInTargetRole.length;
                   const maxGroups = Math.floor(totalEligible / 2);
                   return (
                     <div className="group-capacity-badge" data-testid="capacity-badge">
-                      <span>📊 Cuentas aptas: <strong>{totalEligible}</strong> ({freeCount} libres{totalEligible > freeCount ? ` · ${totalEligible - freeCount} reasignables` : ''})</span>
+                      <span>📊 Cuentas disponibles sin asignar: <strong>{totalEligible}</strong></span>
                       <span> · Capacidad máxima: <strong>{maxGroups}</strong> grupo(s) de rotación (mínimo 2 cuentas/grupo)</span>
                     </div>
                   );
                 })()}
+
+                {/* Mensaje informativo si no hay cuentas compatibles suficientes */}
+                {family && leaderCandidates.length === 0 && (
+                  <div className="group-family-warning" style={{ margin: '16px 0', padding: '14px', borderRadius: 8, background: 'rgba(234, 179, 8, 0.1)', border: '1px solid rgba(234, 179, 8, 0.3)' }} data-testid="no-compatible-accounts-alert">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: '#facc15', marginBottom: 4 }}>
+                      <span>ℹ️</span>
+                      <span>No hay cuentas libres compatibles para armar un nuevo pool de {effectiveFamily ? effectiveFamily.label : 'esta familia'}</span>
+                    </div>
+                    <p style={{ margin: 0, fontSize: 13, color: '#cbd5e1', lineHeight: 1.5 }}>
+                      Se requieren al menos 2 cuentas disponibles (1 titular y 1 reserva). Tus cuentas actuales ya están operando dentro de los pools activos. Puedes liberar cuentas existentes en la pestaña <strong>"💥 Disolver / Desagrupar Pools"</strong> o vincular una nueva cuenta en CPAMC.
+                    </p>
+                  </div>
+                )}
 
                 {/* Cuenta Principal + Prefijo Base */}
                 <div className="group-inline-row">
                   <div className="group-field group-field-account">
                     <label className="group-label">
                       <span>👑</span>
-                      <span>Titular del Pool (Líder Activo):</span>
+                      <span>Titular del Pool (Líder Activo en RAM):</span>
                     </label>
                     <select
                       className="group-select"
                       value={selectedActiveNodeId}
-                      disabled={!family}
+                      disabled={!family || leaderCandidates.length === 0}
                       onChange={(e) => handleSelectActiveNode(e.target.value)}
                       data-testid="select-active-account"
                     >
                       <option value="">
                         {family
-                          ? '-- Selecciona la cuenta titular libre --'
+                          ? (leaderCandidates.length === 0 ? '-- Sin cuentas disponibles para esta familia --' : '-- Selecciona la cuenta titular libre --')
                           : '⚠️ Elige primero la familia de modelos'}
                       </option>
                       {leaderCandidates.map(({ node: n, virtual }) => {
@@ -1461,18 +1714,13 @@ export default function GroupManager({
                         );
                       })}
                     </select>
-                    {family && leaderCandidates.length === 0 && (
-                      <div className="group-family-warning" data-testid="no-compatible-accounts-alert">
-                        ℹ️ No hay cuentas libres compatibles con <strong>{effectiveFamily ? effectiveFamily.label : 'esta familia'}</strong>. Las cuentas ya asignadas a otros pools aparecen en la pestaña "💥 Disolver / Desagrupar Pools".
-                      </div>
-                    )}
-                    <p className="group-field-hint">Al elegir la cuenta, su prefijo de auth-file se carga automáticamente.</p>
+                    <p className="group-field-hint">Esta cuenta encabezará la rotación inicial del pool soberano.</p>
                   </div>
 
                   <div className="group-field group-field-prefix">
                     <label className="group-label">
                       <span>🏷️</span>
-                      <span>Prefijo Virtual (Ruta de Pool):</span>
+                      <span>Ruta Soberana del Pool (Nombre en /model):</span>
                     </label>
                     <input
                       type="text"
@@ -1495,7 +1743,7 @@ export default function GroupManager({
                       </div>
                     )}
                     <div className="group-prefix-chips">
-                      <span style={{ fontSize: 11, color: '#64748b', alignSelf: 'center' }}>Sugerencias:</span>
+                      <span style={{ fontSize: 11, color: '#64748b', alignSelf: 'center' }}>Sugerido:</span>
                       {effectiveFamily && (
                         <button
                           type="button"
@@ -1505,37 +1753,6 @@ export default function GroupManager({
                           {suggestNextBasePrefix(nodes, effectiveFamily.hintPrefix)} (próximo libre)
                         </button>
                       )}
-                      {!family && (
-                        <>
-                          <button
-                            type="button"
-                            className="group-prefix-chip"
-                            onClick={() => {
-                              handleSelectFamily('gemini');
-                              handleSelectGeminiSubtype('pure');
-                            }}
-                          >
-                            🔷 agy (Gemini)
-                          </button>
-                          <button
-                            type="button"
-                            className="group-prefix-chip"
-                            onClick={() => {
-                              handleSelectFamily('gemini');
-                              handleSelectGeminiSubtype('claude');
-                            }}
-                          >
-                            🔶 agy_clau (Claude)
-                          </button>
-                          <button
-                            type="button"
-                            className="group-prefix-chip"
-                            onClick={() => handleSelectFamily('codex')}
-                          >
-                            🧩 codex
-                          </button>
-                        </>
-                      )}
                     </div>
                   </div>
                 </div>
@@ -1544,7 +1761,7 @@ export default function GroupManager({
                 <div className="group-field">
                   <label className="group-label">
                     <span>🛡️</span>
-                    <span>Banco de Suplentes (Reservas Invisibles en /model):</span>
+                    <span>Banco de Suplentes (Reservas en RAM · Failover transparente):</span>
                   </label>
                   {reserveCandidates.length === 0 ? (
                     <div style={{ color: '#64748b', fontSize: 12, padding: 8 }}>
@@ -1769,6 +1986,209 @@ export default function GroupManager({
         </div>
       )}
 
+      {/* Pestaña: Adoptar / Sumar Reservas a Pools Existentes */}
+      {activeTab === 'adopt' && (
+        <div className="group-manager-content" data-testid="adopt-reserves-view">
+          <div className="group-builder-col" style={{ maxWidth: 840, margin: '0 auto', width: '100%' }}>
+            <div className="group-card">
+              <h3 className="group-card-title">
+                <span>➕</span>
+                <span>Adoptar Cuenta Libre como Reserva de un Pool</span>
+              </h3>
+              <p style={{ color: '#94a3b8', fontSize: 13, lineHeight: 1.5, margin: '0 0 16px 0' }}>
+                Si agregaste una cuenta nueva en <strong>Auth Files Management</strong> nativo de CPAMC, puedes incorporarla directamente a cualquiera de tus pools activos sin tener que desarmar ni disolver tus grupos existentes.
+              </p>
+
+              {freeNodes.length === 0 ? (
+                <div className="group-empty-alert" style={{ margin: '16px 0' }} data-testid="no-free-accounts-adopt-alert">
+                  <span className="group-alert-icon">✨</span>
+                  <h4 className="group-alert-title">No hay cuentas libres pendientes</h4>
+                  <p className="group-alert-desc">
+                    Todas las cuentas de OAuth registradas ya están asignadas a un pool activo. Si agregas una cuenta nueva en CPAMC o liberas una reserva, aparecerá aquí automáticamente.
+                  </p>
+                </div>
+              ) : existingPools.length === 0 ? (
+                <div className="group-empty-alert" style={{ margin: '16px 0' }}>
+                  <span className="group-alert-icon">⚠️</span>
+                  <h4 className="group-alert-title">No hay pools activos creados</h4>
+                  <p className="group-alert-desc">
+                    Para adoptar reservas, primero debes estructurar al menos un pool en la pestaña <strong>"⚡ Armar Nuevo Pool"</strong>.
+                  </p>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                  {/* Selector 1: Cuenta Libre */}
+                  <div className="group-field">
+                    <label className="group-label">
+                      <span>🔑</span>
+                      <span>① Selecciona la Cuenta Libre a incorporar:</span>
+                    </label>
+                    <select
+                      className="group-select"
+                      value={adoptAccountNodeId || freeNodes[0]?.id || ''}
+                      onChange={(e) => setAdoptAccountNodeId(e.target.value)}
+                      data-testid="select-adopt-account"
+                      style={{ fontSize: 13, padding: '10px 14px' }}
+                    >
+                      {freeNodes.map((fn) => {
+                        const email = fn.data?.email || fn.data?.fileName || fn.id;
+                        const prov = (fn.data?.provider || fn.data?.accountType || 'ANTIGRAVITY').toUpperCase();
+                        return (
+                          <option key={fn.id} value={fn.id}>
+                            🔑 {email} ({prov})
+                          </option>
+                        );
+                      })}
+                    </select>
+                    <p className="group-field-hint">
+                      Cuentas autenticadas físicamente en CPAMC que no tienen ningún grupo o prefijo asignado.
+                    </p>
+                  </div>
+
+                  {/* Selector 2: Pool Destino */}
+                  <div className="group-field">
+                    <label className="group-label">
+                      <span>📦</span>
+                      <span>② Selecciona el Pool Destino que la adoptará:</span>
+                    </label>
+                    <select
+                      className="group-select"
+                      value={adoptTargetPool || existingPools[0]?.basePrefix || ''}
+                      onChange={(e) => {
+                        const newPoolBase = e.target.value;
+                        setAdoptTargetPool(newPoolBase);
+                        const pDef = registeredPools.find((p) => p.base_prefix === newPoolBase);
+                        const defMod = Array.isArray(pDef?.policy?.target_models) && pDef.policy.target_models[0]
+                          ? pDef.policy.target_models[0]
+                          : '';
+                        setAdoptSpecialistModel(defMod);
+                      }}
+                      data-testid="select-adopt-target-pool"
+                      style={{ fontSize: 13, padding: '10px 14px' }}
+                    >
+                      {existingPools.map((p, idx) => {
+                        const leaderEmail = p.root?.data?.email || p.root?.data?.fileName || 'Líder';
+                        const count = (p.root ? 1 : 0) + p.reserves.length;
+                        const label = p.displayName || `Pool ${idx + 1}`;
+                        return (
+                          <option key={p.id || p.basePrefix} value={p.basePrefix}>
+                            📦 {label} [{p.basePrefix}] (ID: {p.id || p.basePrefix}) — Líder: {leaderEmail} ({count} cuentas)
+                          </option>
+                        );
+                      })}
+                    </select>
+                    <p className="group-field-hint">
+                      La cuenta se sumará como Reserva adicional (ej. <code>{adoptTargetPool || existingPools[0]?.basePrefix}_N</code>) y responderá cuando el líder o reservas previas agoten su cuota.
+                    </p>
+                  </div>
+
+                  {/* Selector 3: Modelo Especialista que Adoptará la Cuenta */}
+                  {(() => {
+                    const currentTargetBase = adoptTargetPool || existingPools[0]?.basePrefix || '';
+                    const poolDef = registeredPools.find((p) => p.base_prefix === currentTargetBase);
+                    const poolFamily = poolDef?.family || (currentTargetBase.startsWith('clau') || currentTargetBase.startsWith('agy_son') || currentTargetBase.startsWith('agy_clau') ? 'gemini_sonnet' : currentTargetBase.startsWith('agy_opus') ? 'gemini_opus' : 'gemini_pure');
+
+                    let candidateModels = [];
+                    if (poolFamily.includes('sonnet')) {
+                      candidateModels = ['claude-sonnet-4-6', 'claude-sonnet-5-5-high'];
+                    } else if (poolFamily.includes('opus')) {
+                      candidateModels = ['claude-opus-4-6-thinking', 'claude-opus-5-5-high'];
+                    } else if (poolFamily.includes('claude')) {
+                      candidateModels = ['claude-sonnet-4-6', 'claude-3-7-sonnet', 'claude-3-5-haiku', 'claude-opus-4-6-thinking'];
+                    } else if (poolFamily.includes('codex')) {
+                      candidateModels = ['gpt-4o', 'gpt-4o-mini', 'o1-preview', 'o3-mini'];
+                    } else {
+                      candidateModels = [
+                        'gemini-3.8-flash-high',
+                        'gemini-3.7-flash-high',
+                        'gemini-3.6-flash-high',
+                        'gemini-3.5-flash-lite',
+                        'gemini-3.1-pro-low',
+                        'gemini-3.1-flash-lite',
+                        'gemini-3.1-flash-image',
+                        'gemini-3-flash',
+                        'gemini-pro-agent',
+                      ];
+                    }
+
+                    const poolCurrentModel =
+                      (Array.isArray(poolDef?.policy?.target_models) && poolDef.policy.target_models[0]) ||
+                      candidateModels[0];
+
+                    const effectiveSelectedModel = adoptSpecialistModel && candidateModels.includes(adoptSpecialistModel)
+                      ? adoptSpecialistModel
+                      : poolCurrentModel;
+
+                    return (
+                      <div className="bento-specialist-box" data-testid="adopt-specialist-box" style={{ marginTop: 4 }}>
+                        <div className="bento-specialist-head">
+                          <span className="bento-specialist-title">🎯 ③ Modelo Especialista que Adoptará la Cuenta</span>
+                          <span className="bento-specialist-badge">1 Pool = 1 Modelo</span>
+                        </div>
+                        <select
+                          className="group-select bento-specialist-select"
+                          value={effectiveSelectedModel}
+                          onChange={(e) => setAdoptSpecialistModel(e.target.value)}
+                          data-testid="select-adopt-specialist-model"
+                        >
+                          {candidateModels.map((mod) => (
+                            <option key={mod} value={mod}>
+                              {mod === poolCurrentModel
+                                ? `${mod} ⭐ (Por defecto del Pool [${currentTargetBase}])`
+                                : mod}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="bento-specialist-hint">
+                          🔒 Por defecto hereda el modelo especialista del pool (<code>{poolCurrentModel}</code>) para garantizar aislamiento de cuota 100% uniforme en toda la cascada.
+                        </p>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Botón de Acción Principal */}
+                  <div style={{ marginTop: 8 }}>
+                    <button
+                      type="button"
+                      disabled={isSubmitting}
+                      onClick={() => {
+                        const targetId = adoptAccountNodeId || freeNodes[0]?.id;
+                        const found = freeNodes.find((fn) => fn.id === targetId) || freeNodes[0];
+                        const targetPool = adoptTargetPool || existingPools[0]?.basePrefix;
+                        const pDef = registeredPools.find((p) => p.base_prefix === targetPool);
+                        const defaultMod = (Array.isArray(pDef?.policy?.target_models) && pDef.policy.target_models[0]) || 'gemini-3.8-flash-high';
+                        const chosenModel = adoptSpecialistModel || defaultMod;
+                        if (found && targetPool) {
+                          handleAdoptAccountIntoPool(targetPool, found, chosenModel);
+                        }
+                      }}
+                      data-testid="btn-quick-adopt"
+                      style={{
+                        padding: '12px 24px',
+                        background: 'linear-gradient(135deg, #0284c7 0%, #2563eb 100%)',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 8,
+                        fontSize: 13,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        boxShadow: '0 4px 14px rgba(2, 132, 199, 0.35)',
+                      }}
+                    >
+                      <span>➕</span>
+                      <span>{isSubmitting ? 'Incorporando cuenta...' : 'Adoptar como Nueva Reserva'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Pestaña: Disolver / Desagrupar Pools */}
       {activeTab === 'dissolve' && (
         <div className="group-pools-grid" data-testid="dissolve-pools-grid">
@@ -1777,10 +2197,24 @@ export default function GroupManager({
               No se detectaron pools estructurados en el sistema actualmente.
             </div>
           ) : (
-            existingPools.map((pool) => (
-              <div key={pool.basePrefix} className="group-pool-card" data-testid={`pool-card-${pool.basePrefix}`}>
+            existingPools.map((pool, poolIdx) => {
+              const poolCleanName = pool.displayName || `Pool-${String(poolIdx + 1).padStart(2, '0')}-gemini`;
+              const leaderFile = pool.root?.data?.fileName || pool.root?.name || pool.root?.id || '';
+              const leaderModel = (pool.memberModels && pool.memberModels[leaderFile]) || pool.targetModel || 'gemini-3.8-flash-high';
+              const leaderPref = pool.root?.data?.prefix || pool.basePrefix;
+
+              return (
+              <div key={pool.id || pool.basePrefix} className="group-pool-card" data-testid={`pool-card-${pool.basePrefix}`}>
                 <div className="group-pool-header">
-                  <h4 className="group-pool-title">{pool.basePrefix}</h4>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: '#38bdf8', background: 'rgba(56, 189, 248, 0.12)', padding: '2px 8px', borderRadius: 4, border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+                      📦 {poolCleanName}
+                    </span>
+                    <h4 className="group-pool-title">{pool.basePrefix}</h4>
+                    <span style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'monospace', background: 'rgba(148, 163, 184, 0.1)', padding: '2px 6px', borderRadius: 4 }} title="En /model aparece limpio como este identificador">
+                      /model: {poolCleanName}
+                    </span>
+                  </div>
                   <span style={{ fontSize: 11, background: 'rgba(168, 85, 247, 0.2)', color: '#d8b4fe', padding: '2px 8px', borderRadius: 4 }}>
                     {(pool.root ? 1 : 0) + pool.reserves.length} cuentas
                   </span>
@@ -1789,10 +2223,13 @@ export default function GroupManager({
                 <div className="group-pool-members">
                   {pool.root && (
                     <div className="group-pool-member-row">
-                      <span style={{ color: '#fbbf24', fontWeight: 600 }}>👑 {pool.root.data?.email || pool.root.data?.fileName}</span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ color: '#fbbf24', fontWeight: 600 }}>1️⃣ 👑 {pool.root.data?.email || pool.root.data?.fileName}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                         <span style={{ fontFamily: 'monospace', color: '#fbbf24', fontWeight: 700 }}>
-                          [{pool.root.data?.prefix || pool.basePrefix}]
+                          [{leaderPref}]
+                        </span>
+                        <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#38bdf8', background: 'rgba(14, 165, 233, 0.12)', padding: '1px 6px', borderRadius: 4, border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+                          {leaderPref}/{leaderModel}
                         </span>
                         <span style={{
                           fontSize: 9,
@@ -1802,19 +2239,127 @@ export default function GroupManager({
                           padding: '2px 6px',
                           borderRadius: 4,
                           border: '1px solid rgba(234, 179, 8, 0.4)',
-                        }}>
+                        }}
+                        title="Líder dinámico ficticio en RAM: Auto Switcher Pro rota este rol automáticamente según disponibilidad y anti-429"
+                        >
                           LEADER
+                        </span>
+                        <span style={{
+                          fontSize: 9,
+                          fontWeight: 700,
+                          background: 'rgba(56, 189, 248, 0.15)',
+                          color: '#38bdf8',
+                          padding: '2px 6px',
+                          borderRadius: 4,
+                          border: '1px solid rgba(56, 189, 248, 0.35)',
+                        }}>
+                          🔄 DINÁMICO
                         </span>
                       </div>
                     </div>
                   )}
-                  {pool.reserves.map(({ node, prefix }) => (
+                  {pool.reserves.map(({ node, prefix }, rIdx) => {
+                    const rFile = node.data?.fileName || node.name || node.id || '';
+                    const rModel = (pool.memberModels && pool.memberModels[rFile]) || pool.targetModel || 'gemini-3.8-flash-high';
+                    const numBadge = rIdx === 0 ? '2️⃣' : rIdx === 1 ? '3️⃣' : `${rIdx + 2}️⃣`;
+                    return (
                     <div key={node.id} className="group-pool-member-row">
-                      <span style={{ color: '#7dd3fc' }}>🛡️ {node.data?.email || node.data?.fileName}</span>
-                      <span style={{ fontFamily: 'monospace', color: '#94a3b8' }}>[{prefix}]</span>
+                      <span style={{ color: '#7dd3fc' }}>{numBadge} 🛡️ {node.data?.email || node.data?.fileName}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <span style={{ fontFamily: 'monospace', color: '#94a3b8' }}>[{prefix}]</span>
+                        <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#7dd3fc', background: 'rgba(14, 165, 233, 0.08)', padding: '1px 6px', borderRadius: 4, border: '1px solid rgba(125, 211, 252, 0.25)' }}>
+                          {prefix}/{rModel}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleReleaseReserve(pool.basePrefix, node)}
+                          disabled={isSubmitting}
+                          title="Liberar solo esta cuenta de reserva sin disolver el pool"
+                          data-testid={`btn-release-reserve-${pool.basePrefix}-${node.id}`}
+                          style={{
+                            background: 'rgba(239, 68, 68, 0.12)',
+                            border: '1px solid rgba(239, 68, 68, 0.3)',
+                            color: '#fca5a5',
+                            borderRadius: 4,
+                            padding: '1px 6px',
+                            fontSize: 10,
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
                     </div>
-                  ))}
+                  );
+                  })}
                 </div>
+
+                {/* Sección de Adopción Directa dentro de la tarjeta del Pool */}
+                {freeNodes.length > 0 && (
+                  <div
+                    data-testid={`card-adopt-section-${pool.basePrefix}`}
+                    style={{
+                      marginTop: 10,
+                      padding: '8px 10px',
+                      background: 'rgba(56, 189, 248, 0.08)',
+                      border: '1px dashed rgba(56, 189, 248, 0.35)',
+                      borderRadius: 6,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 6,
+                    }}
+                  >
+                    <span style={{ fontSize: 11, color: '#38bdf8', fontWeight: 700 }}>
+                      ➕ Adoptar cuenta libre en [{pool.basePrefix}]:
+                    </span>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <select
+                        className="group-select"
+                        style={{ flex: 1, padding: '4px 8px', fontSize: 11 }}
+                        value={cardAdoptSelections[pool.basePrefix] || freeNodes[0]?.id || ''}
+                        onChange={(e) =>
+                          setCardAdoptSelections((prev) => ({
+                            ...prev,
+                            [pool.basePrefix]: e.target.value,
+                          }))
+                        }
+                        data-testid={`select-card-adopt-${pool.basePrefix}`}
+                      >
+                        {freeNodes.map((fn) => (
+                          <option key={fn.id} value={fn.id}>
+                            {fn.data?.email || fn.data?.fileName || fn.id}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        disabled={isSubmitting}
+                        onClick={() => {
+                          const selId = cardAdoptSelections[pool.basePrefix] || freeNodes[0]?.id;
+                          const targetNode = freeNodes.find((fn) => fn.id === selId) || freeNodes[0];
+                          if (targetNode) {
+                            handleAdoptAccountIntoPool(pool.basePrefix, targetNode);
+                          }
+                        }}
+                        data-testid={`btn-card-adopt-${pool.basePrefix}`}
+                        style={{
+                          background: '#0284c7',
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: 5,
+                          padding: '4px 10px',
+                          fontSize: 11,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        ➕ Adoptar
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <button
                   type="button"
@@ -1841,7 +2386,8 @@ export default function GroupManager({
                   <span>Disolver Pool (Liberar Cuentas)</span>
                 </button>
               </div>
-            ))
+              );
+            })
           )}
         </div>
       )}

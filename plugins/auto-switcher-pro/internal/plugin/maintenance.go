@@ -759,8 +759,9 @@ func cleanHealth(authDir string) (CleanResult, error) {
 		delete(cred, "excludedModels")
 		newData, err := json.MarshalIndent(cred, "", "  ")
 		if err == nil {
-			_ = os.WriteFile(filePath, newData, 0644)
-			res.CleanedFiles = append(res.CleanedFiles, e.Name())
+			if wErr := atomicWriteFile(filePath, newData, 0644); wErr == nil {
+				res.CleanedFiles = append(res.CleanedFiles, e.Name())
+			}
 		}
 	}
 
@@ -899,14 +900,14 @@ func updateConsole(staticDir string) (UpdateConsoleResult, error) {
 
 	// 5. Create backup of current management.html
 	if curData, err := os.ReadFile(mgmtPath); err == nil {
-		_ = os.WriteFile(bakPath, curData, 0644)
+		_ = atomicWriteFile(bakPath, curData, 0644)
 	}
 
 	// 6. Atomic replacement
 	if err := os.Rename(tmpPath, mgmtPath); err != nil {
 		// Rollback if failed
 		if bakData, bErr := os.ReadFile(bakPath); bErr == nil {
-			_ = os.WriteFile(mgmtPath, bakData, 0644)
+			_ = atomicWriteFile(mgmtPath, bakData, 0644)
 		}
 		return res, fmt.Errorf("reemplazo atómico falló: %w", err)
 	}

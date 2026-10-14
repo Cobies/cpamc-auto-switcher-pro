@@ -40,9 +40,23 @@ Cualquier cambio realizado en la interfaz web de CPAMC (GroupManager / PrefixMan
 
 ---
 
-## 📦 Instalación y Homologación Canónica
+## 📦 Instalación Rápida All-in-One (Recomendada)
 
-Para enlazar la extensión en cualquier sabor de Pi:
+Ejecuta el instalador universal interactivo compatible con **Localhost, LAN y VPS**:
+
+```bash
+# Modo interactivo guiado:
+curl -sSL https://raw.githubusercontent.com/WiloxDev/cpamc-auto-switcher-pro/main/scripts/install-all.sh | bash
+
+# O apuntando directamente a un VPS remoto:
+curl -sSL https://raw.githubusercontent.com/WiloxDev/cpamc-auto-switcher-pro/main/scripts/install-all.sh | bash -s -- --url "https://ai.midominio.com:8317" --key "mi-clave"
+```
+
+---
+
+## 📦 Instalación Manual / Homologación Canónica
+
+Para enlazar la extensión manualmente en cualquier sabor de Pi:
 
 ### 1. Para Gentle-Shell
 ```bash

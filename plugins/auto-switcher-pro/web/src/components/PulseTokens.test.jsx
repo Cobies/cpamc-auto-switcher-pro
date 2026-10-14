@@ -156,4 +156,70 @@ describe('PulseTokens Component - Telemetry Dashboard & Kaizen Engine', () => {
     fireEvent.change(input, { target: { value: 'RESET' } });
     expect(confirmBtn.disabled).toBe(false);
   });
+
+  it('homologates sovereign pools and live metrics from rotations.db', async () => {
+    const mgmt = await import('../api/managementClient');
+    vi.spyOn(mgmt, 'apiFetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        totals: {
+          total_requests: 120,
+          leader_requests: 115,
+          failover_rescues: 5,
+          failover_rate_pct: 4.16,
+        },
+        timeline_hourly: [
+          { hour: '14:00', requests: 120, failovers: 5 }
+        ],
+        pools: [
+          {
+            pool_id: 'Pool-01-gemini',
+            pool_prefix: 'agy',
+            family: 'gemini_pure',
+            model: 'gemini-3.8-flash-high',
+            requests: 120,
+            failovers: 5,
+          }
+        ],
+        accounts: [
+          {
+            email: 'active-leader@gmail.com',
+            pool_id: 'Pool-01-gemini',
+            pool_prefix: 'agy',
+            role: 'Líder (Pool-01-gemini)',
+            requests: 115,
+            share_pct: 95.8,
+            status: 'Activa',
+          },
+          {
+            email: 'reserve-one@gmail.com',
+            pool_id: 'Pool-01-gemini',
+            pool_prefix: 'agy',
+            role: 'Reserva 1 (Pool-01-gemini)',
+            requests: 5,
+            share_pct: 4.2,
+            status: 'Rescató peticiones por 429',
+          }
+        ],
+        database: {
+          path: 'plugins/rotations.db',
+          mode: 'WAL',
+          records: 120,
+          size_kb: 48,
+        }
+      })
+    });
+
+    render(<PulseTokens />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('pulse-tokens-view')).toBeTruthy();
+    });
+
+    // Validar que se renderiza el pool soberano con su badge
+    expect(screen.getAllByText(/Pool-01-gemini/).length).toBeGreaterThan(0);
+    // Validar que se muestran las cuentas reales vinculadas al pool
+    expect(screen.getByText(/Líder \(Pool-01-gemini\)/)).toBeTruthy();
+  });
 });

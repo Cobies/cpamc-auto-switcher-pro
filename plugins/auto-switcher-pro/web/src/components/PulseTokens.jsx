@@ -79,7 +79,7 @@ const I18N = {
   },
 };
 
-export default function PulseTokens() {
+export default function PulseTokens({ onNavigateTab }) {
   const [lang, setLang] = useState('es');
   const [range, setRange] = useState('24h');
   const [compare, setCompare] = useState(true);
@@ -492,7 +492,9 @@ export default function PulseTokens() {
             </div>
             <div className="pt-kpi-sub-row">
               <span>Output / Think:</span>
-              <strong>{(totals.completion_tokens / 1_000).toFixed(1)}k / {(totals.thinking_tokens / 1_000).toFixed(1)}k</strong>
+              <strong>
+                {(totals.completion_tokens / 1_000).toFixed(1)}k / {((totals.thinking_tokens || totals.reasoning_tokens || 0) / 1_000).toFixed(1)}k
+              </strong>
             </div>
           </div>
         </div>
@@ -650,63 +652,67 @@ export default function PulseTokens() {
             <line x1="0" y1="30" x2="1000" y2="30" stroke="#232936" strokeDasharray="3 3" />
 
             {/* Barras de Tokens por Hora */}
-            {activeTimeline.map((b, idx) => {
-              const x = (idx / activeTimeline.length) * 980 + 10;
-              const barWidth = Math.max(12, 980 / activeTimeline.length - 8);
-              const maxTokens = 30; // escala 30M
-              const height = Math.min(140, (b.tokensM / maxTokens) * 140);
-              const y = 170 - height;
-              const isPeak = b.hour === '02:00';
+            {(() => {
+              const peakTokens = Math.max(...activeTimeline.map((b) => b.tokensM || 0), 1.0);
+              const maxTokensScale = Math.max(peakTokens * 1.25, 2.0); // Auto-escala dinámica adaptativa
 
-              return (
-                <g
-                  key={b.hour}
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => setFilterHour(filterHour === b.hour ? null : b.hour)}
-                >
-                  {/* Barra Principal (Tokens) */}
-                  <rect
-                    x={x}
-                    y={y}
-                    width={barWidth}
-                    height={height}
-                    fill={isPeak ? '#eab308' : '#38bdf8'}
-                    rx="3"
-                    opacity={filterHour && filterHour !== b.hour ? 0.3 : 0.85}
+              return activeTimeline.map((b, idx) => {
+                const x = (idx / activeTimeline.length) * 980 + 10;
+                const barWidth = Math.max(12, 980 / activeTimeline.length - 8);
+                const height = Math.min(140, ((b.tokensM || 0) / maxTokensScale) * 140);
+                const y = 170 - height;
+                const isPeak = snapshot.peakBucket?.hour === b.hour;
+
+                return (
+                  <g
+                    key={b.hour}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => setFilterHour(filterHour === b.hour ? null : b.hour)}
                   >
-                    <title>{`${b.hour} · ${b.tokensM}M tokens · ${b.reqs} requests · Latencia: ${b.p50}ms ${b.errors ? `· Errores: ${b.errors}` : ''}`}</title>
-                  </rect>
-
-                  {/* Marcas de Error (§6.6.3) */}
-                  {b.errors > 0 && (
-                    <circle
-                      cx={x + barWidth / 2}
-                      cy="182"
-                      r="4"
-                      fill="#ef4444"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setErrorModalOpen(true);
-                      }}
+                    {/* Barra Principal (Tokens) */}
+                    <rect
+                      x={x}
+                      y={y}
+                      width={barWidth}
+                      height={height}
+                      fill={isPeak ? '#eab308' : '#38bdf8'}
+                      rx="3"
+                      opacity={filterHour && filterHour !== b.hour ? 0.3 : 0.85}
                     >
-                      <title>{`Error ${b.error_type} en ${b.hour}`}</title>
-                    </circle>
-                  )}
+                      <title>{`${b.hour} · ${b.tokensM}M tokens · ${b.reqs} requests · Latencia: ${b.p50}ms ${b.errors ? `· Errores: ${b.errors}` : ''}`}</title>
+                    </rect>
 
-                  {/* Etiqueta de Hora */}
-                  <text
-                    x={x + barWidth / 2}
-                    y="196"
-                    fontSize="9"
-                    fill="#64748b"
-                    textAnchor="middle"
-                    fontFamily="monospace"
-                  >
-                    {b.hour.slice(0, 2)}
-                  </text>
-                </g>
-              );
-            })}
+                    {/* Marcas de Error (§6.6.3) */}
+                    {b.errors > 0 && (
+                      <circle
+                        cx={x + barWidth / 2}
+                        cy="182"
+                        r="4"
+                        fill="#ef4444"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setErrorModalOpen(true);
+                        }}
+                      >
+                        <title>{`Error ${b.error_type} en ${b.hour}`}</title>
+                      </circle>
+                    )}
+
+                    {/* Etiqueta de Hora */}
+                    <text
+                      x={x + barWidth / 2}
+                      y="196"
+                      fontSize="9"
+                      fill="#64748b"
+                      textAnchor="middle"
+                      fontFamily="monospace"
+                    >
+                      {b.hour.slice(0, 2)}
+                    </text>
+                  </g>
+                );
+              });
+            })()}
 
             {/* Línea de Latencia Superpuesta (§6.6.2) */}
             {showLatencyLine && (
@@ -799,20 +805,45 @@ export default function PulseTokens() {
               </tr>
             </thead>
             <tbody>
-              {snapshot.models.map((m) => (
-                <tr key={`${m.model}-${m.provider}`}>
-                  <td><strong>{m.model}</strong></td>
-                  <td style={{ color: 'var(--pt-muted)' }}>{m.provider}</td>
-                  <td>{(m.total_tokens / 1_000_000).toFixed(1)}M</td>
-                  <td>${m.est_value_usd.toFixed(2)}</td>
-                  <td>{(m.latency_p50_ms / 1000).toFixed(1)}s</td>
-                  <td>
-                    <span className={`pt-score-pill ${m.efficiency_score > 80 ? 'pt-score-high' : m.efficiency_score > 50 ? 'pt-score-mid' : 'pt-score-low'}`}>
-                      {m.efficiency_score}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              {snapshot.models.map((m) => {
+                const parts = m.model.split('/');
+                const hasPrefix = parts.length > 1;
+                const poolPrefix = hasPrefix ? parts[0] : null;
+                const cleanModel = hasPrefix ? parts.slice(1).join('/') : m.model;
+
+                return (
+                  <tr key={`${m.model}-${m.provider}`}>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {poolPrefix && (
+                          <span style={{
+                            background: 'rgba(56, 189, 248, 0.15)',
+                            color: '#38bdf8',
+                            border: '1px solid rgba(56, 189, 248, 0.3)',
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            fontSize: '10px',
+                            fontWeight: 700,
+                            fontFamily: 'monospace',
+                          }}>
+                            📦 {poolPrefix}
+                          </span>
+                        )}
+                        <strong>{cleanModel}</strong>
+                      </div>
+                    </td>
+                    <td style={{ color: 'var(--pt-muted)' }}>{m.provider}</td>
+                    <td>{(m.total_tokens / 1_000_000).toFixed(1)}M</td>
+                    <td>${m.est_value_usd.toFixed(2)}</td>
+                    <td>{(m.latency_p50_ms / 1000).toFixed(1)}s</td>
+                    <td>
+                      <span className={`pt-score-pill ${m.efficiency_score > 80 ? 'pt-score-high' : m.efficiency_score > 50 ? 'pt-score-mid' : 'pt-score-low'}`}>
+                        {m.efficiency_score}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -820,12 +851,44 @@ export default function PulseTokens() {
 
       {/* 6. Tabla de Cuentas y Reparto de Carga (§6.9) */}
       <div className="pt-section-card" data-testid="accounts-section">
-        <div className="pt-card-title">
-          <span>👥 {t.accountsTitle}</span>
+        <div className="pt-card-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>👥 {t.accountsTitle}</span>
+            {isAccountOverloaded && (
+              <span style={{ fontSize: 11, color: '#fde047', fontWeight: 600 }}>
+                ⚠️ {t.loadAlert}
+              </span>
+            )}
+          </div>
           {isAccountOverloaded && (
-            <span style={{ fontSize: 11, color: '#fde047', fontWeight: 600 }}>
-              ⚠️ {t.loadAlert}
-            </span>
+            <button
+              type="button"
+              onClick={() => {
+                if (typeof onNavigateTab === 'function') {
+                  onNavigateTab('switcher');
+                } else if (typeof window !== 'undefined') {
+                  window.location.hash = '#/switcher';
+                }
+              }}
+              style={{
+                background: 'rgba(234, 179, 8, 0.15)',
+                color: '#facc15',
+                border: '1px solid rgba(234, 179, 8, 0.4)',
+                borderRadius: '6px',
+                padding: '4px 10px',
+                fontSize: '11px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                transition: 'all 0.2s',
+              }}
+              title="Ir a Control Switcher para rotar cuenta manualmente"
+            >
+              <span>🔄</span>
+              <span>Rebalancear en Control Switcher</span>
+            </button>
           )}
         </div>
         <table className="pt-table">

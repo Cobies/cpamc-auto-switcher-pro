@@ -144,6 +144,34 @@ function ProfileNode({ id, data, isConnectable }) {
           <span className={`profile-badge ${isRoot ? 'badge-root' : 'badge-child'}`}>
             {isRoot ? 'ROOT' : 'CHILD'}
           </span>
+          {data?.poolId && (
+            <span
+              className="profile-badge badge-pool-id"
+              style={{
+                backgroundColor: 'rgba(56, 189, 248, 0.2)',
+                color: '#38bdf8',
+                border: '1px solid rgba(56, 189, 248, 0.4)',
+                fontWeight: 800,
+              }}
+              title={`Asignado a ${data.poolId}`}
+            >
+              📦 {data.poolId}
+            </span>
+          )}
+          {data?.isRAMLeader && (
+            <span
+              className="profile-badge badge-ram-leader"
+              style={{
+                backgroundColor: 'rgba(234, 179, 8, 0.2)',
+                color: '#facc15',
+                border: '1px solid rgba(234, 179, 8, 0.4)',
+                fontWeight: 700,
+              }}
+              title="Líder Activo en RAM (absorbiendo tráfico actual)"
+            >
+              👑 RAM
+            </span>
+          )}
           {accountType && (
             <span
               className={`profile-badge badge-account-type badge-type-${accountType.toLowerCase()}`}
@@ -244,11 +272,17 @@ function ProfileNode({ id, data, isConnectable }) {
             <div className="profile-node-display">
               <div
                 className="profile-node-prefix"
-                title={currentPrefix || '(empty prefix)'}
+                title={currentPrefix || (data?.virtualPrefix ? `${data.virtualPrefix} (Pool)` : '(empty prefix)')}
                 onClick={handleStartEdit}
                 data-testid={`profile-node-prefix-${testIdKey}`}
               >
-                {currentPrefix || <span className="prefix-empty-placeholder">&lt;empty&gt;</span>}
+                {currentPrefix || (data?.virtualPrefix ? (
+                  <span className="prefix-virtual-placeholder" style={{ color: '#7dd3fc', fontWeight: 600 }}>
+                    {data.virtualPrefix}
+                  </span>
+                ) : (
+                  <span className="prefix-empty-placeholder">&lt;empty&gt;</span>
+                ))}
               </div>
               <div className="profile-node-actions nodrag nopan">
                 <button

@@ -1156,4 +1156,76 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
     expect(patchPrefixesSpy).not.toHaveBeenCalled();
     expect(deleteSpy).not.toHaveBeenCalled();
   });
+
+  it('allows adopting a single newly added free account into an existing pool as an extra reserve', async () => {
+    const existingPoolsData = [
+      {
+        id: 'pool-agy-1',
+        family: 'gemini_pure',
+        base_prefix: 'agy',
+        leader_auth: 'antigravity-leader@gmail.com.json',
+        reserves: ['antigravity-res1@gmail.com.json'],
+        policy: { disable_isolation: false, target_models: ['gemini-3.8-flash-high'] },
+      },
+    ];
+    vi.spyOn(managementClient, 'listPools').mockResolvedValue({
+      ok: true,
+      pools: existingPoolsData,
+      count: 1,
+    });
+    const savePoolSpy = vi.spyOn(managementClient, 'savePool').mockResolvedValue({ ok: true });
+    const patchSpy = vi.spyOn(managementClient, 'saveAuthFilePrefixes').mockResolvedValue({
+      successful: [{ name: 'antigravity-newfree@gmail.com.json', prefix: 'agy_2' }],
+      failed: [],
+    });
+
+    const nodesWithNewFree = [
+      {
+        id: 'antigravity-leader@gmail.com.json',
+        data: { fileName: 'antigravity-leader@gmail.com.json', email: 'leader@gmail.com', prefix: 'agy', provider: 'antigravity' },
+      },
+      {
+        id: 'antigravity-res1@gmail.com.json',
+        data: { fileName: 'antigravity-res1@gmail.com.json', email: 'res1@gmail.com', prefix: 'agy_1', provider: 'antigravity' },
+      },
+      {
+        id: 'antigravity-newfree@gmail.com.json',
+        data: { fileName: 'antigravity-newfree@gmail.com.json', email: 'newfree@gmail.com', prefix: '', provider: 'antigravity' },
+      },
+    ];
+
+    render(<GroupManager nodes={nodesWithNewFree} />);
+
+    // Ir directamente a la nueva pestaña dedicada de Adopción
+    await waitFor(() => {
+      expect(screen.getByTestId('tab-adoptar-reserva')).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTestId('tab-adoptar-reserva'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('adopt-reserves-view')).toBeTruthy();
+      expect(screen.getByTestId('select-adopt-specialist-model')).toBeTruthy();
+    });
+
+    // Verifica que preselecciona el modelo especialista por defecto del pool (gemini-3.8-flash-high)
+    const modelSelect = screen.getByTestId('select-adopt-specialist-model');
+    expect(modelSelect.value).toBe('gemini-3.8-flash-high');
+
+    fireEvent.click(screen.getByTestId('btn-quick-adopt'));
+
+    await waitFor(() => {
+      expect(patchSpy).toHaveBeenCalledWith([
+        { name: 'antigravity-newfree@gmail.com.json', prefix: 'agy_2' },
+      ]);
+      expect(savePoolSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          base_prefix: 'agy',
+          reserves: ['antigravity-res1@gmail.com.json', 'antigravity-newfree@gmail.com.json'],
+          policy: expect.objectContaining({
+            target_models: ['gemini-3.8-flash-high'],
+          }),
+        })
+      );
+    });
+  });
 });

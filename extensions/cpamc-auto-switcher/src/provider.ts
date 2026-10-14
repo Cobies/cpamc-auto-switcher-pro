@@ -31,25 +31,39 @@ type FallbackOpenAIModel = {
 };
 
 const PROVIDER_ID = "cpamc";
-const DEFAULT_BASE_URL = "http://192.168.10.150:8317";
+const DEFAULT_BASE_URL = "http://localhost:8317";
 const DEFAULT_MAX_TOKENS = 16_384;
 const MAX_SAFE_OUTPUT_TOKENS = 65_536;
 
 /**
- * Resuelve las rutas de caché de forma universal en cualquier entorno de Pi:
+ * Resuelve las rutas de caché de forma dinámica y universal:
  * - PI_CODING_AGENT_DIR si está definido
- * - ~/.pi/agent (Pi Estándar / Vanilla)
- * - ~/.pi/agent-j0k3r (J0k3r Pi)
  * - ~/.gentle-shell/agent (Gentle Shell)
+ * - Escaneo dinámico de carpetas de agentes en ~/.pi/ sin rutas fijas
  */
 function resolveCacheTargets(): string[] {
     const targets = new Set<string>();
     if (process.env.PI_CODING_AGENT_DIR) {
         targets.add(join(process.env.PI_CODING_AGENT_DIR, "cpamc-models-cache.json"));
     }
-    targets.add(join(homedir(), ".pi", "agent", "cpamc-models-cache.json"));
-    targets.add(join(homedir(), ".pi", "agent-j0k3r", "cpamc-models-cache.json"));
-    targets.add(join(homedir(), ".gentle-shell", "agent", "cpamc-models-cache.json"));
+    const home = homedir();
+    const gentleAgentDir = join(home, ".gentle-shell", "agent");
+    if (existsSync(gentleAgentDir)) {
+        targets.add(join(gentleAgentDir, "cpamc-models-cache.json"));
+    }
+    const piDir = join(home, ".pi");
+    if (existsSync(piDir)) {
+        const standardAgent = join(piDir, "agent");
+        targets.add(join(standardAgent, "cpamc-models-cache.json"));
+        try {
+            const entries = require("node:fs").readdirSync(piDir, { withFileTypes: true });
+            for (const entry of entries) {
+                if (entry.isDirectory() && entry.name.startsWith("agent")) {
+                    targets.add(join(piDir, entry.name, "cpamc-models-cache.json"));
+                }
+            }
+        } catch {}
+    }
     return Array.from(targets);
 }
 
@@ -149,11 +163,8 @@ function resolveRecommendedContextWindow(modelId: string, reportedContext?: numb
 }
 
 function resolveBaseUrl(): string {
-    const raw = (process.env.CLIPROXYAPI_BASE_URL || DEFAULT_BASE_URL).trim().replace(/\/+$/, "").replace(/\/v1$/, "");
-    if (raw.includes("127.0.0.1") || raw.includes("localhost")) {
-        return DEFAULT_BASE_URL;
-    }
-    return raw;
+    const raw = (process.env.CLIPROXYAPI_BASE_URL || process.env.CPAMC_URL || DEFAULT_BASE_URL).trim().replace(/\/+$/, "").replace(/\/v1$/, "");
+    return raw || DEFAULT_BASE_URL;
 }
 
 function requireApiKey(): string {
@@ -230,6 +241,24 @@ function toPiModelFromCPA(model: CPAModel, poolLabels?: Map<string, string>) {
     const owner = typeof model.owned_by === "string" && model.owned_by.trim() ? model.owned_by.trim() : "CLIProxyAPI";
     const displayName = typeof model.display_name === "string" && model.display_name.trim() ? model.display_name.trim() : id;
 
+    // Si es un Identificador Limpio de Pool (p. ej. Pool-01-gemini)
+    if (/^pool-\d+-/i.test(id)) {
+        return {
+            id,
+            name: `${id} (Pool Soberano · Auto Switcher Pro)`,
+            provider: PROVIDER_ID,
+            reasoning: true,
+            input: ["text", "image"] as ("text" | "image")[],
+            contextWindow,
+            maxTokens,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            ...(thinkingLevelMap ? { thinkingLevelMap } : {}),
+            reasoningEfforts: levels,
+            description: `Grupo/Pool virtual activo ${id} con balanceo predictivo y failover en caliente`,
+            displayName: id,
+        };
+    }
+
     const slash = id.indexOf("/");
     const prefix = slash > 0 ? id.slice(0, slash) : "";
     const isParent = prefix === "agy" || prefix === "agy2" || prefix === "agy_son" || prefix === "agy_opus";
@@ -302,6 +331,22 @@ function toPiModelFromOpenAI(model: FallbackOpenAIModel, poolLabels?: Map<string
 
     const openAiEfforts = isReasoning ? ["low", "medium", "high"] : [];
     const thinkingLevelMap = isReasoning ? buildStrictThinkingLevelMap(openAiEfforts) : undefined;
+
+    // Si es un Identificador Limpio de Pool (p. ej. Pool-01-gemini)
+    if (/^pool-\d+-/i.test(id)) {
+        return {
+            id,
+            name: `${id} (Pool Soberano · Auto Switcher Pro)`,
+            provider: PROVIDER_ID,
+            reasoning: isReasoning,
+            input: supportsImages ? (["text", "image"] as ("text" | "image")[]) : (["text"] as ("text" | "image")[]),
+            contextWindow,
+            maxTokens,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            ...(thinkingLevelMap ? { thinkingLevelMap } : {}),
+            reasoningEfforts: openAiEfforts,
+        };
+    }
 
     return {
         id,
@@ -409,59 +454,62 @@ async function fetchAccountPrefixesAndExclusions(baseUrl: string, signal?: Abort
         const familyActiveLeaderPrefix = new Map<string, string>();
         const prefixToFamily = new Map<string, string>();
 
-        // Consultar los pools virtuales registrados en el plugin PoolRegistry (Auto Switcher Pro)
-        try {
-            const poolsRes = await fetch(`${baseUrl}/v0/management/auto-switcher-pro/pools`, {
-                headers: {
-                    Authorization: `Bearer ${mgmtKey}`,
-                    Accept: "application/json",
-                },
-                signal: combinedSignal,
-            });
-            if (poolsRes.ok) {
-                const poolsData = (await poolsRes.json()) as {
-                    pools?: Array<{
-                        base_prefix?: string;
-                        family?: string;
-                        leader_auth?: string;
-                        policy?: { excluded_models?: string[] };
-                    }>;
-                };
-                const pools = Array.isArray(poolsData.pools) ? poolsData.pools : [];
-                
-                // Mapeo ordenado determinista: el pool base canónico (ej. 'agy' frente a 'agy2')
-                for (const pool of pools) {
-                    const basePref = typeof pool.base_prefix === "string" ? pool.base_prefix.trim() : "";
-                    if (!basePref) continue;
+        const activePoolFamilies = new Set<string>();
+        const poolAssignedPrefixes = new Set<string>();
+        const poolsRes = await fetch(`${baseUrl}/v0/management/auto-switcher-pro/pools`, {
+            headers: {
+                Authorization: `Bearer ${mgmtKey}`,
+                Accept: "application/json",
+            },
+            signal: combinedSignal,
+        });
+        if (poolsRes.ok) {
+            const poolsData = (await poolsRes.json()) as {
+                pools?: Array<{
+                    base_prefix?: string;
+                    family?: string;
+                    leader_auth?: string;
+                    reserves?: string[];
+                    members?: string[];
+                    policy?: { excluded_models?: string[] };
+                }>;
+            };
+            const pools = Array.isArray(poolsData.pools) ? poolsData.pools : [];
+            
+            // Mapeo ordenado determinista: el pool base canónico (ej. 'agy' frente a 'agy2')
+            for (const pool of pools) {
+                const basePref = typeof pool.base_prefix === "string" ? pool.base_prefix.trim() : "";
+                if (!basePref) continue;
 
-                    const fam = (typeof pool.family === "string" && pool.family.trim()) ? pool.family.trim() : "default";
-                    prefixToFamily.set(basePref, fam);
-                    validPrefixes.add(basePref);
+                // Marcar el prefijo base del pool como asignado a un pool activo
+                poolAssignedPrefixes.add(basePref.toLowerCase());
 
-                    // Determinar el líder representativo activo para la familia
-                    if (!familyActiveLeaderPrefix.has(fam)) {
+                const fam = (typeof pool.family === "string" && pool.family.trim()) ? pool.family.trim() : "default";
+                activePoolFamilies.add(fam);
+                prefixToFamily.set(basePref, fam);
+                validPrefixes.add(basePref);
+
+                // Determinar el líder representativo activo para la familia
+                if (!familyActiveLeaderPrefix.has(fam)) {
+                    familyActiveLeaderPrefix.set(fam, basePref);
+                } else {
+                    const existing = familyActiveLeaderPrefix.get(fam)!;
+                    // Priorizar prefijo canónico más corto o alfabéticamente superior ('agy' antes que 'agy2')
+                    if (basePref.length < existing.length || (basePref.length === existing.length && basePref < existing)) {
                         familyActiveLeaderPrefix.set(fam, basePref);
-                    } else {
-                        const existing = familyActiveLeaderPrefix.get(fam)!;
-                        // Priorizar prefijo canónico más corto o alfabéticamente superior ('agy' antes que 'agy2')
-                        if (basePref.length < existing.length || (basePref.length === existing.length && basePref < existing)) {
-                            familyActiveLeaderPrefix.set(fam, basePref);
-                        }
-                    }
-
-                    // Sincronizar exclusiones de la Tuerca ⚙️ de la cuenta líder del pool
-                    if (pool.leader_auth && authFileExclusions.has(pool.leader_auth)) {
-                        prefixExclusions.set(basePref, authFileExclusions.get(pool.leader_auth)!);
-                    } else if (Array.isArray(pool.policy?.excluded_models)) {
-                        prefixExclusions.set(basePref, new Set(pool.policy.excluded_models));
                     }
                 }
+
+                // Sincronizar exclusiones de la Tuerca ⚙️ de la cuenta líder del pool
+                if (pool.leader_auth && authFileExclusions.has(pool.leader_auth)) {
+                    prefixExclusions.set(basePref, authFileExclusions.get(pool.leader_auth)!);
+                } else if (Array.isArray(pool.policy?.excluded_models)) {
+                    prefixExclusions.set(basePref, new Set(pool.policy.excluded_models));
+                }
             }
-        } catch {
-            // Continuar silenciosamente si el plugin aún no está inicializado
         }
 
-        const result = { validPrefixes, prefixExclusions, familyActiveLeaderPrefix, prefixToFamily };
+        const result = { validPrefixes, prefixExclusions, familyActiveLeaderPrefix, prefixToFamily, activePoolFamilies, poolAssignedPrefixes };
         cachedFilterData = result;
         return result;
     } catch {
@@ -482,8 +530,16 @@ function isCleanIncludedModel(id: string, filterData: {
     prefixExclusions: Map<string, Set<string>>;
     familyActiveLeaderPrefix?: Map<string, string>;
     prefixToFamily?: Map<string, string>;
+    activePoolFamilies?: Set<string>;
+    poolAssignedPrefixes?: Set<string>;
 } | null): boolean {
     const trimmed = id.trim();
+
+    // 0. Si es un Identificador Limpio de Pool Canónico (p. ej. Pool-01-gemini, Pool-02-gemini)
+    if (/^pool-\d+-/i.test(trimmed)) {
+        return true;
+    }
+
     const slashIndex = trimmed.indexOf("/");
     if (slashIndex <= 0 || slashIndex >= trimmed.length - 1) {
         return false;
@@ -494,6 +550,16 @@ function isCleanIncludedModel(id: string, filterData: {
     // 1. Filtrar reservas numéricas (_1, _2...) para exponer SOLO rutas líderes dinámicas
     if (/_(\d+)$/.test(prefix)) {
         return false;
+    }
+
+    // 1.5. REGLA ARQUITECTÓNICA SAGRADA (Máscara Virtual Pura y Coexistencia Granular por Cuenta):
+    // - Si este prefijo físico está ASIGNADO a un pool activo (ej. "agy", "agy2"), SE OCULTA de /model
+    //   porque ya está gobernado y enmascarado limpiamente por su Pool-XX-<familia>.
+    // - Si este prefijo NO está asignado a ningún pool (cuenta libre / nueva del mismo o de otro proveedor),
+    //   NO SE OCULTA: se respeta su comportamiento 100% nativo de CPAMC ("Auth Files Management") y pasa
+    //   a /model con sus exclusiones de disco.
+    if (filterData?.poolAssignedPrefixes && filterData.poolAssignedPrefixes.has(prefix.toLowerCase())) {
+        return false; // Enmascarado bajo su respectivo Pool-XX
     }
 
     // 2. Comprobar validez de prefijo (validPrefixes del backend o fallback por convención N -> ∞)

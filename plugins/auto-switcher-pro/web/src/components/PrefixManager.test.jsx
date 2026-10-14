@@ -215,4 +215,33 @@ describe('PrefixManager Component - Full Screen Prefix & Accounts Engine', () =>
       expect(patchSpy).toHaveBeenCalled();
     });
   });
+
+  it('renders specialist model badge for member accounts of registered pools', async () => {
+    vi.spyOn(managementClient, 'listPools').mockResolvedValue({
+      ok: true,
+      pools: [
+        {
+          id: 'Pool-01-gemini',
+          base_prefix: 'agy',
+          active_leader: 'antigravity-g1-wilsonlavio7.json',
+          leader_auth: 'antigravity-g1-wilsonlavio7.json',
+          members: ['antigravity-g1-wilsonlavio7.json', 'antigravity-g1-maribelluz.json'],
+          member_models: {
+            'antigravity-g1-wilsonlavio7.json': 'gemini-3.8-flash-high',
+            'antigravity-g1-maribelluz.json': 'gemini-3.7-flash-high',
+          },
+          policy: { target_models: ['gemini-3.8-flash-high'] },
+        },
+      ],
+    });
+
+    render(<PrefixManager nodes={mockNodes} />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('📦 Pool-01-gemini').length).toBe(2);
+    });
+
+    expect(screen.getByText('🎯 gemini-3.8-flash-high')).toBeTruthy();
+    expect(screen.getByText('🎯 gemini-3.7-flash-high')).toBeTruthy();
+  });
 });

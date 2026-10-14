@@ -243,12 +243,17 @@ func main() {
 
 			accountDisplay := abbreviateEmail(extractAccountEmail(acc.Entry.ID, acc.Entry.Name, acc.Entry.Email))
 
+			prefixDisplay := acc.Prefix
+			if strings.TrimSpace(prefixDisplay) == "" {
+				prefixDisplay = "-"
+			}
+
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 				statusTag,
 				acc.Entry.Provider,
 				profileDisplay,
 				accountDisplay,
-				acc.Prefix,
+				prefixDisplay,
 				fiveHStr,
 				weeklyStr,
 				minAvailStr,

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { apiFetch, patchAuthFilePrefix } from '../api/managementClient';
+import { apiFetch, patchAuthFilePrefix, getPredictiveState, updatePredictiveConfig, listPools } from '../api/managementClient';
 
 /**
  * Paleta de 8 colores del Espectro TrueColor (24-bit RGB)
@@ -80,6 +80,12 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
   const [actionError, setActionError] = useState('');
   const [rawFiles, setRawFiles] = useState([]);
   const [quotasMap, setQuotasMap] = useState({});
+  const [registeredPools, setRegisteredPools] = useState([]);
+
+  // Motor Predictivo (Anti-429)
+  const [predictiveConfig, setPredictiveConfig] = useState({ enabled: true, max_reqs_per_hour: 80, threshold_pct: 80 });
+  const [predictiveAccounts, setPredictiveAccounts] = useState([]);
+  const [savingPredictive, setSavingPredictive] = useState(false);
 
   // Controles dinámicos de Paginación, Filtrado y Búsqueda
   const [searchQuery, setSearchQuery] = useState('');
@@ -286,6 +292,27 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
 
       setRawFiles(enrichedFiles);
       setQuotasMap(newQuotas);
+
+      // Cargar lista canónica de pools registrados
+      try {
+        const poolRes = await listPools();
+        if (poolRes && Array.isArray(poolRes.pools)) {
+          setRegisteredPools(poolRes.pools);
+        }
+      } catch {
+        // Fallback a pools descubiertos dinámicamente si no hay backend activo
+      }
+
+      // Cargar estado de Rebalanceo Predictivo
+      try {
+        const predRes = await getPredictiveState();
+        if (predRes && predRes.ok) {
+          if (predRes.config) setPredictiveConfig(predRes.config);
+          if (Array.isArray(predRes.accounts)) setPredictiveAccounts(predRes.accounts);
+        }
+      } catch {
+        // Silencioso si aún no está disponible
+      }
     } catch (err) {
       setActionError(err.message || 'Error cargando datos de infraestructura');
     } finally {
@@ -488,7 +515,7 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
             index,
             quota,
             isAgotada,
-            resetDate: isAgotada ? '02 de Octubre' : null,
+            resetDate: isAgotada ? 'En cooldown' : null,
           };
         });
 
@@ -551,8 +578,122 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
       };
     });
 
+    // Mapear pools soberanos registrados desde el backend si existen
+    if (registeredPools && registeredPools.length > 0) {
+      return registeredPools.map((rp, idx) => {
+        const base = rp.base_prefix || (rp.id ? rp.id.toLowerCase().replace(/[^a-z0-9]/g, '_') : `pool_${idx}`);
+        const famLower = (rp.family || '').toLowerCase();
+        const dotColor = famLower.includes('claude')
+          ? '#f59e0b'
+          : famLower.includes('codex')
+          ? '#79c0ff'
+          : 'var(--dot-emerald, #34d399)';
+
+        // Identificar la cuenta líder en memoria (active_leader en RAM o leader_auth)
+        const leaderFileName = rp.active_leader || rp.leader_auth;
+        const leaderFile = effectiveFiles.find((f) => (f.name || f.id) === leaderFileName);
+
+        // Identificar las cuentas de reserva desde rp.reserves o rp.members (excluyendo el líder)
+        const reserveFileNames = Array.isArray(rp.reserves) && rp.reserves.length > 0
+          ? rp.reserves
+          : (Array.isArray(rp.members) ? rp.members.filter((m) => m !== leaderFileName) : []);
+
+        const mappedReserves = reserveFileNames.map((rfName, rIdx) => {
+          const rFile = effectiveFiles.find((f) => (f.name || f.id) === rfName);
+          const rawEmail = rFile?.email || rFile?.account || rfName;
+          const assignedReservePrefix = `${base}_${rIdx + 1}`;
+          const quota = (rFile && quotasMap[rFile.name]) || {
+            fiveHourConsumed: null,
+            weeklyConsumed: null,
+            minAvailable: null,
+          };
+          const weekly = quota.weeklyConsumed ?? 0;
+          const isAgotada = weekly >= 98.0;
+
+          const resModel =
+            (rp.member_models && rp.member_models[rfName]) ||
+            rp.policy?.target_models?.[0] ||
+            null;
+
+          return {
+            name: rfName,
+            email: rawEmail,
+            obfuscatedEmail: obfuscateEmail(rawEmail),
+            prefix: assignedReservePrefix,
+            model: resModel,
+            index: rIdx + 1,
+            quota,
+            isAgotada,
+            resetDate: isAgotada ? 'En cooldown' : null,
+          };
+        });
+
+        // Calcular Mejor Candidata en la cola de reservas
+        let bestReserveName = null;
+        let maxAvail = -1;
+        mappedReserves.forEach((r) => {
+          if (!r.isAgotada) {
+            const avail = r.quota?.minAvailable ?? 100;
+            if (avail > maxAvail) {
+              maxAvail = avail;
+              bestReserveName = r.name;
+            }
+          }
+        });
+        if (!bestReserveName) {
+          const firstAvail = mappedReserves.find((r) => !r.isAgotada);
+          if (firstAvail) bestReserveName = firstAvail.name;
+        }
+
+        const markedReserves = mappedReserves.map((r) => ({
+          ...r,
+          isBestCandidate: r.name === bestReserveName,
+        }));
+
+        // Métricas de cuenta líder activa
+        const leaderQuota = leaderFile ? quotasMap[leaderFile.name] : null;
+        const fiveH = leaderQuota?.fiveHourConsumed ?? 0;
+        const weekly = leaderQuota?.weeklyConsumed ?? 0;
+        const minAvail = leaderQuota?.minAvailable ?? (100 - Math.max(fiveH, weekly));
+
+        let status = 'HEALTHY';
+        if (weekly >= 95 || fiveH >= 90) {
+          status = 'EXHAUSTED';
+        } else if (weekly >= 80 || fiveH >= 75) {
+          status = 'WARNING';
+        }
+
+        const leaderModel =
+          (leaderFile && rp.member_models && rp.member_models[leaderFile.name]) ||
+          rp.policy?.target_models?.[0] ||
+          'gemini-3.8-flash-high';
+
+        return {
+          id: rp.id,
+          displayName: rp.display_name || rp.id,
+          profile: base,
+          title: rp.display_name || rp.id,
+          modelTarget: leaderModel,
+          dotColor,
+          activePrefix: base,
+          status,
+          activeAccount: leaderFile
+            ? {
+                name: leaderFile.name,
+                email: leaderFile.email || leaderFile.account || leaderFile.name,
+                obfuscatedEmail: obfuscateEmail(leaderFile.email || leaderFile.account || leaderFile.name),
+                fiveHourConsumed: leaderQuota?.fiveHourConsumed !== null && leaderQuota?.fiveHourConsumed !== undefined ? leaderQuota.fiveHourConsumed : 0,
+                weeklyConsumed: leaderQuota?.weeklyConsumed !== null && leaderQuota?.weeklyConsumed !== undefined ? leaderQuota.weeklyConsumed : 0,
+                minAvailable: minAvail,
+              }
+            : null,
+          reserves: markedReserves,
+        };
+      });
+    }
+
     return result;
-  }, [effectiveFiles, quotasMap]);
+  }, [effectiveFiles, quotasMap, registeredPools]);
 
   // Filtrado y Ordenamiento Dinámico de los Pools
   const filteredAndSortedPools = useMemo(() => {
@@ -682,6 +823,21 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
   }, [filteredAndSortedPools, safeCurrentPage, pageSize]);
 
   // Chequeo forzado de cuotas
+  const handleTogglePredictive = async () => {
+    setSavingPredictive(true);
+    const newEnabled = !predictiveConfig.enabled;
+    const updated = { ...predictiveConfig, enabled: newEnabled };
+    try {
+      await updatePredictiveConfig(updated);
+      setPredictiveConfig(updated);
+      setCheckOutput(newEnabled ? '🛡️ Auto-Rebalanceo Predictivo ACTIVADO (Rotación preventiva antes de 429)' : '⚠️ Auto-Rebalanceo Predictivo DESACTIVADO (Rotación solo reactiva)');
+    } catch (err) {
+      setActionError('Error actualizando motor predictivo: ' + err.message);
+    } finally {
+      setSavingPredictive(false);
+    }
+  };
+
   const handleTriggerForceCheck = async () => {
     setChecking(true);
     setCheckOutput('');
@@ -720,6 +876,32 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
 
         {/* Acciones Rápidas */}
         <div className="cs-hero-actions">
+          {/* Toggle de Auto-Rebalanceo Predictivo */}
+          <button
+            type="button"
+            onClick={handleTogglePredictive}
+            disabled={savingPredictive}
+            className={`cs-btn-predictive ${predictiveConfig.enabled ? 'active' : ''}`}
+            title="Activa rotación preventiva de cuentas al 80% de cuota para evitar 429 de Google"
+            style={{
+              padding: '8px 14px',
+              borderRadius: '8px',
+              fontSize: '12px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              border: predictiveConfig.enabled ? '1px solid #10b981' : '1px solid #64748b',
+              background: predictiveConfig.enabled ? 'rgba(16, 185, 129, 0.15)' : 'rgba(100, 116, 139, 0.15)',
+              color: predictiveConfig.enabled ? '#34d399' : '#94a3b8',
+              transition: 'all 0.2s',
+            }}
+          >
+            <span>🛡️</span>
+            <span>Predictivo: {predictiveConfig.enabled ? 'ON (Anti-429)' : 'OFF'}</span>
+          </button>
+
           <button
             type="button"
             onClick={handleTriggerForceCheck}
@@ -879,7 +1061,7 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
 
       {/* 3. Grid de Pools Segmentados */}
       <div className="cs-pools-grid">
-        {displayedPools.map((pool) => {
+        {displayedPools.map((pool, poolIdx) => {
           const isExhausted = pool.status === 'EXHAUSTED';
           const isWarning = pool.status === 'WARNING';
           const badgeClass = isExhausted
@@ -887,20 +1069,37 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
             : isWarning
             ? 'cs-badge-warning'
             : 'cs-badge-healthy';
+          const pLower = (pool.activePrefix || pool.profile || pool.title || '').toLowerCase();
+          const famSuffix = pLower.includes('codex')
+            ? 'codex'
+            : pLower.includes('clau') || pLower.includes('son') || pLower.includes('opus')
+            ? 'claude'
+            : 'gemini';
+          const canonicalPoolName = `Pool-${String(poolIdx + 1).padStart(2, '0')}-${famSuffix}`;
+          const sovereignId = pool.id || pool.displayName || canonicalPoolName;
+          const poolLabel = pool.displayName || pool.id || canonicalPoolName;
 
           return (
-            <div key={pool.profile} className="cs-pool-card">
+            <div key={sovereignId} className="cs-pool-card">
               {/* Cabecera del Pool */}
               <div className="cs-pool-head">
                 <div>
-                  <div className="cs-pool-title-row">
+                  <div className="cs-pool-title-row" style={{ flexWrap: 'wrap', gap: 6 }}>
                     <span
                       className="cs-pool-dot"
                       style={{ backgroundColor: pool.dotColor }}
                     ></span>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: '#38bdf8', background: 'rgba(56, 189, 248, 0.12)', padding: '2px 7px', borderRadius: 4, border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+                      📦 {poolLabel}
+                    </span>
                     <h2 className="cs-pool-title">{pool.title}</h2>
                   </div>
-                  <div className="cs-pool-model">Modelo: {pool.modelTarget}</div>
+                  <div className="cs-pool-model" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
+                    <span>Modelo: {pool.modelTarget}</span>
+                    <span style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace', background: 'rgba(100, 116, 139, 0.15)', padding: '1px 6px', borderRadius: 4 }} title="Identificador Único Soberano Inmutable del Pool">
+                      ID: {sovereignId}
+                    </span>
+                  </div>
                 </div>
                 <span className={`cs-status-badge ${badgeClass}`}>{pool.status}</span>
               </div>
@@ -992,6 +1191,22 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
                         </div>
                         <div className="cs-reserve-meta">
                           <span className="cs-reserve-prefix">{res.prefix}</span>
+                          {res.model && (
+                            <span
+                              className="cs-reserve-model"
+                              style={{
+                                fontSize: 10,
+                                color: '#38bdf8',
+                                background: 'rgba(56, 189, 248, 0.12)',
+                                padding: '1px 5px',
+                                borderRadius: 4,
+                                fontFamily: 'monospace',
+                              }}
+                              title={`Modelo Especialista Asignado: ${res.model}`}
+                            >
+                              🎯 {res.model}
+                            </span>
+                          )}
                           {res.quota?.minAvailable !== null && res.quota?.minAvailable !== undefined && !res.isAgotada && (
                             <span className="cs-reserve-avail">
                               · {res.quota.minAvailable}% libre
@@ -1041,9 +1256,9 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
 
               {/* Footer del Card */}
               <div className="cs-pool-footer">
-                <span className="cs-footer-label">Invocación en Pi:</span>
-                <span className="cs-footer-code">
-                  cpamc/{pool.activePrefix}/...
+                <span className="cs-footer-label">Invocación en Pi (/model):</span>
+                <span className="cs-footer-code" title={`cpamc/${pool.activePrefix}/...`}>
+                  {poolLabel} (cpamc/{pool.activePrefix}/...)
                 </span>
               </div>
             </div>
@@ -1063,78 +1278,6 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
             </button>
           </div>
         )}
-      </div>
-
-      {/* 4. Flota de Especialistas y Salvavidas Permanentes */}
-      <div className="cs-specialists-section">
-        <div className="cs-specialists-head">
-          <div className="cs-specialists-title-row">
-            <span className="cs-shield-icon">🛡️</span>
-            <div>
-              <h3 className="cs-specialists-title">
-                Flota de Especialistas y Salvavidas Permanentes
-              </h3>
-              <p className="cs-specialists-desc">
-                Modelos con API Key directa en CPAMC siempre en línea; operan como salvavidas cuando las cuentas de Google se saturan y para tareas de alta especialización.
-              </p>
-            </div>
-          </div>
-          <span className="cs-badge-online">SIEMPRE EN LÍNEA</span>
-        </div>
-
-        <div className="cs-specialists-grid">
-          {/* Tarjeta 1: OpenCode Go */}
-          <div className="cs-specialist-card">
-            <div className="cs-specialist-head">
-              <span className="cs-spec-title-group">
-                <span className="cs-spec-icon">⚡</span>
-                <span className="cs-spec-name">OpenCode Go</span>
-              </span>
-              <span className="cs-spec-badge">ocgo</span>
-            </div>
-            <p className="cs-spec-role">
-              Salvavidas Código, Contexto Gigante & Testing
-            </p>
-            <div className="cs-spec-footer">
-              <div className="cs-spec-row">
-                <span className="cs-spec-label">Modelo Insignia:</span>
-                <span className="cs-spec-model">
-                  deepseek-v4-flash / deepseek-v4-pro
-                </span>
-              </div>
-              <div className="cs-spec-row">
-                <span className="cs-spec-label">Llamada en Pi:</span>
-                <span className="cs-spec-code">cpamc/ocgo/...</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Tarjeta 2: NVIDIA NIM */}
-          <div className="cs-specialist-card">
-            <div className="cs-specialist-head">
-              <span className="cs-spec-title-group">
-                <span className="cs-spec-icon">🚀</span>
-                <span className="cs-spec-name">NVIDIA NIM</span>
-              </span>
-              <span className="cs-spec-badge">nv</span>
-            </div>
-            <p className="cs-spec-role">
-              Especialista Lógica Matemática & Reglas Duras
-            </p>
-            <div className="cs-spec-footer">
-              <div className="cs-spec-row">
-                <span className="cs-spec-label">Modelo Insignia:</span>
-                <span className="cs-spec-model">
-                  nvidia/llama-3.1-nemotron-70b-instruct
-                </span>
-              </div>
-              <div className="cs-spec-row">
-                <span className="cs-spec-label">Llamada en Pi:</span>
-                <span className="cs-spec-code">cpamc/nv/...</span>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* 4. Pie de Reglas de Rotación */}

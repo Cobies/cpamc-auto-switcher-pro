@@ -128,7 +128,8 @@ describe('SpecialistModal Component', () => {
     await waitFor(() => {
       expect(mockPatchFn).toHaveBeenCalledWith(
         'antigravity-user@gmail.com.json',
-        ['gemini-2.0-flash', 'gemini-2.5-flash']
+        ['gemini-2.0-flash', 'gemini-2.5-flash'],
+        'gemini-2.5-pro'
       );
     });
 
@@ -166,7 +167,8 @@ describe('SpecialistModal Component', () => {
     await waitFor(() => {
       expect(mockPatchFn).toHaveBeenCalledWith(
         'antigravity-user@gmail.com.json',
-        ['gemini-2.5-flash', 'gemini-2.5-pro']
+        ['gemini-2.5-flash', 'gemini-2.5-pro'],
+        'gemini-2.0-flash'
       );
     });
     expect(mockOnSaved).toHaveBeenCalled();

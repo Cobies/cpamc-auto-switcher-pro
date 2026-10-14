@@ -16,10 +16,10 @@ describe('HomeCenter Component - Portada Principal & Directorio de Menús', () =
     render(<HomeCenter onNavigateTab={vi.fn()} />);
 
     expect(screen.getByTestId('kpi-license')).toBeTruthy();
-    expect(screen.getByText('PRO Vitalicio')).toBeTruthy();
+    expect(screen.getByText(/Demo Evaluación|PRO Vitalicio/)).toBeTruthy();
 
     expect(screen.getByTestId('kpi-machine-id')).toBeTruthy();
-    expect(screen.getByText('ASP-8F2A-99B1-4CD3')).toBeTruthy();
+    expect(screen.getByText(/CPA-/)).toBeTruthy();
 
     expect(screen.getByTestId('kpi-version')).toBeTruthy();
     expect(screen.getByText('v2.4.0')).toBeTruthy();
@@ -41,7 +41,7 @@ describe('HomeCenter Component - Portada Principal & Directorio de Menús', () =
     const copyBtn = screen.getByTestId('btn-copy-machine-id');
     fireEvent.click(copyBtn);
 
-    expect(writeTextMock).toHaveBeenCalledWith('ASP-8F2A-99B1-4CD3');
+    expect(writeTextMock).toHaveBeenCalledWith('CPA-...');
   });
 
   it('renders all menu cards and triggers onNavigateTab on click', () => {

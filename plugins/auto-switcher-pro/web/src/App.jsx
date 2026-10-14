@@ -8,6 +8,7 @@ import GroupManager from './components/GroupManager';
 import AutoAuthFiles from './components/AutoAuthFiles';
 import Maintenance from './components/Maintenance';
 import QuickGuideModal from './components/QuickGuideModal';
+import LicenseModal from './components/LicenseModal';
 import logoImg from './assets/auto-switcher-pro-logo.png';
 import { triggerCPAMCSidebarRefresh } from './utils/syncSidebar';
 import {
@@ -16,6 +17,7 @@ import {
   buildGraphFromAuthFiles,
   scanSystemHealth,
   updateManagementConsole,
+  listPools,
 } from './api/managementClient';
 import './App.css';
 import './ControlSwitcher.css';
@@ -25,6 +27,32 @@ export default function App() {
     if (typeof window === 'undefined' || !window.location) return 'home';
 
     const hash = (window.location.hash || '').toLowerCase();
+    // CPAMC Native Menus index mapping:
+    // CPAMC exposes pages as #/plugin-pages/<plugin-name>/<index>
+    // 0: /create-groups
+    // 1: /auto-auth-files
+    // 2: /control-switcher
+    // 3: /profiles
+    // 4: /pulse-tokens
+    // 5: /create-prefixes
+    // 6: /maintenance
+    // 7: /quick-guide
+    const numIndexMatch = hash.match(/\/(\d+)(?:\b|\?|$)/);
+    if (numIndexMatch) {
+      const idx = parseInt(numIndexMatch[1], 10);
+      switch (idx) {
+        case 0: return 'create-groups';
+        case 1: return 'auto-auth-files';
+        case 2: return 'switcher';
+        case 3: return 'profiles';
+        case 4: return 'tokens';
+        case 5: return 'create-prefixes';
+        case 6: return 'maintenance';
+        case 7: return 'quick-guide';
+        default: break;
+      }
+    }
+
     if (hash.includes('tab-home') || hash.includes('tab=home') || hash === '#home') {
       return 'home';
     }
@@ -104,6 +132,7 @@ export default function App() {
   const [actionFeedback, setActionFeedback] = useState('');
   const [checkingForce, setCheckingForce] = useState(false);
   const [isGuideOpen, setIsGuideOpen] = useState(false);
+  const [isLicenseOpen, setIsLicenseOpen] = useState(false);
   const [consoleToastVersion, setConsoleToastVersion] = useState(null);
   const consoleCheckExecutedRef = useRef(false);
   const graphRef = useRef(null);
@@ -130,8 +159,12 @@ export default function App() {
     setErrorMessage('');
 
     try {
-      const authFiles = await loadAuthFilesWithPrefixes({ key });
-      const { nodes, edges } = buildGraphFromAuthFiles(authFiles);
+      const [authFiles, poolsRes] = await Promise.all([
+        loadAuthFilesWithPrefixes({ key }),
+        listPools().catch(() => ({ pools: [] })),
+      ]);
+      const registeredPools = Array.isArray(poolsRes?.pools) ? poolsRes.pools : [];
+      const { nodes, edges } = buildGraphFromAuthFiles(authFiles, { registeredPools });
       setGraphData({ nodes, edges });
       setDatasetVersion((v) => v + 1);
       setStatus('ready');
@@ -276,8 +309,8 @@ export default function App() {
 
   return (
     <div className="app-layout">
-      {/* Header Unificado (Oculto en Inicio & Bienvenida para máxima limpieza visual) */}
-      {activeTab !== 'home' && (
+      {/* Header Unificado: Única y exclusivamente visible en Visual Profile Prefix Topology */}
+      {activeTab === 'profiles' && (
         <header className="app-header">
           {/* Lado Izquierdo: Identidad, Submenús y Acciones Estructurales */}
           <div className="header-left-cluster">
@@ -558,6 +591,30 @@ export default function App() {
 
           <button
             type="button"
+            className="btn btn-outline"
+            onClick={() => setIsLicenseOpen(true)}
+            data-testid="btn-open-license-modal"
+            title="Ver estado de Licencia y Machine ID"
+            style={{
+              padding: '5px 10px',
+              fontSize: '11px',
+              fontWeight: 700,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'rgba(234, 179, 8, 0.15)',
+              color: '#facc15',
+              border: '1px solid rgba(234, 179, 8, 0.4)',
+              borderRadius: '6px',
+              cursor: 'pointer',
+            }}
+          >
+            <span>🔐</span>
+            <span>Licencia</span>
+          </button>
+
+          <button
+            type="button"
             className="btn-header-force"
             onClick={handleHeaderForceCheck}
             disabled={checkingForce}
@@ -629,7 +686,10 @@ export default function App() {
       <main className="app-main">
         {activeTab === 'home' && (
           <div style={{ width: '100%', height: '100%', overflowY: 'auto' }}>
-            <HomeCenter onNavigateTab={setActiveTab} />
+            <HomeCenter
+              onNavigateTab={setActiveTab}
+              onOpenLicenseModal={() => setIsLicenseOpen(true)}
+            />
           </div>
         )}
 
@@ -658,7 +718,7 @@ export default function App() {
 
         {activeTab === 'tokens' && (
           <div style={{ width: '100%', height: '100%', overflowY: 'auto' }}>
-            <PulseTokens />
+            <PulseTokens onNavigateTab={setActiveTab} />
           </div>
         )}
 
@@ -789,6 +849,12 @@ export default function App() {
         <QuickGuideModal
           isOpen={isGuideOpen}
           onClose={() => setIsGuideOpen(false)}
+        />
+
+        {/* License & Activation Modal Mount */}
+        <LicenseModal
+          isOpen={isLicenseOpen}
+          onClose={() => setIsLicenseOpen(false)}
         />
       </main>
 

@@ -10,6 +10,52 @@ const LEADER_COLOR = "\x1b[1;38;2;92;184;199m"; // Cian suave negrita
 const NEXT_COLOR = "\x1b[1;38;2;222;116;155m"; // Rosa coral suave negrita
 const MUTED = "\x1b[38;2;120;153;166m";
 
+const ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]/g;
+
+export function stripAnsi(str: string): string {
+	return str.replace(ANSI_REGEX, "");
+}
+
+export function truncateWithAnsi(str: string, maxW: number): string {
+	if (maxW <= 0) return "";
+	if (visibleLen(str) <= maxW) return str;
+
+	let vis = 0;
+	let res = "";
+	const token = /^\x1b\[[0-9;]*[a-zA-Z]/;
+	let i = 0;
+
+	while (i < str.length && vis < maxW) {
+		const match = str.slice(i).match(token);
+		if (match) {
+			res += match[0];
+			i += match[0].length;
+		} else {
+			const cp = str.codePointAt(i) || 0;
+			const charLen = String.fromCodePoint(cp).length;
+			const charVis =
+				(cp >= 0x1f300 && cp <= 0x1faff) ||
+				(cp >= 0x2600 && cp <= 0x27bf) ||
+				(cp >= 0x2b50 && cp <= 0x2b55)
+					? 2
+					: cp >= 0xfe00 && cp <= 0xfe0f
+						? 0
+						: 1;
+
+			if (vis + charVis > maxW) break;
+			res += str.slice(i, i + charLen);
+			vis += charVis;
+			i += charLen;
+		}
+	}
+
+	return `${res}${RESET}`;
+}
+
+export function fitToWidth(str: string, maxW: number): string {
+	return truncateWithAnsi(str, maxW);
+}
+
 function pctColor(pctStr: string): string {
 	const num = parseFloat(pctStr.replace("%", "")) || 0;
 	if (num >= 50) return "\x1b[38;2;123;200;143m";
@@ -26,7 +72,8 @@ export function formatFooterRotationBlock(pair: PoolRotationPair | null, isBusy 
 
 	const icon = isBusy ? `${PLAY_COLOR}▶${RESET}` : `${PAUSE_COLOR}⏸${RESET}`;
 	const pActiveColor = pctColor(pair.active.minAvailable);
-	const activePart = `${icon} ${LEADER_COLOR}${pair.active.prefix}${RESET} ${pActiveColor}${pair.active.minAvailable}${RESET}`;
+	const activeLabel = pair.active.prefix || pair.active.accountId;
+	const activePart = `${icon} ${LEADER_COLOR}${activeLabel}${RESET} ${pActiveColor}${pair.active.minAvailable}${RESET}`;
 
 	if (!pair.next) {
 		return `${SEP} ${activePart}`;
@@ -34,7 +81,8 @@ export function formatFooterRotationBlock(pair: PoolRotationPair | null, isBusy 
 
 	const nextIcon = `\x1b[38;2;157;124;216m⏭${RESET}`;
 	const pNextColor = pctColor(pair.next.minAvailable);
-	const nextPart = `${nextIcon} ${NEXT_COLOR}${pair.next.prefix}${RESET} ${pNextColor}${pair.next.minAvailable}${RESET}`;
+	const nextLabel = pair.next.prefix || pair.next.accountId;
+	const nextPart = `${nextIcon} ${NEXT_COLOR}${nextLabel}${RESET} ${pNextColor}${pair.next.minAvailable}${RESET}`;
 
 	return `${SEP} ${activePart} ${SEP} ${nextPart}`;
 }
@@ -148,51 +196,77 @@ export function formatSidebarQuotaCardLines(
 	borderColor = "\x1b[38;2;120;153;166m",
 	theme?: any,
 ): string[] {
-	const safeW = Math.max(34, width);
+	if (width < 20) {
+		// Modo ultra-compacto si el ancho disponible es extremadamente pequeño
+		if (!pair) return [truncateWithAnsi("⚡ Sin pool activo", width)];
+		const activeLabel = pair.active.prefix || pair.active.accountId;
+		return [truncateWithAnsi(`⚡ ${pair.poolKey}: ${activeLabel} (${pair.active.minAvailable})`, width)];
+	}
+
+	const safeW = width;
 	const s = createThemeStyler(theme, borderColor);
 
 	if (!pair) {
-		const top = `${s.border("╭─ ")}${s.accent("⚡ CPAMC AUTO-SWITCHER ")}${s.border("─".repeat(Math.max(1, safeW - 27)) + "╮")}`;
+		const titleStr = truncateWithAnsi("⚡ CPAMC AUTO-SWITCHER", Math.max(1, safeW - 6));
+		const titlePrefix = `${s.border("╭─ ")}${s.accent(titleStr)} ${s.border("─")}`;
+		const prefixLen = visibleLen(titlePrefix);
+		const titleRules = Math.max(1, safeW - prefixLen - 1);
+		const top = `${titlePrefix}${s.border("─".repeat(titleRules) + "╮")}`;
 		const bot = s.border("╰" + "─".repeat(safeW - 2) + "╯");
+		const msg = truncateWithAnsi("Sin modelo con rotación activo", Math.max(1, safeW - 4));
+		const emptySpace = Math.max(0, safeW - 4 - visibleLen(msg));
 		return [
-			top,
-			`${s.border("│")} ${s.muted("Sin modelo con rotación activo")}${" ".repeat(Math.max(1, safeW - 35))}${s.border("│")}`,
-			bot,
+			fitToWidth(top, safeW),
+			fitToWidth(`${s.border("│")} ${s.muted(msg)}${" ".repeat(emptySpace)} ${s.border("│")}`, safeW),
+			fitToWidth(bot, safeW),
 		];
 	}
 
-	const innerW = safeW - 4;
+	const innerW = Math.max(4, safeW - 4);
 	const renderLine = (label: string, val: string) => {
 		const totalLen = visibleLen(label) + visibleLen(val);
+		if (totalLen >= innerW) {
+			const spaceLeft = Math.max(3, innerW - visibleLen(label) - 1);
+			const truncatedVal = truncateWithAnsi(val, spaceLeft);
+			const space = Math.max(1, innerW - visibleLen(label) - visibleLen(truncatedVal));
+			return fitToWidth(`${s.border("│")} ${label}${" ".repeat(space)}${truncatedVal} ${s.border("│")}`, safeW);
+		}
 		const space = Math.max(1, innerW - totalLen);
-		return `${s.border("│")} ${label}${" ".repeat(space)}${val} ${s.border("│")}`;
+		return fitToWidth(`${s.border("│")} ${label}${" ".repeat(space)}${val} ${s.border("│")}`, safeW);
 	};
 
-	const divider = s.border("├" + "─".repeat(safeW - 2) + "┤");
+	const divider = fitToWidth(s.border("├" + "─".repeat(Math.max(1, safeW - 2)) + "┤"), safeW);
 	const bar5h = s.paintGauge(pair.active.consumed5h, 6);
 	const barWk = s.paintGauge(pair.active.consumedWeekly, 6);
 
-	const titlePrefix = `${s.border("╭─ ")}${s.accent("⚡ CPAMC POOL: ")}${s.text(pair.poolKey)} ${s.border("─")}`;
+	const maxPoolKeyW = Math.max(3, safeW - 24);
+	const poolKeyLabel = truncateWithAnsi(pair.poolKey, maxPoolKeyW);
+	const titlePrefix = `${s.border("╭─ ")}${s.accent("⚡ CPAMC POOL: ")}${s.text(poolKeyLabel)} ${s.border("─")}`;
 	const prefixLen = visibleLen(titlePrefix);
 	const titleRules = Math.max(1, safeW - prefixLen - 1);
-	const top = `${titlePrefix}${s.border("─".repeat(titleRules) + "╮")}`;
-	const bottom = s.border("╰" + "─".repeat(safeW - 2) + "╯");
+	const top = fitToWidth(`${titlePrefix}${s.border("─".repeat(titleRules) + "╮")}`, safeW);
+	const bottom = fitToWidth(s.border("╰" + "─".repeat(Math.max(1, safeW - 2)) + "╯"), safeW);
 
-	return [
+	const activeAccountLabel = pair.active.prefix || pair.active.accountId;
+	const nextAccountLabel = pair.next ? (pair.next.prefix || pair.next.accountId) : "";
+
+	const rawLines = [
 		top,
 		renderLine(s.muted("Familia"), `${pair.familyIcon}${s.text(pair.familyName)}`),
 		renderLine(s.muted("Cuentas en Pool"), s.text(String(pair.totalAccounts))),
 		divider,
-		renderLine(s.accent("[LÍDER ACTIVA]"), `${s.text(pair.active.prefix)} ${s.muted(`(${pair.active.minAvailable})`)}`),
+		renderLine(s.accent("[LÍDER ACTIVA]"), `${s.text(activeAccountLabel)} ${s.muted(`(${pair.active.minAvailable})`)}`),
 		renderLine(s.muted(`5h: ${pair.active.consumed5h}`), bar5h),
 		renderLine(s.muted(`Sem: ${pair.active.consumedWeekly}`), barWk),
 		divider,
 		renderLine(
 			s.accent("[SIGUIENTE EN COLA]"),
-			pair.next ? `${s.text(pair.next.prefix)} ${s.muted(`(${pair.next.minAvailable})`)}` : s.muted("Ninguna (Pool único)"),
+			pair.next ? `${s.text(nextAccountLabel)} ${s.muted(`(${pair.next.minAvailable})`)}` : s.muted("Ninguna (Pool único)"),
 		),
 		bottom,
 	];
+
+	return rawLines.map((line) => fitToWidth(line, safeW));
 }
 
 /**
@@ -245,23 +319,25 @@ export class CpamcTuiAdapter {
 		try {
 			this.currentPair = await getRotationPairForModel(model.id, model.provider);
 
-			// Detección de modo TUI:
-			// 1. Symbol global de Gentle
-			// 2. Variable host.mode o settings
+			// Detección de modo TUI y sidebars (gentle-pi y j0k3r-theme):
 			const tui = this.tui || (this.ctx as any)?.tui;
 			const terminal = tui?.terminal as any;
 			const gentleState = terminal?.[Symbol.for("gentle-pi.experimental-sidebar.state")];
+			const j0k3rSidebarState = terminal?.[Symbol.for("j0k3r-theme.sidebar.state")];
 
-			this.isFullscreen = Boolean(gentleState?.active || terminal?.fullscreen || process.env.PI_TUI_MODE === "fullscreen");
+			this.isFullscreen = Boolean(gentleState?.active || j0k3rSidebarState?.active || terminal?.fullscreen || process.env.PI_TUI_MODE === "fullscreen");
 
 			if (gentleState?.parts) {
-				// Inyectar en Sidebar de Gentle
 				this.injectIntoSidebar(gentleState);
 				tui?.requestRender?.();
-			} else {
-				// Inyectar en Footer
-				this.injectIntoFooter(isBusy);
 			}
+			if (j0k3rSidebarState?.parts) {
+				this.injectIntoSidebar(j0k3rSidebarState);
+				tui?.requestRender?.();
+			}
+
+			// Inyectar simultáneamente en Footer para tener ambas superficies activas y unificadas
+			this.injectIntoFooter(isBusy);
 		} catch {
 			// Silenciar fallos secundarios en segundo plano
 		}
@@ -328,15 +404,14 @@ export class CpamcTuiAdapter {
 					return baseLines;
 				}
 
-				const cardWidth = Math.max(34, width);
 				const bColor = extractBorderColor(baseLines, this.theme);
-				const quotaLines = formatSidebarQuotaCardLines(pair, cardWidth, bColor, this.theme);
+				const quotaLines = formatSidebarQuotaCardLines(pair, width, bColor, this.theme);
 
 				if (!baseLines.length) {
 					return quotaLines;
 				}
 
-				return [...baseLines, "", ...quotaLines];
+				return [...baseLines, "", ...quotaLines].map((line) => fitToWidth(line, width));
 			},
 			digest: () => {
 				const baseDigest = this.originalFooterPart?.digest

@@ -2,7 +2,10 @@ package switcher
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -11,6 +14,118 @@ import (
 	"cpamc-auto-switcher/internal/config"
 	"cpamc-auto-switcher/internal/quota"
 )
+
+type poolAccountInfo struct {
+	PoolID        string
+	Profile       string
+	VirtualPrefix string
+	IsActive      bool
+	IsReserve     bool
+}
+
+func lookupPoolAccount(authFileName string) (poolAccountInfo, bool) {
+	statePaths := []string{
+		"/home/wilox/services/cliproxy/plugins/auto-switcher-pro-state.json",
+		"/CLIProxyAPI/plugins/auto-switcher-pro-state.json",
+	}
+	if envPath := os.Getenv("AUTO_SWITCHER_STATE_PATH"); envPath != "" {
+		statePaths = append([]string{envPath}, statePaths...)
+	}
+
+	for _, p := range statePaths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+
+		var root struct {
+			Pools []struct {
+				ID           string   `json:"id"`
+				BasePrefix   string   `json:"base_prefix"`
+				RouteSlug    string   `json:"route_slug"`
+				LeaderAuth   string   `json:"leader_auth"`
+				ActiveLeader string   `json:"active_leader"`
+				Members      []string `json:"members"`
+				Reserves     []string `json:"reserves"`
+			} `json:"pools"`
+		}
+
+		if err := json.Unmarshal(data, &root); err != nil {
+			continue
+		}
+
+		cleanTarget := filepath.Base(authFileName)
+
+		for _, pool := range root.Pools {
+			basePrefix := strings.TrimSpace(pool.BasePrefix)
+			if basePrefix == "" {
+				basePrefix = strings.TrimSpace(pool.RouteSlug)
+			}
+			if basePrefix == "" {
+				basePrefix = "agy"
+			}
+
+			profile := "default"
+			if strings.HasPrefix(basePrefix, "agy2") {
+				profile = "2"
+			} else if strings.HasPrefix(basePrefix, "agy_son") || strings.HasPrefix(basePrefix, "son") {
+				profile = "son"
+			} else if strings.HasPrefix(basePrefix, "agy_opus") || strings.HasPrefix(basePrefix, "opus") {
+				profile = "opus"
+			} else if strings.HasPrefix(basePrefix, "agy_clau") || strings.HasPrefix(basePrefix, "clau") {
+				profile = "clau"
+			}
+
+			// Verificar si es el líder
+			isNominalLeader := filepath.Base(pool.LeaderAuth) == cleanTarget
+			currentActiveLeader := pool.ActiveLeader
+			if currentActiveLeader == "" {
+				currentActiveLeader = pool.LeaderAuth
+			}
+			isRAMLeader := filepath.Base(currentActiveLeader) == cleanTarget
+
+			if isNominalLeader {
+				return poolAccountInfo{
+					PoolID:        pool.ID,
+					Profile:       profile,
+					VirtualPrefix: basePrefix,
+					IsActive:      isRAMLeader,
+					IsReserve:     !isRAMLeader,
+				}, true
+			}
+
+			// Verificar si está en las reservas
+			for idx, res := range pool.Reserves {
+				if filepath.Base(res) == cleanTarget {
+					virtualPrefix := fmt.Sprintf("%s_%d", basePrefix, idx+1)
+					return poolAccountInfo{
+						PoolID:        pool.ID,
+						Profile:       profile,
+						VirtualPrefix: virtualPrefix,
+						IsActive:      isRAMLeader,
+						IsReserve:     !isRAMLeader,
+					}, true
+				}
+			}
+
+			// Verificar si está en miembros en general
+			for idx, mem := range pool.Members {
+				if filepath.Base(mem) == cleanTarget && filepath.Base(mem) != filepath.Base(pool.LeaderAuth) {
+					virtualPrefix := fmt.Sprintf("%s_%d", basePrefix, idx)
+					return poolAccountInfo{
+						PoolID:        pool.ID,
+						Profile:       profile,
+						VirtualPrefix: virtualPrefix,
+						IsActive:      isRAMLeader,
+						IsReserve:     !isRAMLeader,
+					}, true
+				}
+			}
+		}
+	}
+
+	return poolAccountInfo{}, false
+}
 
 // AccountState represents a discovered credential and its quota metrics.
 type AccountState struct {
@@ -131,13 +246,29 @@ func (s *Switcher) fetchAccountsConcurrently(ctx context.Context, targetProvider
 			baseActive, _ := s.cfg.ConventionForProvider(f.Provider)
 			parsed := config.ParsePrefix(meta.Prefix, baseActive)
 
+			prefix := meta.Prefix
+			profile := parsed.Profile
+			isActive := parsed.IsActive
+			isReserve := parsed.IsReserve
+
+			// Si el prefijo en disco está vacío (Gobernanza Virtual Pura),
+			// consultar si pertenece a un Pool Soberano en auto-switcher-pro-state.json
+			if strings.TrimSpace(prefix) == "" {
+				if poolState, ok := lookupPoolAccount(name); ok {
+					prefix = poolState.VirtualPrefix
+					profile = poolState.Profile
+					isActive = poolState.IsActive
+					isReserve = poolState.IsReserve
+				}
+			}
+
 			state := AccountState{
 				Entry:            f,
-				Prefix:           meta.Prefix,
-				Profile:          parsed.Profile,
+				Prefix:           prefix,
+				Profile:          profile,
 				ChatGPTAccountID: meta.ChatGPTAccountID,
-				IsActive:         parsed.IsActive,
-				IsReserve:        parsed.IsReserve,
+				IsActive:         isActive,
+				IsReserve:        isReserve,
 			}
 
 			// Fetch quota asynchronously if not disabled

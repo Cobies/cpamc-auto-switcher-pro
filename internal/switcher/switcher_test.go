@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -742,3 +744,137 @@ func TestNumberedPoolRotation(t *testing.T) {
 		t.Errorf("expected agy2-act.json to become agy2_1, got %s", prefixes["agy2-act.json"])
 	}
 }
+
+func TestLookupPoolAccount(t *testing.T) {
+	tempDir := t.TempDir()
+	stateFile := filepath.Join(tempDir, "auto-switcher-pro-state.json")
+
+	stateContent := `{
+		"pools": [
+			{
+				"id": "Pool-01-gemini",
+				"base_prefix": "agy",
+				"route_slug": "agy",
+				"leader_auth": "antigravity-infosoytec@gmail.com.json",
+				"active_leader": "antigravity-infowilsonlavio@gmail.com.json",
+				"members": [
+					"antigravity-infosoytec@gmail.com.json",
+					"antigravity-infowilsonlavio@gmail.com.json"
+				],
+				"reserves": [
+					"antigravity-infowilsonlavio@gmail.com.json"
+				]
+			},
+			{
+				"id": "Pool-02-gemini",
+				"base_prefix": "agy2",
+				"route_slug": "agy2",
+				"leader_auth": "antigravity-maribelluz@gmail.com.json",
+				"active_leader": "antigravity-maribelluz@gmail.com.json",
+				"members": [
+					"antigravity-maribelluz@gmail.com.json",
+					"antigravity-wilsonlavio11@gmail.com.json",
+					"antigravity-wilsonlavio7@gmail.com.json"
+				],
+				"reserves": [
+					"antigravity-wilsonlavio11@gmail.com.json",
+					"antigravity-wilsonlavio7@gmail.com.json"
+				]
+			},
+			{
+				"id": "Pool-03-sonnet",
+				"base_prefix": "agy_son",
+				"leader_auth": "antigravity-sonnet@gmail.com.json",
+				"active_leader": "antigravity-sonnet@gmail.com.json",
+				"members": ["antigravity-sonnet@gmail.com.json"],
+				"reserves": []
+			}
+		]
+	}`
+
+	if err := os.WriteFile(stateFile, []byte(stateContent), 0644); err != nil {
+		t.Fatalf("failed to write test state file: %v", err)
+	}
+
+	t.Setenv("AUTO_SWITCHER_STATE_PATH", stateFile)
+
+	t.Run("resolve leader in Pool 01 when reserve is active in RAM", func(t *testing.T) {
+		info, found := lookupPoolAccount("antigravity-infosoytec@gmail.com.json")
+		if !found {
+			t.Fatal("expected infosoytec to be found in Pool 01")
+		}
+		if info.PoolID != "Pool-01-gemini" {
+			t.Errorf("expected Pool-01-gemini, got %s", info.PoolID)
+		}
+		if info.VirtualPrefix != "agy" {
+			t.Errorf("expected virtual prefix 'agy', got %s", info.VirtualPrefix)
+		}
+		if info.Profile != "default" {
+			t.Errorf("expected profile 'default', got %s", info.Profile)
+		}
+		if info.IsActive {
+			t.Error("expected infosoytec to be inactive because infowilsonlavio is active_leader in RAM")
+		}
+		if !info.IsReserve {
+			t.Error("expected infosoytec to be flagged as reserve/standby when rotated")
+		}
+	})
+
+	t.Run("resolve active reserve in Pool 01 that took leadership in RAM", func(t *testing.T) {
+		info, found := lookupPoolAccount("antigravity-infowilsonlavio@gmail.com.json")
+		if !found {
+			t.Fatal("expected infowilsonlavio to be found in Pool 01")
+		}
+		if info.VirtualPrefix != "agy_1" {
+			t.Errorf("expected virtual prefix 'agy_1', got %s", info.VirtualPrefix)
+		}
+		if !info.IsActive {
+			t.Error("expected infowilsonlavio to be active because it is active_leader in RAM")
+		}
+	})
+
+	t.Run("resolve Pool 02 indexed reserves", func(t *testing.T) {
+		info11, found11 := lookupPoolAccount("antigravity-wilsonlavio11@gmail.com.json")
+		if !found11 {
+			t.Fatal("expected wilsonlavio11 to be found in Pool 02")
+		}
+		if info11.VirtualPrefix != "agy2_1" {
+			t.Errorf("expected virtual prefix 'agy2_1', got %s", info11.VirtualPrefix)
+		}
+		if info11.Profile != "2" {
+			t.Errorf("expected profile '2', got %s", info11.Profile)
+		}
+
+		info7, found7 := lookupPoolAccount("antigravity-wilsonlavio7@gmail.com.json")
+		if !found7 {
+			t.Fatal("expected wilsonlavio7 to be found in Pool 02")
+		}
+		if info7.VirtualPrefix != "agy2_2" {
+			t.Errorf("expected virtual prefix 'agy2_2', got %s", info7.VirtualPrefix)
+		}
+		if info7.Profile != "2" {
+			t.Errorf("expected profile '2', got %s", info7.Profile)
+		}
+	})
+
+	t.Run("resolve Sonnet pool profile", func(t *testing.T) {
+		infoSon, foundSon := lookupPoolAccount("antigravity-sonnet@gmail.com.json")
+		if !foundSon {
+			t.Fatal("expected sonnet to be found in Pool 03")
+		}
+		if infoSon.Profile != "son" {
+			t.Errorf("expected profile 'son', got %s", infoSon.Profile)
+		}
+		if infoSon.VirtualPrefix != "agy_son" {
+			t.Errorf("expected virtual prefix 'agy_son', got %s", infoSon.VirtualPrefix)
+		}
+	})
+
+	t.Run("non-pool account returns false", func(t *testing.T) {
+		_, found := lookupPoolAccount("unrelated-account@gmail.com.json")
+		if found {
+			t.Error("expected unrelated account not to be found")
+		}
+	})
+}
+

@@ -6,7 +6,45 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync/atomic"
+
+	"auto-switcher-pro/internal/analytics"
+	"auto-switcher-pro/internal/license"
+	"auto-switcher-pro/internal/version"
 )
+
+var totalRotations int64
+var totalFailovers int64
+
+func init() {
+	license.SetTelemetryProvider(func() license.TelemetryInfo {
+		var prefixes []string
+		if activeRegistry != nil {
+			if reg := activeRegistry(); reg != nil {
+				pools := reg.ListPools()
+				prefixes = make([]string, 0, len(pools))
+				for _, p := range pools {
+					prefixes = append(prefixes, p.BasePrefix)
+				}
+			}
+		}
+		persistedReqs, persistedFailovers := license.GetPersistedUsage()
+		curReqs := atomic.LoadInt64(&totalRotations)
+		if curReqs < persistedReqs {
+			curReqs = persistedReqs
+		}
+		curFail := atomic.LoadInt64(&totalFailovers)
+		if curFail < persistedFailovers {
+			curFail = persistedFailovers
+		}
+		return license.TelemetryInfo{
+			Version:        version.Version,
+			Rotations:      curReqs,
+			TotalFailovers: curFail,
+			ActivePools:    prefixes,
+		}
+	})
+}
 
 // Plugin-side RPC methods exposed by the CLIProxyAPI plugin host for the
 // model_provider, model_router and scheduler capabilities (sdk/pluginabi names).
@@ -155,8 +193,11 @@ func cleanBareModelID(id string) string {
 	return cur
 }
 
-// poolTargets extracts the pool's target model list (empty when unset).
+// poolTargets extracts the pool's target model list (empty when unset or paused).
 func poolTargets(pool PoolDefinition) []string {
+	if !pool.IsEnabled() {
+		return nil
+	}
 	if pool.Policy.DisableIsolation {
 		// Wildcard pools serve every family: no virtual catalog narrowing.
 		return nil
@@ -199,11 +240,8 @@ func poolContainsAuth(pool PoolDefinition, authFileName string) bool {
 	if name == "" {
 		return false
 	}
-	if strings.EqualFold(strings.TrimSpace(pool.LeaderAuth), name) {
-		return true
-	}
-	for _, reserve := range pool.Reserves {
-		if strings.EqualFold(strings.TrimSpace(reserve), name) {
+	for _, member := range pool.AllMembers() {
+		if strings.EqualFold(strings.TrimSpace(member), name) {
 			return true
 		}
 	}
@@ -264,6 +302,15 @@ func modelCatalogForAuth(diskPrefix string, memberPools []PoolDefinition) []plug
 	for _, pool := range memberPools {
 		targets := poolTargets(pool)
 		diskBacked := prefixMatchesPool(diskPrefix, pool.BasePrefix)
+		if pool.IsEnabled() {
+			cleanPoolName := strings.TrimSpace(pool.DisplayName)
+			if cleanPoolName == "" {
+				cleanPoolName = strings.TrimSpace(pool.ID)
+			}
+			if cleanPoolName != "" {
+				add(cleanPoolName)
+			}
+		}
 		for _, target := range targets {
 			add(target)
 			if !diskBacked {
@@ -277,19 +324,39 @@ func modelCatalogForAuth(diskPrefix string, memberPools []PoolDefinition) []plug
 }
 
 // poolPrefixedCatalog computes the static catalog of virtual pool routes:
-// "<base>/<target>" for every pool target, plus the baseline when no pools
+// Exposes the clean sovereign Pool Identifier (e.g. "Pool-01-gemini", "Pool-02-gemini")
+// as well as "<base>/<target>" for every pool target, plus the baseline when no pools
 // exist (keeps the provider match key armed at host sweep time).
 func poolPrefixedCatalog(registry *PoolRegistry) []pluginModelInfo {
 	pools := registry.ListPools()
 	models := make([]pluginModelInfo, 0, 16)
+	seen := make(map[string]struct{})
+	addModel := func(id, display string) {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return
+		}
+		if _, dup := seen[id]; dup {
+			return
+		}
+		seen[id] = struct{}{}
+		models = append(models, pluginModelInfo{
+			ID:          id,
+			Object:      "model",
+			OwnedBy:     antigravityProviderKey,
+			DisplayName: display,
+		})
+	}
 	for _, pool := range pools {
-		for _, target := range poolTargets(pool) {
-			models = append(models, pluginModelInfo{
-				ID:          pool.BasePrefix + "/" + target,
-				Object:      "model",
-				OwnedBy:     antigravityProviderKey,
-				DisplayName: target,
-			})
+		if !pool.IsEnabled() {
+			continue
+		}
+		cleanPoolName := strings.TrimSpace(pool.DisplayName)
+		if cleanPoolName == "" {
+			cleanPoolName = strings.TrimSpace(pool.ID)
+		}
+		if cleanPoolName != "" {
+			addModel(cleanPoolName, cleanPoolName)
 		}
 	}
 	if len(models) == 0 {
@@ -299,22 +366,51 @@ func poolPrefixedCatalog(registry *PoolRegistry) []pluginModelInfo {
 	return models
 }
 
-// routeDecisionFor resolves a model.route request: when the requested model
-// targets a registered pool route ("<base>/<target>"), the plugin rewrites it
-// to the bare target model on the built-in antigravity provider so selection
-// matches the pool members' registered catalog and the upstream call uses the
-// provider-native model name.
+// routeDecisionFor resolves a model.route request:
+// 1) Clean Pool Identifier ("Pool-01-gemini"): resolves dynamically to the configured
+//    model of the current ActiveLeader account in RAM.
+// 2) Legacy "<base>/<target>" route: rewrites to the bare target model on the built-in
+//    antigravity provider.
 func routeDecisionFor(registry *PoolRegistry, requestedModel string) modelRouteResponse {
 	trimmed := strings.TrimSpace(requestedModel)
+	if trimmed == "" {
+		return modelRouteResponse{}
+	}
+
 	slash := strings.Index(trimmed, "/")
-	if slash <= 0 || slash >= len(trimmed)-1 {
+	if slash <= 0 {
+		// Direct Clean Pool Identifier invocation (e.g. "Pool-01-gemini")
+		pool, ok := registry.GetPool(trimmed)
+		if !ok || !pool.IsEnabled() {
+			return modelRouteResponse{}
+		}
+		// Only treat bare strings without slash as pool routes if they match the Pool ID / DisplayName
+		// (avoid intercepting native bare models like "gemini-3-flash").
+		if !strings.EqualFold(trimmed, pool.ID) && !strings.EqualFold(trimmed, pool.DisplayName) && !strings.HasPrefix(strings.ToLower(trimmed), "pool-") {
+			return modelRouteResponse{}
+		}
+		activeAuth := strings.TrimSpace(pool.ActiveLeader)
+		if activeAuth == "" {
+			activeAuth = strings.TrimSpace(pool.LeaderAuth)
+		}
+		resolvedModel := pool.ActiveModelForAccount(activeAuth)
+		return modelRouteResponse{
+			Handled:     true,
+			TargetKind:  "provider",
+			Target:      antigravityProviderKey,
+			TargetModel: resolvedModel,
+			Reason:      fmt.Sprintf("auto-switcher-pro sovereign pool route (%s -> %s)", trimmed, resolvedModel),
+		}
+	}
+
+	if slash >= len(trimmed)-1 {
 		return modelRouteResponse{}
 	}
 
 	base := trimmed[:slash]
 	rest := trimmed[slash+1:]
 	pool, ok := registry.GetPool(base)
-	if !ok {
+	if !ok || !pool.IsEnabled() {
 		return modelRouteResponse{}
 	}
 
@@ -377,6 +473,13 @@ func handleModelRoute(req modelRouteRequest) modelRouteResponse {
 // filtered by availability (cooldowns excluded) and model support, so picking
 // the first cascade member present IS quota-aware failover.
 func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) schedulerPickResponse {
+	// Verificar si la licencia permite rotación o si el periodo de prueba expiró
+	licStatus := license.GetLicenseStatus()
+	if !licStatus.CanRotate {
+		// Licencia expirada: no permitir failover ni cascada a cuentas de reserva
+		return schedulerPickResponse{Handled: false}
+	}
+
 	// 1) Pool identity from the original client model ("clau/claude-sonnet-4-6")
 	// carried by the host in the requested_model metadata key.
 	originalModel := ""
@@ -389,7 +492,7 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 	}
 	var pool *PoolDefinition
 	if slash := strings.Index(originalModel, "/"); slash > 0 {
-		if candidate, ok := registry.GetPool(originalModel[:slash]); ok {
+		if candidate, ok := registry.GetPool(originalModel[:slash]); ok && candidate.IsEnabled() {
 			rest := originalModel[slash+1:]
 			for _, target := range poolTargets(candidate) {
 				if strings.EqualFold(target, rest) {
@@ -398,31 +501,113 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 				}
 			}
 		}
+	} else if originalModel != "" {
+		// Clean Pool Identifier (e.g. "Pool-01-gemini")
+		if candidate, ok := registry.GetPool(originalModel); ok && candidate.IsEnabled() {
+			if strings.EqualFold(originalModel, candidate.ID) ||
+				strings.EqualFold(originalModel, candidate.DisplayName) ||
+				strings.HasPrefix(strings.ToLower(originalModel), "pool-") {
+				pool = &candidate
+			}
+		}
 	}
 	if pool == nil {
 		// Not a pool request (native credential or non-pool model): native scheduler.
 		return schedulerPickResponse{Handled: false}
 	}
-	// 2) Cascade order: leader first, reserves in registration order.
-	cascade := make([]string, 0, 1+len(pool.Reserves))
-	if leader := strings.TrimSpace(pool.LeaderAuth); leader != "" {
-		cascade = append(cascade, leader)
-	}
-	for _, reserve := range pool.Reserves {
-		if trimmed := strings.TrimSpace(reserve); trimmed != "" {
-			cascade = append(cascade, trimmed)
+	// 2) Symmetrical Pool Members with Dynamic Active Leader ordering:
+	// Start from the current ActiveLeader in RAM (if set), followed by remaining pool members.
+	allMembers := pool.AllMembers()
+	cascade := make([]string, 0, len(allMembers))
+	currentActive := strings.TrimSpace(pool.ActiveLeader)
+	if currentActive != "" {
+		for _, m := range allMembers {
+			if strings.EqualFold(m, currentActive) {
+				cascade = append(cascade, m)
+				break
+			}
 		}
+		for _, m := range allMembers {
+			if !strings.EqualFold(m, currentActive) {
+				cascade = append(cascade, m)
+			}
+		}
+	} else {
+		cascade = append(cascade, allMembers...)
 	}
 
 	// 3) Pick the first cascade member present among the available candidates.
+	// REGLA PREDICTIVA (CTO): Si el líder dinámico actual está cerca de su límite seguro (>80%)
+	// y hay otros miembros del pool sanos, rotar preventivamente el liderazgo antes del 429.
 	available := make(map[string]string, len(req.Candidates))
 	for _, candidate := range req.Candidates {
 		if strings.TrimSpace(candidate.ID) != "" {
 			available[strings.ToLower(candidate.ID)] = candidate.ID
 		}
 	}
-	for _, authFile := range cascade {
+
+	predEngine := GetPredictiveEngine()
+
+	// Evaluar si el líder dinámico actual requiere descanso preventivo y si existe al menos otro miembro sano
+	leaderAuth := ""
+	if len(cascade) > 0 {
+		leaderAuth = cascade[0]
+	}
+	leaderEmail := strings.TrimSuffix(strings.TrimPrefix(leaderAuth, "antigravity-"), ".json")
+
+	hasHealthyReserve := false
+	if len(cascade) > 1 {
+		for _, resAuth := range cascade[1:] {
+			if _, ok := available[strings.ToLower(resAuth)]; ok {
+				hasHealthyReserve = true
+				break
+			}
+		}
+	}
+
+	skipLeaderPredictive := hasHealthyReserve && predEngine.ShouldPreventiveCool(leaderEmail)
+
+	for i, authFile := range cascade {
+		// Si el motor predictivo decidió enfriar al líder actual y estamos en i == 0, rotar al siguiente miembro
+		if i == 0 && skipLeaderPredictive {
+			continue
+		}
+
 		if exactID, ok := available[strings.ToLower(authFile)]; ok {
+			isFailover := (i > 0) // Si i > 0 significa que hubo rotación de líder (por 429 o balanceo predictivo)
+			if isFailover && registry != nil {
+				// Actualizar el Líder Dinámico Ficticio en RAM hacia el nuevo miembro activo
+				registry.SetActiveLeader(pool.BasePrefix, exactID)
+			}
+			reqs, fail := license.RecordRotation(isFailover)
+			atomic.StoreInt64(&totalRotations, reqs)
+			atomic.StoreInt64(&totalFailovers, fail)
+
+			// Registrar evento granular en SQLite local (Pulse Tokens)
+			email := exactID
+			email = strings.TrimPrefix(email, "antigravity-")
+			email = strings.TrimSuffix(email, ".json")
+
+			// Registrar actividad en el motor predictivo para control de fatiga
+			predEngine.RecordActivity(email)
+
+			// Resolver el modelo especialista específico de esta cuenta (member_models o fallback del pool)
+			resolvedTargetModel := pool.ActiveModelForAccount(exactID)
+			if strings.TrimSpace(resolvedTargetModel) == "" {
+				resolvedTargetModel = originalModel
+			}
+
+			analytics.RecordEvent(analytics.RotationEvent{
+				PoolID:          pool.ID,
+				PoolPrefix:      pool.BasePrefix,
+				SelectedAccount: exactID,
+				AccountEmail:    email,
+				IsFailover:      isFailover,
+				CascadeIndex:    i,
+				TargetModel:     resolvedTargetModel,
+				StatusCode:      200,
+			})
+
 			return schedulerPickResponse{
 				Handled: true,
 				AuthID:  exactID,

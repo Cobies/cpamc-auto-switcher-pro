@@ -8,6 +8,8 @@ import {
   detectSpecialistState,
   listModels,
   listPools,
+  savePool,
+  patchAuthFileExclusions,
   fetchCardQuota,
   computeAccountTelemetry,
   classifyCooldowns,
@@ -194,6 +196,57 @@ export default function AutoAuthFiles({
     [effectiveCatalogModels]
   );
 
+  const handlePatchSpecialist = useCallback(
+    async (targetFileName, exclusionsToSave, selectedModel) => {
+      const currentCard = specialistModal.card;
+      // Gobernanza 100% Virtual e Independencia Per-Cuenta:
+      // Si la tarjeta pertenece a un pool registrado, actualizamos ÚNICAMENTE el modelo
+      // especialista de esta cuenta física en member_models[targetFile], sin alterar
+      // la política general del pool ni forzar a las demás tarjetas miembros.
+      if (currentCard?.poolId || currentCard?.activePoolBase) {
+        const targetPoolId = currentCard.poolId;
+        const targetBase = currentCard.activePoolBase;
+        const targetPool = registeredPools.find(
+          (p) => p.id === targetPoolId || p.base_prefix === targetBase
+        );
+        if (targetPool) {
+          const authKey = currentCard.masterFileName || targetFileName;
+          const updatedMemberModels = {
+            ...(targetPool.member_models || {}),
+          };
+          if (authKey && selectedModel) {
+            updatedMemberModels[authKey] = selectedModel;
+          }
+          const updatedPool = {
+            ...targetPool,
+            policy: {
+              ...(targetPool.policy || {}),
+              disable_isolation: false,
+              // Preservar target_models existente como fallback de familia,
+              // o inicializarlo si estaba vacío.
+              target_models:
+                Array.isArray(targetPool.policy?.target_models) && targetPool.policy.target_models.length > 0
+                  ? targetPool.policy.target_models
+                  : (selectedModel ? [selectedModel] : []),
+              excluded_models: [],
+            },
+            member_models: updatedMemberModels,
+          };
+          await savePool(updatedPool);
+          // Refrescar la lista de pools localmente
+          const poolsRes = await listPools();
+          if (Array.isArray(poolsRes?.pools)) {
+            setRegisteredPools(poolsRes.pools);
+          }
+          return { ok: true, name: targetFileName };
+        }
+      }
+      // Fallback para cuentas libres / fuera de pools: exclusiones nativas en CPAMC
+      return await patchAuthFileExclusions(targetFileName, exclusionsToSave);
+    },
+    [specialistModal.card, registeredPools]
+  );
+
   const handleSpecialistSaved = useCallback(
     async (result) => {
       setSuccessMessage(
@@ -368,7 +421,7 @@ export default function AutoAuthFiles({
                 color: poolStyle.color,
               } : {}}
             >
-              🎯 MODELO ESPECIALISTA ACTIVO
+              🎯 MODELO ASIGNADO EN RAM
             </span>
           </div>
           <div
@@ -379,7 +432,7 @@ export default function AutoAuthFiles({
             {specState.activeSpecialistModel}
           </div>
           <div className="hero-model-helper">
-            Tráfico exclusivo hacia este modelo · {specState.excludedCount} modelo(s) excluido(s)
+            Ruteo virtual activo · 🛡️ Aislamiento en RAM (Disco intacto)
           </div>
         </div>
       );
@@ -400,7 +453,7 @@ export default function AutoAuthFiles({
     );
   };
 
-  const renderQuotaTelemetry = (masterKey, source) => {
+  const renderQuotaTelemetry = (masterKey, source, familyRole) => {
     const telemetry = extractAccountTelemetry(source);
     const quota = getCardQuota(masterKey, telemetry);
     const isRefreshing = refreshingQuotaKeys.has(masterKey);
@@ -419,6 +472,18 @@ export default function AutoAuthFiles({
             null
           )
         : null;
+
+    // Filtrar grupos de cuota para priorizar la familia activa de la tarjeta:
+    // En Gemini cards, no saturar con Claude si ya hay Gemini models presentes
+    const visibleGroups = (quota.groups || []).filter((group) => {
+      if (familyRole === 'gemini') {
+        // Si el grupo contiene Claude, solo mostrarlo si no hay grupo de Gemini
+        const isClaudeGroup = group.title.toLowerCase().includes('claude');
+        const hasGeminiGroup = quota.groups.some((g) => g.title.toLowerCase().includes('gemini'));
+        if (isClaudeGroup && hasGeminiGroup) return false;
+      }
+      return true;
+    });
 
     return (
       <div className="card-quota-telemetry" data-testid="card-quota-telemetry">
@@ -447,7 +512,7 @@ export default function AutoAuthFiles({
           </div>
         </div>
 
-        {(quota.groups || []).map((group, gIdx) => (
+        {visibleGroups.map((group, gIdx) => (
           <div key={gIdx} className="quota-group">
             <div className="group-title">{group.title}</div>
             {(group.rows || []).map((row, rIdx) => {
@@ -518,6 +583,23 @@ export default function AutoAuthFiles({
     () => buildManagedPoolCards(nodes, registeredPools),
     [nodes, registeredPools]
   );
+
+  // Scalable N -> 2N Managed Pool Cards agrupadas por Pool
+  const poolGroups = useMemo(() => {
+    const groups = new Map();
+    managedCards.forEach((card, idx) => {
+      const poolKey = card.poolId || card.activePoolBase || 'sin-pool';
+      if (!groups.has(poolKey)) {
+        groups.set(poolKey, {
+          poolId: card.poolId,
+          activePoolBase: card.activePoolBase,
+          cards: [],
+        });
+      }
+      groups.get(poolKey).cards.push({ card, originalIdx: idx });
+    });
+    return Array.from(groups.values());
+  }, [managedCards]);
 
   // 1b. Auto-fetch live quota/tier once per physical master on mount so cards
   // show real Google values when reachable (never fabricated defaults).
@@ -870,180 +952,234 @@ export default function AutoAuthFiles({
             </p>
           </div>
         ) : (
-          <div className="auto-auth-grid" data-testid="section-virtuals">
-          {managedCards.map((card, idx) => {
-            const isGemini = card.familyRole === 'gemini';
-            const roleBadgeClass = isGemini ? 'master' : 'virtual';
-            const familyTitle = isGemini ? '💎 Gemini Card' : '🎭 Claude Card';
+          <div className="auto-auth-section-groups" data-testid="section-virtuals">
+            {poolGroups.map((group, gIdx) => {
+              const groupPoolId = group.poolId || group.activePoolBase || `Pool-${gIdx + 1}`;
+              const poolDef = registeredPools.find(
+                (p) => p.id === group.poolId || p.base_prefix === group.activePoolBase
+              );
+              const groupTargetModel =
+                poolDef?.policy?.target_models?.[0] ||
+                group.cards[0]?.card?.specialistModel ||
+                'Multimodelo';
 
-            let poolStatusBadge = 'LIBRE';
-            if (card.poolRole === 'leader') poolStatusBadge = 'LÍDER';
-            else if (card.poolRole === 'reserve') poolStatusBadge = 'RESERVA';
-
-            const excludes55 = (card.exclusionBadges || []).includes('Excluye 5.5');
-            const virtualFileToDelete = card.virtualFileName;
-            const claudeIdx = claudeCards.indexOf(card);
-            const cardInherited = resolveInheritedCardModels(card, effectiveCatalogModels);
-            // Gobernanza virtual pura: la política del pool manda. Si el pool define un
-            // especialista aislado (1 Pool = 1 Modelo), la tarjeta lo refleja sin depender
-            // del catálogo heredado ni de exclusiones físicas en disco (CPAMC nativo intacto).
-            const specState = card.specialistModel
-              ? {
-                  isSpecialist: true,
-                  activeSpecialistModel: card.specialistModel,
-                  excludedCount:
-                    cardInherited.length > 1
-                      ? cardInherited.length - 1
-                      : (card.excludedModels || []).length,
-                }
-              : detectSpecialistState(card, cardInherited);
-            const poolGroupStyle = getPoolGroupStyle(card.assignedPrefix);
-
-            return (
-              <div
-                key={card.cardId || idx}
-                className={`auto-auth-card ${roleBadgeClass}`}
-                style={{
-                  ...poolGroupStyle.cardStyle,
-                  '--card-accent': poolGroupStyle.primary,
-                  '--card-accent-bg': poolGroupStyle.bg,
-                  '--card-accent-border': poolGroupStyle.border,
-                  '--card-accent-color': poolGroupStyle.color,
-                }}
-                data-testid={isGemini ? `gemini-card-${idx}` : `virtual-card-${claudeIdx}`}
-              >
-                <div className="auto-auth-card-top">
-                  <span className={`badge-role ${roleBadgeClass}`}>
-                    {familyTitle}
-                  </span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span
-                      className={poolGroupStyle.className}
-                      style={poolGroupStyle.style}
-                    >
-                      {card.activePoolBase
-                        ? `[${card.activePoolBase}]`
-                        : card.assignedPrefix
-                        ? `[${card.assignedPrefix}]`
-                        : 'Sin Asignar'}
-                    </span>
-                    <button
-                      type="button"
-                      className="btn-card-gear"
-                      onClick={() => handleOpenSpecialist(card)}
-                      aria-label="Configurar Especialista"
-                      data-testid={isGemini ? `btn-gear-gemini-${idx}` : `btn-gear-virtual-${claudeIdx}`}
-                      title="Configurar Especialista (⚙️)"
-                    >
-                      ⚙️
-                    </button>
-                  </div>
-                </div>
-
-                <div className="auto-auth-identity">
-                  <span className="auto-auth-email">{card.maskedEmail}</span>
-                  <span className="auto-auth-filename">
-                    {card.virtualFileName
-                      ? maskDisplayIdentifier(card.virtualFileName)
-                      : maskDisplayIdentifier(card.masterFileName)}
-                  </span>
-                </div>
-
-                {/* Origin Traceability Badge (derived cards linking to master) */}
-                {!isGemini && (
-                  <div
-                    className="auto-auth-origin-box"
-                    data-testid="origin-traceability-badge"
-                  >
-                    <span className="auto-auth-origin-icon">🔗</span>
-                    <span>
-                      Origen: <strong>{card.maskedEmail}</strong> (Master)
-                    </span>
-                  </div>
-                )}
-
-                {/* Hero Active Model Banner (MINI-002) */}
-                {renderHeroBanner(
-                  specState,
-                  isGemini
-                    ? cardInherited.includes('gemini-3.8-flash-high')
-                      ? 'gemini-3.8-flash-high'
-                      : cardInherited.find((m) => m.includes('3.8'))
-                      || (cardInherited.includes('gemini-2.5-pro') ? 'gemini-2.5-pro' : cardInherited[0] || 'gemini-3.8-flash-high')
-                    : cardInherited.includes('claude-3-7-sonnet')
-                    ? 'claude-3-7-sonnet'
-                    : cardInherited.find((m) => m.includes('3.7') || m.includes('sonnet'))
-                    || cardInherited[0]
-                    || 'claude-3-7-sonnet',
-                  poolGroupStyle,
-                  cardInherited.length
-                )}
-
-                <div className="auto-auth-badges-row">
-                  <span className="badge-pool-prefix" style={poolGroupStyle.statusBadgeStyle || {}}>
-                    Estado: {poolStatusBadge} {card.activePoolBase ? `[${card.activePoolBase}]` : ''}
-                  </span>
-
-                  {specState.isSpecialist ? (
-                    <>
-                      <span
-                        className="badge-specialist-active"
-                        style={{
-                          background: poolGroupStyle.bg,
-                          borderColor: poolGroupStyle.border,
-                          color: poolGroupStyle.color,
-                        }}
-                        data-testid={`badge-specialist-active-${idx}`}
-                      >
-                        🎯 Modelo Activo: {specState.activeSpecialistModel}
+              return (
+                <div key={groupPoolId} className="auto-auth-pool-group" data-testid={`pool-group-${gIdx}`}>
+                  <div className="auto-auth-pool-header">
+                    <div className="auto-auth-pool-info">
+                      <span className="auto-auth-pool-title">
+                        📦 {groupPoolId}
                       </span>
-                      <span
-                        className="badge-specialist-excluded"
-                        data-testid={`badge-specialist-excluded-${idx}`}
-                      >
-                        🚫 Excluidos: {specState.excludedCount} modelos
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      {(card.exclusionBadges || []).map((badge, bIdx) => (
-                        <span key={bIdx} className="badge-exclusion">
-                          🚫 {badge}
+                      {group.activePoolBase && (
+                        <span className="auto-auth-pool-badge">
+                          Base: [{group.activePoolBase}]
                         </span>
-                      ))}
-
-                      {/* Serves badge */}
-                      <span className="badge-target-family">
-                        {isGemini
-                          ? '✨ Serves: Gemini 3.x Flash & Pro'
-                          : `✨ Serves: Claude Sonnet/Opus ${excludes55 ? '(4.6 Estable)' : '(4.6 & 5.5-high)'}`}
+                      )}
+                      <span className="auto-auth-pool-target">
+                        🎯 Objetivo: <strong>{groupTargetModel}</strong>
                       </span>
-                    </>
-                  )}
-                </div>
-
-                {/* Quota Telemetry Homologation (MINI-003) */}
-                {renderQuotaTelemetry(card.masterFileName, card)}
-
-                {/* Card actions: dissolution if virtual file exists */}
-                {virtualFileToDelete && (
-                  <div className="auto-auth-card-actions">
-                    <button
-                      type="button"
-                      className="btn-delete-clone"
-                      onClick={() => handleDeleteVirtual(virtualFileToDelete)}
-                      disabled={isProcessing}
-                      data-testid={`btn-delete-virtual-${virtualFileToDelete}`}
-                    >
-                      <span>💥</span>
-                      <span>Disolver / Eliminar Clon</span>
-                    </button>
+                    </div>
+                    <span className="auto-auth-section-count">
+                      {group.cards.length} cuenta(s) en rotación
+                    </span>
                   </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+
+                  <div className="auto-auth-grid">
+                    {group.cards.map(({ card, originalIdx: idx }) => {
+                      const isGemini = card.familyRole === 'gemini';
+                      const roleBadgeClass = isGemini ? 'master' : 'virtual';
+                      const familyTitle = isGemini ? '💎 Gemini' : '🎭 Claude';
+
+                      const excludes55 = (card.exclusionBadges || []).includes('Excluye 5.5');
+                      const virtualFileToDelete = card.virtualFileName;
+                      const claudeIdx = claudeCards.indexOf(card);
+                      const cardInherited = resolveInheritedCardModels(card, effectiveCatalogModels);
+                      const specState = card.specialistModel
+                        ? {
+                            isSpecialist: true,
+                            activeSpecialistModel: card.specialistModel,
+                            excludedCount:
+                              cardInherited.length > 1
+                                ? cardInherited.length - 1
+                                : (card.excludedModels || []).length,
+                          }
+                        : detectSpecialistState(card, cardInherited);
+                      const poolGroupStyle = getPoolGroupStyle(card.assignedPrefix);
+
+                      return (
+                        <div
+                          key={card.cardId || idx}
+                          className={`auto-auth-card ${roleBadgeClass}`}
+                          style={{
+                            ...poolGroupStyle.cardStyle,
+                            '--card-accent': poolGroupStyle.primary,
+                            '--card-accent-bg': poolGroupStyle.bg,
+                            '--card-accent-border': poolGroupStyle.border,
+                            '--card-accent-color': poolGroupStyle.color,
+                          }}
+                          data-testid={isGemini ? `gemini-card-${idx}` : `virtual-card-${claudeIdx}`}
+                        >
+                          <div className="auto-auth-card-top">
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span
+                                className="badge-prefix-hero"
+                                style={{
+                                  background: poolGroupStyle.primary || '#0284c7',
+                                  color: '#ffffff',
+                                }}
+                                data-testid={`badge-prefix-hero-${idx}`}
+                              >
+                                🏷️ [{card.assignedPrefix || card.activePoolBase || 'sin-prefijo'}]
+                              </span>
+                              <span className={`badge-role ${roleBadgeClass}`}>
+                                {familyTitle}
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <button
+                                type="button"
+                                className="btn-card-gear"
+                                onClick={() => handleOpenSpecialist(card)}
+                                aria-label="Configurar Especialista"
+                                data-testid={isGemini ? `btn-gear-gemini-${idx}` : `btn-gear-virtual-${claudeIdx}`}
+                                title="Configurar Especialista (⚙️)"
+                              >
+                                ⚙️
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="auto-auth-identity">
+                            <span
+                              className="auto-auth-email"
+                              title={card.email || card.maskedEmail}
+                            >
+                              {card.email || card.maskedEmail}
+                            </span>
+                            <span className="auto-auth-filename">
+                              {card.virtualFileName
+                                ? maskDisplayIdentifier(card.virtualFileName)
+                                : maskDisplayIdentifier(card.masterFileName)}
+                            </span>
+                          </div>
+
+                          {/* Origin Traceability Badge (derived cards linking to master) */}
+                          {!isGemini && (
+                            <div
+                              className="auto-auth-origin-box"
+                              data-testid="origin-traceability-badge"
+                            >
+                              <span className="auto-auth-origin-icon">🔗</span>
+                              <span>
+                                Origen: <strong>{card.maskedEmail}</strong> (Master)
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Hero Active Model Banner (MINI-002) */}
+                          {renderHeroBanner(
+                            specState,
+                            isGemini
+                              ? cardInherited.includes('gemini-3.8-flash-high')
+                                ? 'gemini-3.8-flash-high'
+                                : cardInherited.find((m) => m.includes('3.8'))
+                                || (cardInherited.includes('gemini-2.5-pro') ? 'gemini-2.5-pro' : cardInherited[0] || 'gemini-3.8-flash-high')
+                              : cardInherited.includes('claude-3-7-sonnet')
+                              ? 'claude-3-7-sonnet'
+                              : cardInherited.find((m) => m.includes('3.7') || m.includes('sonnet'))
+                              || cardInherited[0]
+                              || 'claude-3-7-sonnet',
+                            poolGroupStyle,
+                            cardInherited.length
+                          )}
+
+                          <div className="auto-auth-badges-row">
+                            <div className="status-pill-group">
+                              <span
+                                className="badge-pool-prefix"
+                                style={{
+                                  ...(poolGroupStyle.statusBadgeStyle || {}),
+                                  background: card.isDynamicRAMLeader
+                                    ? 'rgba(16, 185, 129, 0.2)'
+                                    : 'rgba(51, 65, 85, 0.4)',
+                                  borderColor: card.isDynamicRAMLeader
+                                    ? '#10b981'
+                                    : 'rgba(148, 163, 184, 0.3)',
+                                  color: card.isDynamicRAMLeader ? '#34d399' : '#94a3b8',
+                                  fontWeight: 700,
+                                }}
+                              >
+                                {card.isDynamicRAMLeader
+                                  ? '🟢 EN CALIENTE: DESPACHANDO EN RAM'
+                                  : '⏸️ EN BANQUILLO: RESERVA LISTA'}
+                              </span>
+                              {card.isDynamicRAMLeader && (
+                                <span className="badge-ram-leader">
+                                  👑 Turno Activo
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="isolation-pill-group">
+                              {specState.isSpecialist ? (
+                                <>
+                                  <span
+                                    className="badge-specialist-active"
+                                    style={{ display: 'none' }}
+                                    data-testid={`badge-specialist-active-${idx}`}
+                                  >
+                                    🎯 Modelo Activo: {specState.activeSpecialistModel}
+                                  </span>
+                                  <span
+                                    className="badge-isolation-tag"
+                                    data-testid={`badge-specialist-excluded-${idx}`}
+                                  >
+                                    🛡️ Aislamiento Virtual Puro (🚫 Excluidos: {specState.excludedCount} modelos)
+                                  </span>
+                                </>
+                              ) : (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                  {(card.exclusionBadges || []).map((badge, bIdx) => (
+                                    <span key={bIdx} className="badge-exclusion">
+                                      🚫 {badge}
+                                    </span>
+                                  ))}
+                                  <span className="badge-target-family">
+                                    {isGemini
+                                      ? '✨ Gemini 3.x'
+                                      : `✨ Claude ${excludes55 ? '4.6' : '4.6 & 5.5'}`}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Quota Telemetry Homologation (MINI-003) */}
+                          {renderQuotaTelemetry(card.masterFileName, card, card.familyRole)}
+
+                          {/* Card actions: dissolution if virtual file exists */}
+                          {virtualFileToDelete && (
+                            <div className="auto-auth-card-actions">
+                              <button
+                                type="button"
+                                className="btn-delete-clone"
+                                onClick={() => handleDeleteVirtual(virtualFileToDelete)}
+                                disabled={isProcessing}
+                                data-testid={`btn-delete-virtual-${virtualFileToDelete}`}
+                              >
+                                <span>💥</span>
+                                <span>Disolver / Eliminar Clon</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
 
@@ -1055,6 +1191,7 @@ export default function AutoAuthFiles({
         allCatalogModels={effectiveCatalogModels}
         onClose={() => setSpecialistModal((prev) => ({ ...prev, isOpen: false, card: null }))}
         onSaved={handleSpecialistSaved}
+        patchFn={handlePatchSpecialist}
       />
     </div>
   );

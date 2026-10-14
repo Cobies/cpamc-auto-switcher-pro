@@ -8,3 +8,10 @@
 # Node / build caches
 node_modules/
 .vite/
+bin/
+node_modules/
+*.h
+pnpm-lock.yaml
+pnpm-workspace.yaml
+investigaciones/
+openspec/

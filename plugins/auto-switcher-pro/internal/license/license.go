@@ -1,0 +1,445 @@
+package license
+
+import (
+	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
+)
+
+// MasterPublicKeyHex is the embedded Ed25519 public key.
+// Only the corresponding private key (held exclusively by Wilox) can sign valid licenses.
+const MasterPublicKeyHex = "5703fbe52952c260651807d527db5e6021b38cdb40f4ff7ef5b898f3288ab1e1"
+
+const (
+	TrialDurationDays = 30
+	StatusTrial       = "trial"
+	StatusActive      = "active"
+	StatusExpired     = "expired"
+	DefaultHubURL     = "http://31.220.81.105:8444"
+)
+
+// LicenseClaims represents the payload signed inside an activation key.
+type LicenseClaims struct {
+	MachineID string `json:"machine_id"` // Strictly machine-locked
+	Client    string `json:"client"`     // Buyer identifier (e.g. email or handle)
+	Tier      string `json:"tier"`       // "pro" or "enterprise"
+	IssuedAt  int64  `json:"iat"`        // Unix timestamp
+	ExpiresAt int64  `json:"exp"`        // Unix timestamp (0 for lifetime)
+}
+
+// LicenseFile represents the persisted state on disk.
+type LicenseFile struct {
+	FirstBootAt    int64          `json:"first_boot_at"`
+	LastSeenAt     int64          `json:"last_seen_at"`
+	MachineID      string         `json:"machine_id,omitempty"`
+	TotalRequests  int64          `json:"total_requests,omitempty"`  // Total de peticiones balanceadas
+	TotalFailovers int64          `json:"total_failovers,omitempty"` // Rotaciones reales por rescate de reserva
+	LicenseKey     string         `json:"license_key,omitempty"`
+	ActiveClaims   *LicenseClaims `json:"active_claims,omitempty"`
+}
+
+// StatusReport is returned to the web UI and management API.
+type StatusReport struct {
+	MachineID      string `json:"machine_id"`
+	Status         string `json:"status"` // "trial" | "active" | "expired"
+	DaysRemaining  int    `json:"days_remaining"`
+	TrialTotalDays int    `json:"trial_total_days"`
+	Tier           string `json:"tier"`
+	Client         string `json:"client,omitempty"`
+	ExpiresAt      string `json:"expires_at,omitempty"`
+	IsPro          bool   `json:"is_pro"`
+	CanRotate      bool   `json:"can_rotate"`
+}
+
+func getLicenseStoragePath() string {
+	candidates := []string{
+		"/CLIProxyAPI/plugins/auto-switcher-pro-license.json",
+		filepath.Join(os.Getenv("HOME"), "services/cliproxy/plugins/auto-switcher-pro-license.json"),
+		filepath.Join(os.Getenv("HOME"), ".local/share/auto-switcher-pro/license.json"),
+		"./auto-switcher-pro-license.json",
+	}
+	for _, p := range candidates {
+		dir := filepath.Dir(p)
+		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+			return p
+		}
+	}
+	return "./auto-switcher-pro-license.json"
+}
+
+// LoadOrInitLicense loads the license file or creates initial 30-day trial record.
+func LoadOrInitLicense() (*LicenseFile, error) {
+	path := getLicenseStoragePath()
+	now := time.Now().Unix()
+
+	if data, err := os.ReadFile(path); err == nil {
+		var lf LicenseFile
+		if err := json.Unmarshal(data, &lf); err == nil && lf.FirstBootAt > 0 {
+			// Anti-tamper check: clock rollback detection
+			if now < lf.LastSeenAt-3600 {
+				// Clock went back more than 1 hour -> advance last seen to prevent abuse
+				lf.LastSeenAt = now
+			} else if now > lf.LastSeenAt {
+				lf.LastSeenAt = now
+			}
+
+			// Asegurar que el MachineID quede guardado en el archivo persistente
+			if lf.MachineID == "" {
+				lf.MachineID = GetMachineID()
+			}
+			_ = saveLicenseFile(path, &lf)
+			return &lf, nil
+		}
+	}
+
+	// Initialize new trial record
+	lf := &LicenseFile{
+		FirstBootAt: now,
+		LastSeenAt:  now,
+		MachineID:   GetMachineID(),
+	}
+	_ = saveLicenseFile(path, lf)
+	return lf, nil
+}
+
+func saveLicenseFile(path string, lf *LicenseFile) error {
+	dir := filepath.Dir(path)
+	_ = os.MkdirAll(dir, 0755)
+	data, err := json.MarshalIndent(lf, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
+// VerifyActivationKey validates an Ed25519 signature against current machine ID.
+func VerifyActivationKey(keyStr string, currentMachineID string) (*LicenseClaims, error) {
+	keyStr = strings.TrimSpace(keyStr)
+	parts := strings.Split(keyStr, ".")
+	if len(parts) != 2 {
+		return nil, errors.New("formato de clave inválido (debe ser payload.signature)")
+	}
+
+	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return nil, fmt.Errorf("error al decodificar payload: %w", err)
+	}
+
+	sigBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil, fmt.Errorf("error al decodificar firma: %w", err)
+	}
+
+	pubBytes, err := hex.DecodeString(MasterPublicKeyHex)
+	if err != nil || len(pubBytes) != ed25519.PublicKeySize {
+		return nil, errors.New("error en clave pública del sistema")
+	}
+
+	// Verify Ed25519 signature
+	if !ed25519.Verify(pubBytes, payloadBytes, sigBytes) {
+		return nil, errors.New("firma criptográfica inválida o clave adulterada")
+	}
+
+	var claims LicenseClaims
+	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
+		return nil, fmt.Errorf("error al interpretar claims: %w", err)
+	}
+
+	// Strict Machine-Lock check
+	if claims.MachineID != currentMachineID {
+		return nil, fmt.Errorf("esta licencia pertenece a otra máquina (%s)", claims.MachineID)
+	}
+
+	// Expiration check (0 means lifetime)
+	now := time.Now().Unix()
+	if claims.ExpiresAt > 0 && now > claims.ExpiresAt {
+		return nil, errors.New("la licencia ha expirado")
+	}
+
+	return &claims, nil
+}
+
+// ActivateKey activates and persists a signed key.
+func ActivateKey(keyStr string) (*StatusReport, error) {
+	currentMachine := GetMachineID()
+	claims, err := VerifyActivationKey(keyStr, currentMachine)
+	if err != nil {
+		return nil, err
+	}
+
+	path := getLicenseStoragePath()
+	lf, _ := LoadOrInitLicense()
+	lf.LicenseKey = keyStr
+	lf.ActiveClaims = claims
+	lf.LastSeenAt = time.Now().Unix()
+
+	if err := saveLicenseFile(path, lf); err != nil {
+		return nil, fmt.Errorf("error al guardar licencia: %w", err)
+	}
+
+	return GetLicenseStatus(), nil
+}
+
+// TelemetryInfo represents usage and environment metrics reported to the licensing hub.
+type TelemetryInfo struct {
+	Version        string   `json:"version"`
+	OS             string   `json:"os"`
+	Rotations      int64    `json:"rotations"`       // Peticiones totales
+	TotalFailovers int64    `json:"total_failovers"` // Conmutaciones por rescate de reserva
+	ActivePools    []string `json:"active_pools"`
+}
+
+var telemetryProvider func() TelemetryInfo
+var lastSyncUnix int64
+var syncMutex sync.Mutex
+
+// RecordRotation atomically increments and persists request and failover metrics.
+func RecordRotation(isFailover bool) (int64, int64) {
+	path := getLicenseStoragePath()
+	lf, _ := LoadOrInitLicense()
+	lf.TotalRequests++
+	if isFailover {
+		lf.TotalFailovers++
+	}
+	_ = saveLicenseFile(path, lf)
+	return lf.TotalRequests, lf.TotalFailovers
+}
+
+// GetPersistedUsage returns the stored requests and failover metrics.
+func GetPersistedUsage() (int64, int64) {
+	lf, _ := LoadOrInitLicense()
+	return lf.TotalRequests, lf.TotalFailovers
+}
+
+// SetTelemetryProvider registers a provider function for usage telemetry.
+func SetTelemetryProvider(provider func() TelemetryInfo) {
+	telemetryProvider = provider
+}
+
+// SyncWithCloudHub contacts the central Contabo VPS to verify/update status in background.
+func SyncWithCloudHub(machineID string) {
+	now := time.Now().Unix()
+	syncMutex.Lock()
+	if now-lastSyncUnix < 20 { // Throttle: máximo un ping cada 20 segundos
+		syncMutex.Unlock()
+		return
+	}
+	lastSyncUnix = now
+	syncMutex.Unlock()
+
+	hubURL := os.Getenv("CPAMC_LICENSE_HUB_URL")
+	if hubURL == "" {
+		hubURL = DefaultHubURL
+	}
+	hubURL = strings.TrimRight(hubURL, "/")
+
+	go func() {
+		client := &http.Client{Timeout: 4 * time.Second}
+		type pingPayload struct {
+			MachineID      string   `json:"machine_id"`
+			ClientName     string   `json:"client_name,omitempty"`
+			Version        string   `json:"version,omitempty"`
+			OS             string   `json:"os,omitempty"`
+			Rotations      int64    `json:"rotations,omitempty"`
+			TotalFailovers int64    `json:"total_failovers,omitempty"`
+			ActivePools    []string `json:"active_pools,omitempty"`
+		}
+
+		payload := pingPayload{
+			MachineID:  machineID,
+			ClientName: GetSystemIdentity(),
+			OS:         runtime.GOOS,
+		}
+		if telemetryProvider != nil {
+			info := telemetryProvider()
+			payload.Version = info.Version
+			payload.Rotations = info.Rotations
+			payload.TotalFailovers = info.TotalFailovers
+			payload.ActivePools = info.ActivePools
+			if info.OS != "" {
+				payload.OS = info.OS
+			}
+		}
+
+		jsonBytes, _ := json.Marshal(payload)
+		resp, err := client.Post(hubURL+"/api/v1/license/ping", "application/json", strings.NewReader(string(jsonBytes)))
+		if err != nil || resp.StatusCode != http.StatusOK {
+			return
+		}
+		defer resp.Body.Close()
+
+		var res struct {
+			OK           bool   `json:"ok"`
+			Status       string `json:"status"`
+			Tier         string `json:"tier"`
+			LicenseToken string `json:"license_token"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&res); err == nil && res.OK {
+			if res.LicenseToken != "" {
+				// Server pushed an active approved token -> auto-activate locally!
+				_, _ = ActivateKey(res.LicenseToken)
+			}
+		}
+	}()
+}
+
+// GetLicenseStatus computes the current operational status.
+func GetLicenseStatus() *StatusReport {
+	currentMachine := GetMachineID()
+	lf, _ := LoadOrInitLicense()
+	now := time.Now().Unix()
+
+	// Asynchronously ping cloud hub for auto-activation without blocking local execution
+	SyncWithCloudHub(currentMachine)
+
+	// 1. Check if an active Pro license is installed
+	if lf.LicenseKey != "" && lf.ActiveClaims != nil {
+		claims, err := VerifyActivationKey(lf.LicenseKey, currentMachine)
+		if err == nil && claims != nil {
+			var expStr string
+			daysRemaining := 9999
+			if claims.ExpiresAt > 0 {
+				diff := claims.ExpiresAt - now
+				if diff > 0 {
+					daysRemaining = int(diff / 86400)
+					expStr = time.Unix(claims.ExpiresAt, 0).Format("2006-01-02")
+				} else {
+					daysRemaining = 0
+				}
+			} else {
+				expStr = "De por vida (Lifetime)"
+			}
+
+			if claims.ExpiresAt == 0 || daysRemaining > 0 {
+				return &StatusReport{
+					MachineID:      currentMachine,
+					Status:         StatusActive,
+					DaysRemaining:  daysRemaining,
+					TrialTotalDays: TrialDurationDays,
+					Tier:           strings.ToUpper(claims.Tier),
+					Client:         claims.Client,
+					ExpiresAt:      expStr,
+					IsPro:          true,
+					CanRotate:      true,
+				}
+			}
+		}
+	}
+
+	// 2. Evaluate 30-day Trial
+	trialEnd := lf.FirstBootAt + int64(TrialDurationDays*86400)
+	diff := trialEnd - now
+	daysLeft := int(diff / 86400)
+	if daysLeft < 0 {
+		daysLeft = 0
+	}
+
+	if diff > 0 {
+		return &StatusReport{
+			MachineID:      currentMachine,
+			Status:         StatusTrial,
+			DaysRemaining:  daysLeft,
+			TrialTotalDays: TrialDurationDays,
+			Tier:           "DEMO (30 Días)",
+			ExpiresAt:      time.Unix(trialEnd, 0).Format("2006-01-02"),
+			IsPro:          false,
+			CanRotate:      true,
+		}
+	}
+
+	// 3. Expired trial
+	return &StatusReport{
+		MachineID:      currentMachine,
+		Status:         StatusExpired,
+		DaysRemaining:  0,
+		TrialTotalDays: TrialDurationDays,
+		Tier:           "EXPIRADO",
+		ExpiresAt:      time.Unix(trialEnd, 0).Format("2006-01-02"),
+		IsPro:          false,
+		CanRotate:      false, // Rotation degraded/locked
+	}
+}
+
+// RequestReset sends a request to the cloud hub to generate a reset PIN for this machine.
+func RequestReset(email string) (map[string]interface{}, error) {
+	hubURL := os.Getenv("CPAMC_LICENSE_HUB_URL")
+	if hubURL == "" {
+		hubURL = DefaultHubURL
+	}
+	hubURL = strings.TrimRight(hubURL, "/")
+
+	currentMachine := GetMachineID()
+	client := &http.Client{Timeout: 5 * time.Second}
+	payload := map[string]string{
+		"email":      strings.TrimSpace(email),
+		"machine_id": currentMachine,
+	}
+	jsonBytes, _ := json.Marshal(payload)
+
+	resp, err := client.Post(hubURL+"/api/v1/license/request-reset", "application/json", strings.NewReader(string(jsonBytes)))
+	if err != nil {
+		return nil, fmt.Errorf("error al conectar con el servidor de licencias: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var res map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return nil, fmt.Errorf("respuesta inválida del servidor: %w", err)
+	}
+
+	return res, nil
+}
+
+// VerifyReset validates the PIN and activates the license locally on this new machine.
+func VerifyReset(email string, pin string) (*StatusReport, error) {
+	hubURL := os.Getenv("CPAMC_LICENSE_HUB_URL")
+	if hubURL == "" {
+		hubURL = DefaultHubURL
+	}
+	hubURL = strings.TrimRight(hubURL, "/")
+
+	currentMachine := GetMachineID()
+	client := &http.Client{Timeout: 5 * time.Second}
+	payload := map[string]string{
+		"email":      strings.TrimSpace(email),
+		"machine_id": currentMachine,
+		"pin":        strings.TrimSpace(pin),
+	}
+	jsonBytes, _ := json.Marshal(payload)
+
+	resp, err := client.Post(hubURL+"/api/v1/license/verify-reset", "application/json", strings.NewReader(string(jsonBytes)))
+	if err != nil {
+		return nil, fmt.Errorf("error al conectar con el servidor de licencias: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var res struct {
+		OK           bool   `json:"ok"`
+		Message      string `json:"message"`
+		LicenseToken string `json:"license_token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return nil, fmt.Errorf("respuesta inválida: %w", err)
+	}
+
+	if !res.OK || res.LicenseToken == "" {
+		msg := res.Message
+		if msg == "" {
+			msg = "código de verificación inválido"
+		}
+		return nil, errors.New(msg)
+	}
+
+	// Activar localmente la clave recibida
+	return ActivateKey(res.LicenseToken)
+}

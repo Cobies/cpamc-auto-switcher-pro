@@ -120,7 +120,9 @@ func TestPoolPrefixedCatalogIncludesRoutesAndBaselineWithoutPools(t *testing.T) 
 	registry := testModelProviderRegistry(t)
 	catalog = poolPrefixedCatalog(registry)
 	ids := modelIDs(catalog)
-	for _, want := range []string{"agy/gemini-3-flash", "clau/claude-sonnet-4-6"} {
+
+	// Clean sovereign pool facades must be present (1 entry per pool)
+	for _, want := range []string{"Pool-01-gemini", "Pool-02-claude"} {
 		found := false
 		for _, id := range ids {
 			if id == want {
@@ -128,7 +130,16 @@ func TestPoolPrefixedCatalogIncludesRoutesAndBaselineWithoutPools(t *testing.T) 
 			}
 		}
 		if !found {
-			t.Fatalf("static catalog missing %q: %v", want, ids)
+			t.Fatalf("static catalog missing sovereign pool facade %q: %v", want, ids)
+		}
+	}
+
+	// Residual subroutes (<base>/<target>) must NOT be published to the public catalog
+	for _, forbidden := range []string{"agy/gemini-3-flash", "clau/claude-sonnet-4-6"} {
+		for _, id := range ids {
+			if id == forbidden {
+				t.Fatalf("static catalog must not expose residual subroute %q: %v", forbidden, ids)
+			}
 		}
 	}
 }
@@ -367,3 +378,139 @@ func TestSchedulerPickRetriesSkipTriedMembers(t *testing.T) {
 		t.Fatalf("last cascade member must be picked on retries: %+v", resp)
 	}
 }
+
+func TestPoolCentricMembersAndDynamicLeaderRotation(t *testing.T) {
+	reg := NewPoolRegistry(t.TempDir() + "/pool-centric.json")
+	previous := activeRegistry
+	activeRegistry = func() *PoolRegistry { return reg }
+	t.Cleanup(func() { activeRegistry = previous })
+
+	// 1. Crear un pool únicamente con su Identificador/Nombre (Name) y lista simétrica de Members
+	// (sin especificar LeaderAuth ni Reserves).
+	err := reg.SavePool(PoolDefinition{
+		Name:    "agy",
+		Family:  "gemini_pure",
+		Members: []string{"antigravity-m1@gmail.com.json", "antigravity-m2@gmail.com.json"},
+		Policy: PoolPolicy{
+			TargetModels: []string{"gemini-3.8-flash-high"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SavePool with Name and Members failed: %v", err)
+	}
+
+	p, ok := reg.GetPool("agy")
+	if !ok {
+		t.Fatal("expected pool agy to exist")
+	}
+	if len(p.Members) != 2 {
+		t.Fatalf("expected 2 members, got %v", p.Members)
+	}
+	if p.ActiveLeader != "antigravity-m1@gmail.com.json" {
+		t.Fatalf("expected initial active leader m1, got %s", p.ActiveLeader)
+	}
+
+	// 2. Simular que m1 entra en cooldown y solo m2 está disponible:
+	// El líder dinámico ficticio debe rotar automáticamente a m2 en RAM.
+	req := schedulerPickRequest{
+		Provider: "antigravity",
+		Model:    "gemini-3.8-flash-high",
+		Options:  schedulerOptions{Metadata: map[string]any{"requested_model": "agy/gemini-3.8-flash-high"}},
+		Candidates: []schedulerCandidate{
+			{ID: "antigravity-m2@gmail.com.json", Provider: "antigravity", Status: "active"},
+		},
+	}
+	resp := handleSchedulerPick(req)
+	if !resp.Handled || resp.AuthID != "antigravity-m2@gmail.com.json" {
+		t.Fatalf("expected dynamic failover to m2, got %+v", resp)
+	}
+
+	// 3. Verificar que ActiveLeader en el PoolRegistry ahora es m2 y se mantiene en la siguiente llamada
+	pAfter, _ := reg.GetPool("agy")
+	if pAfter.ActiveLeader != "antigravity-m2@gmail.com.json" {
+		t.Fatalf("expected ActiveLeader to rotate dynamically to m2, got %s", pAfter.ActiveLeader)
+	}
+
+	// Incluso cuando m1 vuelve a estar en Candidates, m2 sigue siendo el líder dinámico actual
+	reqBoth := schedulerPickRequest{
+		Provider: "antigravity",
+		Model:    "gemini-3.8-flash-high",
+		Options:  schedulerOptions{Metadata: map[string]any{"requested_model": "agy/gemini-3.8-flash-high"}},
+		Candidates: []schedulerCandidate{
+			{ID: "antigravity-m1@gmail.com.json", Provider: "antigravity", Status: "active"},
+			{ID: "antigravity-m2@gmail.com.json", Provider: "antigravity", Status: "active"},
+		},
+	}
+	respNext := handleSchedulerPick(reqBoth)
+	if !respNext.Handled || respNext.AuthID != "antigravity-m2@gmail.com.json" {
+		t.Fatalf("expected rotated ActiveLeader m2 to continue serving as leader, got %+v", respNext)
+	}
+}
+
+func TestCleanPoolIdentifierInModelAndPerAccountModels(t *testing.T) {
+	reg := NewPoolRegistry(t.TempDir() + "/clean-pool.json")
+	previous := activeRegistry
+	activeRegistry = func() *PoolRegistry { return reg }
+	t.Cleanup(func() { activeRegistry = previous })
+
+	err := reg.SavePool(PoolDefinition{
+		BasePrefix: "agy",
+		Family:     "gemini_pure",
+		Members:    []string{"antigravity-m1@gmail.com.json", "antigravity-m2@gmail.com.json"},
+		MemberModels: map[string]string{
+			"antigravity-m1@gmail.com.json": "gemini-3.8-flash-high",
+			"antigravity-m2@gmail.com.json": "gemini-3.7-flash-high",
+		},
+		Policy: PoolPolicy{
+			TargetModels: []string{"gemini-3.8-flash-high"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SavePool failed: %v", err)
+	}
+
+	// 1. Verificar que el catálogo estático expone "Pool-01-gemini" limpio
+	catalog := poolPrefixedCatalog(reg)
+	ids := modelIDs(catalog)
+	foundClean := false
+	for _, id := range ids {
+		if id == "Pool-01-gemini" {
+			foundClean = true
+			break
+		}
+	}
+	if !foundClean {
+		t.Fatalf("expected clean Pool-01-gemini in /model catalog, got %v", ids)
+	}
+
+	// 2. Cuando m1 es el líder activo, invocar "Pool-01-gemini" resuelve al modelo de m1 (gemini-3.8-flash-high)
+	route1 := routeDecisionFor(reg, "Pool-01-gemini")
+	if !route1.Handled || route1.TargetModel != "gemini-3.8-flash-high" {
+		t.Fatalf("expected Pool-01-gemini to route to m1 model gemini-3.8-flash-high, got %+v", route1)
+	}
+
+	// 3. Simular que el liderazgo rota a m2 en RAM
+	reg.SetActiveLeader("agy", "antigravity-m2@gmail.com.json")
+
+	// Ahora "Pool-01-gemini" resuelve dinámicamente al modelo configurado para m2 (gemini-3.7-flash-high)
+	route2 := routeDecisionFor(reg, "Pool-01-gemini")
+	if !route2.Handled || route2.TargetModel != "gemini-3.7-flash-high" {
+		t.Fatalf("expected Pool-01-gemini to dynamically route to m2 model gemini-3.7-flash-high, got %+v", route2)
+	}
+
+	// 4. Y scheduler.pick selecciona m2 cuando se invoca "Pool-01-gemini"
+	pickResp := handleSchedulerPick(schedulerPickRequest{
+		Provider: "antigravity",
+		Model:    "gemini-3.7-flash-high",
+		Options:  schedulerOptions{Metadata: map[string]any{"requested_model": "Pool-01-gemini"}},
+		Candidates: []schedulerCandidate{
+			{ID: "antigravity-m1@gmail.com.json", Provider: "antigravity", Status: "active"},
+			{ID: "antigravity-m2@gmail.com.json", Provider: "antigravity", Status: "active"},
+		},
+	})
+	if !pickResp.Handled || pickResp.AuthID != "antigravity-m2@gmail.com.json" {
+		t.Fatalf("expected scheduler to pick active leader m2 for Pool-01-gemini, got %+v", pickResp)
+	}
+}
+
+

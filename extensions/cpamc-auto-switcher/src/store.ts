@@ -1,5 +1,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 
 const execFileAsync = promisify(execFile);
 const TIMEOUT_MS = 6000;
@@ -41,6 +44,64 @@ let cachedAccounts: SwitcherAccount[] = [];
 let lastFetchTime = 0;
 let isFetching = false;
 
+interface StoredPool {
+	id: string;
+	base_prefix: string;
+	active_leader?: string;
+	leader_auth?: string;
+	members?: string[];
+	family?: string;
+}
+
+let cachedPoolsState: StoredPool[] = [];
+let lastPoolsStateRead = 0;
+
+/**
+ * Enmascara correo al estilo canónico (local > 6: primeros 3 + ... + ultimos 3).
+ */
+function maskEmailFromAuth(authName: string): string {
+	if (!authName) return "";
+	const clean = authName.replace(/^antigravity-/, "").replace(/\.json$/, "");
+	const parts = clean.split("@");
+	if (parts.length !== 2) return clean;
+	const [local, domain] = parts;
+	if (local && local.length > 6) {
+		return `${local.slice(0, 3)}...${local.slice(-3)}@${domain}`;
+	}
+	return `${local}@${domain}`;
+}
+
+/**
+ * Lee el archivo de estado de pools si existe en rutas conocidas.
+ */
+function getStoredPools(): StoredPool[] {
+	const now = Date.now();
+	if (now - lastPoolsStateRead < 10_000 && cachedPoolsState.length > 0) {
+		return cachedPoolsState;
+	}
+
+	const candidates = [
+		"/home/wilox/services/cliproxy/plugins/auto-switcher-pro-state.json",
+		join(homedir(), "services", "cliproxy", "plugins", "auto-switcher-pro-state.json"),
+		"/CLIProxyAPI/plugins/auto-switcher-pro-state.json",
+	];
+
+	for (const p of candidates) {
+		try {
+			if (existsSync(p)) {
+				const raw = readFileSync(p, "utf-8");
+				const parsed = JSON.parse(raw);
+				if (Array.isArray(parsed?.pools)) {
+					cachedPoolsState = parsed.pools;
+					lastPoolsStateRead = now;
+					return cachedPoolsState;
+				}
+			}
+		} catch {}
+	}
+	return cachedPoolsState;
+}
+
 /**
  * Consulta el estado real de cuentas y rotación vía `cpamc-auto-switcher -list`.
  * Implementa caché en memoria para no saturar procesos ni CPU.
@@ -66,15 +127,27 @@ export async function querySwitcherAccounts(force = false): Promise<SwitcherAcco
 			if (!trimmed || trimmed.startsWith("STATUS")) continue;
 			const parts = trimmed.split(/\s+/);
 			if (parts.length >= 8) {
+				const rawPrefix = (parts[4] || "").trim();
 				list.push({
 					status: parts[0] || "",
 					provider: parts[1] || "",
 					profile: parts[2] || "",
 					accountId: parts[3] || "",
-					prefix: parts[4] || "",
+					prefix: rawPrefix === "-" ? "" : rawPrefix,
 					consumed5h: parts[5] || "",
 					consumedWeekly: parts[6] || "",
 					minAvailable: parts[7] || "",
+				});
+			} else if (parts.length === 7) {
+				list.push({
+					status: parts[0] || "",
+					provider: parts[1] || "",
+					profile: parts[2] || "",
+					accountId: parts[3] || "",
+					prefix: "",
+					consumed5h: parts[4] || "",
+					consumedWeekly: parts[5] || "",
+					minAvailable: parts[6] || "",
 				});
 			}
 		}
@@ -84,7 +157,9 @@ export async function querySwitcherAccounts(force = false): Promise<SwitcherAcco
 			lastFetchTime = Date.now();
 		}
 		return cachedAccounts;
-	} catch {
+	} catch (err: any) {
+		// Fallback gracioso: si no está el CLI binario cpamc-auto-switcher en el PATH,
+		// conservar la caché existente o devolver lista vacía sin arrojar error crítico.
 		return cachedAccounts;
 	} finally {
 		isFetching = false;
@@ -122,6 +197,32 @@ export function classifyModel(modelId: string, provider: string): ModelPoolClass
 		trimmed = trimmed.slice(6);
 	} else if (trimmed.startsWith("cliproxyapi/")) {
 		trimmed = trimmed.slice(12);
+	}
+
+	// Reconocimiento directo de Identificador Limpio de Pool Canónico (p. ej. Pool-01-gemini)
+	if (/^pool-\d+-/i.test(trimmed)) {
+		let familyIcon = "✨ ";
+		let familyLabel = "Gemini (Pool)";
+		const lower = trimmed.toLowerCase();
+		if (lower.includes("claude") || lower.includes("sonnet") || lower.includes("opus")) {
+			familyIcon = "🔶 ";
+			familyLabel = "Claude (Pool)";
+		} else if (lower.includes("codex") || lower.includes("gpt")) {
+			familyIcon = "🧩 ";
+			familyLabel = "Codex (Pool)";
+		}
+
+		return {
+			isCpamc: true,
+			prefix: trimmed,
+			isLeader: true,
+			isReserve: false,
+			roleIcon: "👑 ",
+			familyIcon,
+			familyLabel,
+			canonicalModelId: trimmed,
+			poolBase: trimmed,
+		};
 	}
 
 	const slash = trimmed.indexOf("/");
@@ -196,12 +297,44 @@ export function getRotationPairForModelSync(modelId: string, provider: string): 
 	const accounts = cachedAccounts;
 	if (accounts.length === 0) return null;
 
-	// Filtrar cuentas que pertenecen a esta misma base de pool (ej. agy_clau, agy_clau_1, agy_clau_2...)
+	// Si el modelo invocado es una Fachada Soberana de Pool (ej. Pool-01-gemini),
+	// buscar la definición en el estado de pools para mapear a sus cuentas miembros reales.
+	let matchedBase = info.poolBase;
+	let memberEmails = new Set<string>();
+	let activeLeaderEmail = "";
+
+	if (/^pool-\d+-/i.test(info.poolBase)) {
+		const storedPools = getStoredPools();
+		const matchedPool = storedPools.find(
+			(p) => p.id.toLowerCase() === info.poolBase.toLowerCase() || p.base_prefix.toLowerCase() === info.poolBase.toLowerCase()
+		);
+		if (matchedPool) {
+			matchedBase = matchedPool.base_prefix || info.poolBase;
+			if (Array.isArray(matchedPool.members)) {
+				for (const m of matchedPool.members) {
+					memberEmails.add(maskEmailFromAuth(m).toLowerCase());
+				}
+			}
+			if (matchedPool.active_leader) {
+				activeLeaderEmail = maskEmailFromAuth(matchedPool.active_leader).toLowerCase();
+			} else if (matchedPool.leader_auth) {
+				activeLeaderEmail = maskEmailFromAuth(matchedPool.leader_auth).toLowerCase();
+			}
+		}
+	}
+
+	// Filtrar cuentas que pertenecen a este pool:
+	// 1. Por coincidencia de correo en members del pool (resolución soberana de RAM)
+	// 2. Por coincidencia de prefijo (base o sufijo numérico _N)
 	const poolAccounts = accounts.filter((a) => {
+		const emailLower = (a.accountId || "").toLowerCase();
+		if (memberEmails.size > 0 && memberEmails.has(emailLower)) {
+			return true;
+		}
 		const p = a.prefix.trim();
-		if (p === info.poolBase) return true;
-		if (p.startsWith(`${info.poolBase}_`)) {
-			const suffix = p.slice(info.poolBase.length + 1);
+		if (p === matchedBase) return true;
+		if (p.startsWith(`${matchedBase}_`)) {
+			const suffix = p.slice(matchedBase.length + 1);
 			return /^\d+$/.test(suffix);
 		}
 		return false;
@@ -209,13 +342,24 @@ export function getRotationPairForModelSync(modelId: string, provider: string): 
 
 	if (poolAccounts.length === 0) return null;
 
-	// Cuenta activa: la que tenga status [ACTIVE] o el prefijo base exacto
-	const active = poolAccounts.find((a) => a.status === "[ACTIVE]" || a.prefix === info.poolBase) || poolAccounts[0]!;
+	// Cuenta activa:
+	// Prioridad 1: Coincidencia con activeLeaderEmail de RAM
+	// Prioridad 2: Status [ACTIVE]
+	// Prioridad 3: Prefijo exacto matchedBase
+	const active =
+		(activeLeaderEmail ? poolAccounts.find((a) => (a.accountId || "").toLowerCase() === activeLeaderEmail) : null) ||
+		poolAccounts.find((a) => a.status === "[ACTIVE]") ||
+		poolAccounts.find((a) => a.prefix === matchedBase) ||
+		poolAccounts[0]!;
 
-	// Reservas ordenadas por número en cascada (_1, _2, _3...)
+	// Reservas ordenadas por disponibilidad libre de cuota o prefijo
 	const reserves = poolAccounts
-		.filter((a) => a.prefix !== active.prefix)
-		.sort((a, b) => a.prefix.localeCompare(b.prefix, undefined, { numeric: true }));
+		.filter((a) => (a.accountId || "").toLowerCase() !== (active.accountId || "").toLowerCase())
+		.sort((a, b) => {
+			const qA = parseFloat(a.minAvailable.replace("%", "").trim()) || 0;
+			const qB = parseFloat(b.minAvailable.replace("%", "").trim()) || 0;
+			return qB - qA; // Mejor candidata primero
+		});
 
 	const next = reserves.length > 0 ? reserves[0] : undefined;
 

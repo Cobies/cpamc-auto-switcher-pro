@@ -1,7 +1,76 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import './QuickGuideModal.css';
 
 export default function QuickGuideModal({ isOpen, onClose, embedded = false }) {
+  const [installerState, setInstallerState] = useState({
+    scanning: false,
+    data: null,
+    copied: false,
+    installing: false,
+    resultMessage: null,
+  });
+
+  const scanAgents = async () => {
+    setInstallerState((prev) => ({ ...prev, scanning: true, resultMessage: null }));
+    try {
+      const res = await fetch('/auto-switcher-pro/extension/detect');
+      if (res.ok) {
+        const json = await res.json();
+        setInstallerState((prev) => ({ ...prev, scanning: false, data: json }));
+      } else {
+        setInstallerState((prev) => ({
+          ...prev,
+          scanning: false,
+          data: {
+            curl_command: 'curl -sSL http://localhost:8317/auto-switcher-pro/extension/install.sh | bash',
+            targets: [],
+          },
+        }));
+      }
+    } catch {
+      setInstallerState((prev) => ({
+        ...prev,
+        scanning: false,
+        data: {
+          curl_command: 'curl -sSL http://localhost:8317/auto-switcher-pro/extension/install.sh | bash',
+          targets: [],
+        },
+      }));
+    }
+  };
+
+  const copyCurl = () => {
+    const cmd = installerState.data?.curl_command || 'curl -sSL http://localhost:8317/auto-switcher-pro/extension/install.sh | bash';
+    navigator.clipboard?.writeText(cmd);
+    setInstallerState((prev) => ({ ...prev, copied: true }));
+    setTimeout(() => {
+      setInstallerState((prev) => ({ ...prev, copied: false }));
+    }, 2500);
+  };
+
+  const directInstall = async (targetId) => {
+    setInstallerState((prev) => ({ ...prev, installing: true, resultMessage: null }));
+    try {
+      const res = await fetch('/auto-switcher-pro/extension/install', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_id: targetId }),
+      });
+      const json = await res.json();
+      setInstallerState((prev) => ({
+        ...prev,
+        installing: false,
+        resultMessage: json.message || (json.success ? 'Instalado con éxito' : 'No disponible directamente'),
+      }));
+    } catch (e) {
+      setInstallerState((prev) => ({
+        ...prev,
+        installing: false,
+        resultMessage: 'Error al conectar con el servidor',
+      }));
+    }
+  };
+
   useEffect(() => {
     if (embedded) return;
     const handleKeyDown = (e) => {
@@ -72,7 +141,7 @@ export default function QuickGuideModal({ isOpen, onClose, embedded = false }) {
                 <span className="quick-guide-step-num">3</span>
                 <div className="quick-guide-step-content">
                   <div className="quick-guide-step-header">¡A Programar sin Interrupciones!</div>
-                  En tu editor de código o agente (Pi, Cursor, Claude Code), apunta tus solicitudes al modelo de tu pool (ej. <code>agy/gemini-2.5-pro</code>). Si una cuenta se agota, el sistema conmuta automáticamente.
+                  En tu editor de código o agente (Pi, Cursor, Claude Code), apunta tus solicitudes al identificador soberano limpio en <code>/model</code> (ej. <code>cpamc/Pool-01-gemini</code>). Si una cuenta se agota o cae por 429, el sistema conmuta automáticamente en RAM con cero downtime.
                 </div>
               </div>
             </div>
@@ -82,6 +151,76 @@ export default function QuickGuideModal({ isOpen, onClose, embedded = false }) {
               <p>
                 Al crear grupos con prefijos base como <code>agy</code> y <code>agy2</code>, puedes asignar cuentas especializadas con la <strong>Tuerca ⚙️</strong> en <em>Auto Auth Files</em> para proteger cuotas de modelos premium.
               </p>
+            </div>
+
+            {/* SECCIÓN NUEVA: Instalador Express de la Extensión Pi / Gentle-Shell */}
+            <div className="quick-guide-installer-card">
+              <div className="installer-card-header">
+                <span className="installer-icon">⚡</span>
+                <div>
+                  <div className="installer-title">Extensión Pi & Gentle-Shell</div>
+                  <div className="installer-subtitle">Instalación Express 1-Click / Terminal</div>
+                </div>
+              </div>
+              <p className="installer-desc">
+                Enlaza tus modelos y cuotas en tiempo real dentro de tu terminal (Gentle-Shell, Pi Vanilla o J0k3r Pi).
+              </p>
+
+              {!installerState.data ? (
+                <button
+                  type="button"
+                  className="btn-installer-scan"
+                  onClick={scanAgents}
+                  disabled={installerState.scanning}
+                >
+                  {installerState.scanning ? '🔍 Escaneando entorno...' : '🔍 Detectar Agente en Sistema'}
+                </button>
+              ) : (
+                <div className="installer-results">
+                  {installerState.data.targets && installerState.data.targets.length > 0 ? (
+                    <div className="installer-targets-list">
+                      {installerState.data.targets.map((tgt) => (
+                        <div key={tgt.id} className="installer-target-row">
+                          <div className="target-info">
+                            <span className="target-name">{tgt.name}</span>
+                            <span className={`target-badge ${tgt.exists ? 'badge-found' : 'badge-absent'}`}>
+                              {tgt.exists ? 'Detectado' : 'No instalado'}
+                            </span>
+                          </div>
+                          {tgt.exists && (
+                            <button
+                              type="button"
+                              className="btn-target-install"
+                              onClick={() => directInstall(tgt.id)}
+                              disabled={installerState.installing}
+                            >
+                              {tgt.installed ? 'Reinstalar' : 'Instalar 1-Click'}
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {installerState.resultMessage && (
+                    <div className="installer-message">{installerState.resultMessage}</div>
+                  )}
+
+                  <div className="installer-fallback-box">
+                    <div className="fallback-label">O copia el comando universal All-in-One (Local, LAN o VPS):</div>
+                    <div className="fallback-code-row">
+                      <code className="fallback-cmd">curl -sSL https://raw.githubusercontent.com/WiloxDev/cpamc-auto-switcher-pro/main/scripts/install-all.sh | bash</code>
+                      <button
+                        type="button"
+                        className="btn-copy-cmd"
+                        onClick={copyCurl}
+                      >
+                        {installerState.copied ? '✓ Copiado' : 'Copiar'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -127,10 +266,10 @@ export default function QuickGuideModal({ isOpen, onClose, embedded = false }) {
                   <span className="quick-guide-card-tag">La Fábrica</span>
                 </div>
                 <p className="quick-guide-card-desc">
-                  ¡El núcleo principal! Unes 2 o más cuentas en un Pool con balanceo automático: define 1 Líder y sus Reservas con prefijos ordenados al instante (ej: agy, agy_1).
+                  ¡El núcleo principal! Unes 2 o más cuentas en un Pool Soberano con balanceo automático: define 1 Líder y sus Reservas con identificación limpia (ej: Pool-01-gemini).
                 </p>
                 <div className="quick-guide-card-example">
-                  <strong>Caso de uso:</strong> Creas el pool <code>agy</code> con 3 cuentas. Llamas a <code>agy/gemini-2.5-pro</code> y jamás se corta tu trabajo por error 429.
+                  <strong>Caso de uso:</strong> Creas el pool <code>Pool-01-gemini</code> con 3 cuentas. Invocas <code>cpamc/Pool-01-gemini</code> y jamás se corta tu trabajo por error 429 gracias a la rotación transparente en RAM.
                 </div>
               </div>
 
@@ -141,10 +280,10 @@ export default function QuickGuideModal({ isOpen, onClose, embedded = false }) {
                   <span className="quick-guide-card-tag">El Escaparate</span>
                 </div>
                 <p className="quick-guide-card-desc">
-                  Muestra todas las tarjetas con los colores de sus pools. Incluye la <strong>Tuerca ⚙️ de Modo Especialista</strong> para fijar una cuenta exclusivamente a un modelo pesado (ej. <code>gemini-3.8-flash-high</code>).
+                  Muestra todas las tarjetas con los colores de sus pools y badge de líder en RAM. Incluye la <strong>Tuerca ⚙️ de Modo Especialista</strong> para fijar de manera virtual el modelo del pool (ej. <code>gemini-3.8-flash-high</code>) sin alterar los archivos en disco.
                 </p>
                 <div className="quick-guide-card-example">
-                  <strong>Caso de uso:</strong> Quieres que una cuenta de alta cuota solo atienda razonamiento complejo y no gaste tokens en autocompletado.
+                  <strong>Caso de uso:</strong> Quieres que un pool atienda exclusivamente razonamiento complejo manteniendo intacto el catálogo nativo en CPAMC.
                 </div>
               </div>
 

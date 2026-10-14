@@ -2,13 +2,31 @@ import React, { useState } from 'react';
 import './HomeCenter.css';
 import logoImg from '../assets/auto-switcher-pro-logo.png';
 
-export default function HomeCenter({ onNavigateTab }) {
+export default function HomeCenter({ onNavigateTab, onOpenLicenseModal }) {
   const [copied, setCopied] = useState(false);
-  const [licenseKeyInput, setLicenseKeyInput] = useState('');
-  const [activationMsg, setActivationMsg] = useState('');
+  const [licenseData, setLicenseData] = useState({
+    machine_id: 'CPA-...',
+    status: 'trial',
+    tier: 'trial',
+    days_remaining: 30,
+    is_pro: false
+  });
 
-  // Identificador único de máquina local (obtenido de hostname / fingerprint)
-  const machineId = 'ASP-8F2A-99B1-4CD3';
+  // Cargar estado real de la licencia desde el backend de CPAMC
+  React.useEffect(() => {
+    let active = true;
+    fetch('/v0/management/plugins/auto-switcher-pro/license')
+      .then(r => r.json())
+      .then(d => {
+        if (active && d && d.machine_id) {
+          setLicenseData(d);
+        }
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  const machineId = licenseData.machine_id || 'CPA-2F60-969A-CA1D';
 
   const handleCopyMachineId = () => {
     if (navigator?.clipboard?.writeText) {
@@ -16,12 +34,6 @@ export default function HomeCenter({ onNavigateTab }) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
     }
-  };
-
-  const handleActivate = (e) => {
-    e.preventDefault();
-    if (!licenseKeyInput.trim()) return;
-    setActivationMsg('✅ Clave procesada. Estado: Licencia PRO Vitalicia Activa.');
   };
 
   const menuItems = [
@@ -36,7 +48,7 @@ export default function HomeCenter({ onNavigateTab }) {
       id: 'auto-auth-files',
       icon: '🗂️',
       title: 'Auto Auth Files',
-      desc: 'Visor de cuentas físicas OAuth. Usa el engranaje (⚙️) para limitar una cuenta a un solo modelo (ej. Gemini 3.8).',
+      desc: 'Visor de cuentas físicas OAuth. Gestiona la trazabilidad y la Tuerca ⚙️ de Modo Especialista virtual.',
       badge: 'Trazabilidad',
     },
     {
@@ -64,7 +76,7 @@ export default function HomeCenter({ onNavigateTab }) {
       id: 'create-prefixes',
       icon: '📋',
       title: 'Directorio Cuentas',
-      desc: 'Inventario general de credenciales, roles y prefijos de enrutamiento (agy, agy_clau) para ajustes manuales.',
+      desc: 'Inventario general de credenciales, pertenencia a pools soberanos y prefijos (agy, agy_son, agy_opus, clau, codex).',
       badge: 'Directorio',
     },
     {
@@ -119,10 +131,28 @@ export default function HomeCenter({ onNavigateTab }) {
         <div className="home-kpi-card" data-testid="kpi-license">
           <div className="kpi-header">
             <span className="kpi-title">Licencia del Sistema</span>
-            <span className="kpi-status-badge badge-green">Activa ✓</span>
+            <span className={`kpi-status-badge ${licenseData.is_pro ? 'badge-green' : 'badge-blue'}`}>
+              {licenseData.is_pro ? 'Activa ✓' : `Trial (${licenseData.days_remaining}d)`}
+            </span>
           </div>
-          <div className="kpi-value text-accent">PRO Vitalicio</div>
-          <div className="kpi-caption">Licencia de por vida habilitada en esta instalación</div>
+          <div className="kpi-value text-accent">
+            {licenseData.is_pro ? 'PRO Vitalicio' : 'Demo Evaluación'}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '6px' }}>
+            <span className="kpi-caption" style={{ margin: 0 }}>
+              {licenseData.is_pro ? 'Licencia de por vida activa' : `${licenseData.days_remaining} días restantes`}
+            </span>
+            <button
+              type="button"
+              className="kpi-copy-btn"
+              style={{ background: 'rgba(56, 189, 248, 0.2)', color: '#38bdf8', borderColor: 'rgba(56, 189, 248, 0.4)' }}
+              onClick={() => onOpenLicenseModal && onOpenLicenseModal()}
+              data-testid="btn-home-open-license"
+              title="Abrir asistente de activación o transferencia"
+            >
+              ⚡ Activar / Trasladar
+            </button>
+          </div>
         </div>
 
         {/* KPI 2: ID de Máquina */}
