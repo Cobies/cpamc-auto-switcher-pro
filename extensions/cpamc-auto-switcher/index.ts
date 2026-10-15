@@ -4,6 +4,7 @@ import { initFailoverHook, scheduleAutoSwitcher } from "./src/failover.js";
 import { registerModelPicker } from "./src/picker.js";
 import { CpamcTuiAdapter } from "./src/adapter.js";
 import { querySwitcherAccounts, checkProactivePoolRebalance } from "./src/store.js";
+import { saveProjectModel, getProjectModel } from "./src/project-model-store.js";
 
 /**
  * CPAMC Auto-Switcher Unified Extension for Pi & Gentle-Shell
@@ -61,6 +62,22 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 		if (reason === "compact" && ctx?.hasUI) {
 			ctx.ui.notify?.("✅ Contexto de sesión compactado y reanudado.", "info");
 		}
+
+		// Restauración silenciosa del modelo del proyecto al iniciar o reiniciar sesión (/new, startup)
+		if ((reason === "new" || reason === "startup") && ctx.cwd) {
+			try {
+				const saved = getProjectModel(ctx.cwd);
+				if (saved && (ctx.model?.id !== saved.modelId || ctx.model?.provider !== saved.provider)) {
+					const targetModel = ctx.modelRegistry?.find?.(saved.modelId, saved.provider);
+					if (targetModel) {
+						await pi.setModel(targetModel);
+					}
+				}
+			} catch {
+				// Silencioso ante fallos al restaurar modelo de proyecto
+			}
+		}
+
 		if (reason === "new" || reason === "reload" || reason === "startup") {
 			try {
 				await querySwitcherAccounts(true);
@@ -123,6 +140,16 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("turn_end", async (_event: any, ctx: ExtensionContext) => {
+		await adapter?.update(false, ctx);
+	});
+
+	// Persistir automáticamente el último modelo seleccionado por proyecto
+	pi.on("model_select", async (event: any, ctx: ExtensionContext) => {
+		const cwd = ctx.cwd;
+		const model = event?.model;
+		if (cwd && model?.id && model?.provider) {
+			saveProjectModel(cwd, model.provider, model.id);
+		}
 		await adapter?.update(false, ctx);
 	});
 
