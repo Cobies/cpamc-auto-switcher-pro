@@ -252,7 +252,7 @@ export function formatSidebarQuotaCardLines(
 	if (pair.isNativeReadOnly) {
 		const maxTitleW = Math.max(3, safeW - 22);
 		const titleLabel = truncateWithAnsi(pair.poolKey, maxTitleW);
-		const titlePrefix = `${s.border("╭─ ")}${s.accent("⚡ CPAMC NATIVO: ")}${s.text(titleLabel)} ${s.border("─")}`;
+		const titlePrefix = `${s.border("╭─ ")}${s.accent("⚡ CPAMC DIRECTO: ")}${s.text(titleLabel)} ${s.border("─")}`;
 		const prefixLen = visibleLen(titlePrefix);
 		const titleRules = Math.max(1, safeW - prefixLen - 1);
 		const top = fitToWidth(`${titlePrefix}${s.border("─".repeat(titleRules) + "╮")}`, safeW);
@@ -263,7 +263,7 @@ export function formatSidebarQuotaCardLines(
 			top,
 			renderLine(s.muted("Modelo"), s.text(pair.poolKey)),
 			renderLine(s.muted("Cuenta"), s.text(activeAccountLabel)),
-			renderLine(s.muted("Rotación"), s.muted("Ninguna (Solo Lectura)")),
+			renderLine(s.muted("Conexión"), s.muted("Directa (Cuenta Nativa)")),
 			divider,
 			renderLine(s.accent("[ESTADO CUOTA]"), `${s.text(activeAccountLabel)} ${s.muted(`(${pair.active.minAvailable})`)}`),
 			renderLine(s.muted(`5h: ${pair.active.consumed5h}`), bar5h),
