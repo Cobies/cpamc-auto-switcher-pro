@@ -70,6 +70,16 @@ function pctColor(pctStr: string): string {
 export function formatFooterRotationBlock(pair: PoolRotationPair | null, isBusy = false): string {
 	if (!pair) return "";
 
+	if (pair.isNativeReadOnly) {
+		const pActiveColor = pctColor(pair.active.minAvailable);
+		const activeLabel = pair.active.prefix || pair.active.accountId;
+		const hInfo = pair.active.consumed5h ? `${pair.active.consumed5h}` : "";
+		const wInfo = pair.active.consumedWeekly ? `${pair.active.consumedWeekly}` : "";
+		const cd = [hInfo, wInfo].filter(Boolean).join("/");
+		const cdStr = cd ? ` ↻ ${cd}` : "";
+		return `${SEP} ⚡ ${LEADER_COLOR}${activeLabel}${RESET} ${pActiveColor}${pair.active.minAvailable}${RESET}${MUTED}${cdStr}${RESET}`;
+	}
+
 	const icon = isBusy ? `${PLAY_COLOR}▶${RESET}` : `${PAUSE_COLOR}⏸${RESET}`;
 	const pActiveColor = pctColor(pair.active.minAvailable);
 	const activeLabel = pair.active.prefix || pair.active.accountId;
@@ -238,6 +248,30 @@ export function formatSidebarQuotaCardLines(
 	const divider = fitToWidth(s.border("├" + "─".repeat(Math.max(1, safeW - 2)) + "┤"), safeW);
 	const bar5h = s.paintGauge(pair.active.consumed5h, 6);
 	const barWk = s.paintGauge(pair.active.consumedWeekly, 6);
+
+	if (pair.isNativeReadOnly) {
+		const maxTitleW = Math.max(3, safeW - 22);
+		const titleLabel = truncateWithAnsi(pair.poolKey, maxTitleW);
+		const titlePrefix = `${s.border("╭─ ")}${s.accent("⚡ CPAMC NATIVO: ")}${s.text(titleLabel)} ${s.border("─")}`;
+		const prefixLen = visibleLen(titlePrefix);
+		const titleRules = Math.max(1, safeW - prefixLen - 1);
+		const top = fitToWidth(`${titlePrefix}${s.border("─".repeat(titleRules) + "╮")}`, safeW);
+		const bottom = fitToWidth(s.border("╰" + "─".repeat(Math.max(1, safeW - 2)) + "╯"), safeW);
+		const activeAccountLabel = pair.active.prefix || pair.active.accountId;
+
+		const rawLines = [
+			top,
+			renderLine(s.muted("Modelo"), s.text(pair.poolKey)),
+			renderLine(s.muted("Cuenta"), s.text(activeAccountLabel)),
+			renderLine(s.muted("Rotación"), s.muted("Ninguna (Solo Lectura)")),
+			divider,
+			renderLine(s.accent("[ESTADO CUOTA]"), `${s.text(activeAccountLabel)} ${s.muted(`(${pair.active.minAvailable})`)}`),
+			renderLine(s.muted(`5h: ${pair.active.consumed5h}`), bar5h),
+			renderLine(s.muted(`Sem: ${pair.active.consumedWeekly}`), barWk),
+			bottom,
+		];
+		return rawLines.map((line) => fitToWidth(line, safeW));
+	}
 
 	const maxPoolKeyW = Math.max(3, safeW - 24);
 	const poolKeyLabel = truncateWithAnsi(pair.poolKey, maxPoolKeyW);

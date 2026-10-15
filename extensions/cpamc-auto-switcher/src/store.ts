@@ -26,6 +26,7 @@ export interface PoolRotationPair {
 	active: SwitcherAccount;
 	next?: SwitcherAccount;
 	totalAccounts: number;
+	isNativeReadOnly?: boolean;
 }
 
 export interface ModelPoolClassification {
@@ -292,10 +293,39 @@ export function classifyModel(modelId: string, provider: string): ModelPoolClass
  */
 export function getRotationPairForModelSync(modelId: string, provider: string): PoolRotationPair | null {
 	const info = classifyModel(modelId, provider);
-	if (!info.isCpamc || !info.poolBase) return null;
+	if (!info.isCpamc) return null;
 
 	const accounts = cachedAccounts;
 	if (accounts.length === 0) return null;
+
+	// Si no tiene poolBase, es un modelo nativo CPAMC sin rotación (Solo Lectura)
+	if (!info.poolBase) {
+		const lowerModel = info.canonicalModelId.toLowerCase();
+		let nativeAcc = accounts.find((a) => {
+			if (a.status === "[OTHER]" || a.prefix === "-" || !a.prefix) {
+				if (lowerModel.includes("gemini") && a.provider === "antigravity") return true;
+				if ((lowerModel.includes("gpt") || lowerModel.includes("codex") || lowerModel.startsWith("o")) && (a.provider === "codex" || a.provider === "openai")) return true;
+				if (lowerModel.includes("claude") && (a.provider === "claude" || a.provider === "anthropic")) return true;
+				return true;
+			}
+			return false;
+		});
+
+		if (!nativeAcc) {
+			nativeAcc = accounts.find((a) => a.status === "[OTHER]" || a.prefix === "-" || !a.prefix);
+		}
+
+		if (!nativeAcc) return null;
+
+		return {
+			poolKey: info.canonicalModelId,
+			familyName: "CPAMC Directo",
+			familyIcon: "⚡ ",
+			active: nativeAcc,
+			totalAccounts: 1,
+			isNativeReadOnly: true,
+		};
+	}
 
 	// Si el modelo invocado es una Fachada Soberana de Pool (ej. Pool-01-gemini),
 	// buscar la definición en el estado de pools para mapear a sus cuentas miembros reales.
@@ -326,7 +356,11 @@ export function getRotationPairForModelSync(modelId: string, provider: string): 
 	// Filtrar cuentas que pertenecen a este pool:
 	// 1. Por coincidencia de correo en members del pool (resolución soberana de RAM)
 	// 2. Por coincidencia de prefijo (base o sufijo numérico _N)
+	// Cuentas con status [OTHER] o sin prefijo no pertenecen a ningún pool.
 	const poolAccounts = accounts.filter((a) => {
+		if (a.status === "[OTHER]" || a.prefix === "-" || !a.prefix) {
+			return false;
+		}
 		const emailLower = (a.accountId || "").toLowerCase();
 		if (memberEmails.size > 0 && memberEmails.has(emailLower)) {
 			return true;
