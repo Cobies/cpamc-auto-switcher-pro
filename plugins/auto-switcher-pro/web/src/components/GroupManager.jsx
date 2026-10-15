@@ -2227,37 +2227,46 @@ export default function GroupManager({
                 <div className="group-pool-members">
                   {pool.root && (
                     <div className="group-pool-member-row">
-                      <span style={{ color: '#fbbf24', fontWeight: 600 }}>1️⃣ 👑 {pool.root.data?.email || pool.root.data?.fileName}</span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                        <span style={{ fontFamily: 'monospace', color: '#fbbf24', fontWeight: 700 }}>
-                          [{leaderPref}]
+                      <div className="group-pool-member-top">
+                        <div className="group-pool-member-identity">
+                          <span style={{ color: '#fbbf24', flexShrink: 0 }}>1️⃣ 👑</span>
+                          <span className="group-pool-member-email" style={{ color: '#fbbf24' }} title={pool.root.data?.email || pool.root.data?.fileName}>
+                            {pool.root.data?.email || pool.root.data?.fileName}
+                          </span>
+                        </div>
+                        <div className="group-pool-member-badges">
+                          <span style={{
+                            fontSize: 9,
+                            fontWeight: 800,
+                            background: 'rgba(234, 179, 8, 0.25)',
+                            color: '#fef08a',
+                            padding: '2px 6px',
+                            borderRadius: 4,
+                            border: '1px solid rgba(234, 179, 8, 0.4)',
+                          }}
+                          title="Líder dinámico ficticio en RAM: Auto Switcher Pro rota este rol automáticamente según disponibilidad y anti-429"
+                          >
+                            LEADER
+                          </span>
+                          <span style={{
+                            fontSize: 9,
+                            fontWeight: 700,
+                            background: 'rgba(56, 189, 248, 0.15)',
+                            color: '#38bdf8',
+                            padding: '2px 6px',
+                            borderRadius: 4,
+                            border: '1px solid rgba(56, 189, 248, 0.35)',
+                          }}>
+                            🔄 DINÁMICO
+                          </span>
+                        </div>
+                      </div>
+                      <div className="group-pool-member-bottom">
+                        <span className="group-pool-member-model" title={`Especialista: ${leaderModel}`}>
+                          ⚙️ {leaderModel}
                         </span>
-                        <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#38bdf8', background: 'rgba(14, 165, 233, 0.12)', padding: '1px 6px', borderRadius: 4, border: '1px solid rgba(56, 189, 248, 0.3)' }}>
-                          {leaderPref}/{leaderModel}
-                        </span>
-                        <span style={{
-                          fontSize: 9,
-                          fontWeight: 800,
-                          background: 'rgba(234, 179, 8, 0.25)',
-                          color: '#fef08a',
-                          padding: '2px 6px',
-                          borderRadius: 4,
-                          border: '1px solid rgba(234, 179, 8, 0.4)',
-                        }}
-                        title="Líder dinámico ficticio en RAM: Auto Switcher Pro rota este rol automáticamente según disponibilidad y anti-429"
-                        >
-                          LEADER
-                        </span>
-                        <span style={{
-                          fontSize: 9,
-                          fontWeight: 700,
-                          background: 'rgba(56, 189, 248, 0.15)',
-                          color: '#38bdf8',
-                          padding: '2px 6px',
-                          borderRadius: 4,
-                          border: '1px solid rgba(56, 189, 248, 0.35)',
-                        }}>
-                          🔄 DINÁMICO
+                        <span className="group-pool-member-prefix" style={{ color: '#fbbf24', fontWeight: 700 }}>
+                          [{leaderPref || pool.basePrefix}]
                         </span>
                       </div>
                     </div>
@@ -2268,31 +2277,54 @@ export default function GroupManager({
                     const numBadge = rIdx === 0 ? '2️⃣' : rIdx === 1 ? '3️⃣' : `${rIdx + 2}️⃣`;
                     return (
                     <div key={node.id} className="group-pool-member-row">
-                      <span style={{ color: '#7dd3fc' }}>{numBadge} 🛡️ {node.data?.email || node.data?.fileName}</span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                        <span style={{ fontFamily: 'monospace', color: '#94a3b8' }}>[{prefix}]</span>
-                        <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#7dd3fc', background: 'rgba(14, 165, 233, 0.08)', padding: '1px 6px', borderRadius: 4, border: '1px solid rgba(125, 211, 252, 0.25)' }}>
-                          {prefix}/{rModel}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => handleReleaseReserve(pool.basePrefix, node)}
-                          disabled={isSubmitting}
-                          title="Liberar solo esta cuenta de reserva sin disolver el pool"
-                          data-testid={`btn-release-reserve-${pool.basePrefix}-${node.id}`}
-                          style={{
-                            background: 'rgba(239, 68, 68, 0.12)',
-                            border: '1px solid rgba(239, 68, 68, 0.3)',
-                            color: '#fca5a5',
-                            borderRadius: 4,
-                            padding: '1px 6px',
-                            fontSize: 10,
+                      <div className="group-pool-member-top">
+                        <div className="group-pool-member-identity">
+                          <span style={{ color: '#7dd3fc', flexShrink: 0 }}>{numBadge} 🛡️</span>
+                          <span className="group-pool-member-email" style={{ color: '#7dd3fc' }} title={node.data?.email || node.data?.fileName}>
+                            {node.data?.email || node.data?.fileName}
+                          </span>
+                        </div>
+                        <div className="group-pool-member-badges">
+                          <span style={{
+                            fontSize: 9,
                             fontWeight: 700,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          ✕
-                        </button>
+                            background: 'rgba(125, 211, 252, 0.15)',
+                            color: '#7dd3fc',
+                            padding: '2px 6px',
+                            borderRadius: 4,
+                            border: '1px solid rgba(125, 211, 252, 0.3)',
+                          }}>
+                            RESERVA {rIdx + 1}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleReleaseReserve(pool.basePrefix, node)}
+                            disabled={isSubmitting}
+                            title="Liberar solo esta cuenta de reserva sin disolver el pool"
+                            data-testid={`btn-release-reserve-${pool.basePrefix}-${node.id}`}
+                            style={{
+                              background: 'rgba(239, 68, 68, 0.12)',
+                              border: '1px solid rgba(239, 68, 68, 0.3)',
+                              color: '#fca5a5',
+                              borderRadius: 4,
+                              padding: '1px 6px',
+                              fontSize: 10,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              marginLeft: 2,
+                            }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                      <div className="group-pool-member-bottom">
+                        <span className="group-pool-member-model" style={{ color: '#7dd3fc', background: 'rgba(14, 165, 233, 0.08)', borderColor: 'rgba(125, 211, 252, 0.25)' }} title={`Especialista: ${rModel}`}>
+                          ⚙️ {rModel}
+                        </span>
+                        <span className="group-pool-member-prefix">
+                          [{prefix || `${pool.basePrefix}_${rIdx + 1}`}]
+                        </span>
                       </div>
                     </div>
                   );
