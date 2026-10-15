@@ -66,4 +66,47 @@ describe("Dynamic Provider Filtering & Granular Coexistence", () => {
         assert.equal(labels.get("agy_1"), "P1·RESERVA agy_1");
         assert.equal(labels.get("agy3"), "LIBRE agy3");
     });
+
+    it("verifies N=0 total dissolution fallback (all pools dissolved, native accounts exposed without outage)", () => {
+        const zeroPoolsFilterData = {
+            validPrefixes: new Set<string>(),
+            prefixExclusions: new Map(),
+            familyActiveLeaderPrefix: new Map(),
+            prefixToFamily: new Map(),
+            activePoolFamilies: new Set<string>(),
+            poolAssignedPrefixes: new Set<string>(),
+            activeBareProviders: new Set(["antigravity"]),
+            bareExclusions: new Set<string>(),
+            registeredPoolBases: new Set<string>(),
+        };
+
+        // No pools exist
+        assert.equal(isCleanIncludedModel("Pool-01-gemini", zeroPoolsFilterData), true); // regex passes, but in N=0 CPAMC won't return it
+        // Native bare models MUST pass smoothly
+        assert.equal(isCleanIncludedModel("gemini-3.8-flash-high", zeroPoolsFilterData), true);
+        assert.equal(isCleanIncludedModel("gemini-3-flash", zeroPoolsFilterData), true);
+        assert.equal(isCleanIncludedModel("gemini-pro-agent", zeroPoolsFilterData), true);
+        // Phantom models MUST STILL be blocked
+        assert.equal(isCleanIncludedModel("gpt-6-luna", zeroPoolsFilterData), false);
+        assert.equal(isCleanIncludedModel("deepseek-flash", zeroPoolsFilterData), false);
+    });
+
+    it("verifies account adoption (when free account is adopted into pool, its bare models disappear)", () => {
+        // Post-adopción: Todas las cuentas pertenecen a pools, 0 cuentas libres sin prefijo
+        const allAdoptedFilterData = {
+            ...mockFilterData,
+            activeBareProviders: new Set<string>(), // 0 bare free accounts
+            bareExclusions: new Set<string>(),
+        };
+
+        // Las fachadas de pool se mantienen
+        assert.equal(isCleanIncludedModel("Pool-01-gemini", allAdoptedFilterData), true);
+        assert.equal(isCleanIncludedModel("Pool-02-gemini", allAdoptedFilterData), true);
+        // Las cuentas físicas y reservas están enmascaradas
+        assert.equal(isCleanIncludedModel("agy/gemini-3.8-flash-high", allAdoptedFilterData), false);
+        assert.equal(isCleanIncludedModel("agy_1/gemini-3.8-flash-high", allAdoptedFilterData), false);
+        assert.equal(isCleanIncludedModel("agy_2/gemini-3.8-flash-high", allAdoptedFilterData), false);
+        // Los modelos planos desaparecen de /model porque no hay cuentas libres
+        assert.equal(isCleanIncludedModel("gemini-3.8-flash-high", allAdoptedFilterData), false);
+    });
 });

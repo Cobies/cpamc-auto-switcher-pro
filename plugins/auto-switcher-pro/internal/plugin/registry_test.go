@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -258,5 +259,69 @@ func TestPruneStaleAccountsAutoHealing(t *testing.T) {
 	}
 	if len(reg.ListPools()) != 0 {
 		t.Fatalf("expected 0 pools in registry")
+	}
+}
+
+func TestPoolRegistry_ContingencyPurgeVirtualPoolNames(t *testing.T) {
+	tempDir := t.TempDir()
+	stateFile := filepath.Join(tempDir, "contingency-pools.json")
+	reg := NewPoolRegistry(stateFile)
+
+	// Intento hostil / bug: Guardar un pool con nombres de pool en target_models y excluded_models
+	hostilePool := PoolDefinition{
+		Family:     "gemini_pure",
+		BasePrefix: "agy",
+		LeaderAuth: "antigravity-leader.json",
+		Reserves:   []string{"antigravity-res.json"},
+		Policy: PoolPolicy{
+			TargetModels: []string{
+				"gemini-3.8-flash-high",
+				"Pool-01-gemini",
+				"pool-02-claude",
+			},
+			ExcludedModels: []string{
+				"gemini-3-flash",
+				"Pool-01-gemini",
+				"pool-99-special",
+				"gemini-3.7-flash-high",
+			},
+		},
+	}
+
+	if err := reg.SavePool(hostilePool); err != nil {
+		t.Fatalf("SavePool failed: %v", err)
+	}
+
+	// Verificar en memoria
+	saved, ok := reg.GetPool("agy")
+	if !ok {
+		t.Fatal("expected pool 'agy' to be found")
+	}
+
+	// target_models no debe contener ningún pool-*
+	if len(saved.Policy.TargetModels) != 1 || saved.Policy.TargetModels[0] != "gemini-3.8-flash-high" {
+		t.Fatalf("expected target_models to only contain gemini-3.8-flash-high, got: %v", saved.Policy.TargetModels)
+	}
+
+	// excluded_models no debe contener ningún pool-*
+	for _, ex := range saved.Policy.ExcludedModels {
+		if strings.HasPrefix(strings.ToLower(ex), "pool-") {
+			t.Fatalf("contingency failed: found contaminated pool name %q in excluded_models: %v", ex, saved.Policy.ExcludedModels)
+		}
+	}
+	if len(saved.Policy.ExcludedModels) != 2 {
+		t.Fatalf("expected exactly 2 excluded models, got %d: %v", len(saved.Policy.ExcludedModels), saved.Policy.ExcludedModels)
+	}
+
+	// Verificar en disco (persistencia real)
+	reloaded := NewPoolRegistry(stateFile)
+	if err := reloaded.Load(); err != nil {
+		t.Fatalf("failed to reload registry: %v", err)
+	}
+	diskPool, _ := reloaded.GetPool("agy")
+	for _, ex := range diskPool.Policy.ExcludedModels {
+		if strings.HasPrefix(strings.ToLower(ex), "pool-") {
+			t.Fatalf("persisted state contaminated with pool name %q: %v", ex, diskPool.Policy.ExcludedModels)
+		}
 	}
 }
