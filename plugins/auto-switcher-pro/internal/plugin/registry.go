@@ -170,6 +170,31 @@ func normalizePoolDefinition(pool *PoolDefinition) {
 		tr := true
 		pool.Enabled = &tr
 	}
+
+	// Contingencia Antigravedad & Gobernanza Sagrada:
+	// Purgar de raíz cualquier identificador de pool virtual ('pool-...') de target_models y excluded_models
+	// para blindar el estado de persistencia contra cualquier contaminación cruzada accidental.
+	if len(pool.Policy.TargetModels) > 0 {
+		cleanedTargets := make([]string, 0, len(pool.Policy.TargetModels))
+		for _, t := range pool.Policy.TargetModels {
+			tr := strings.TrimSpace(t)
+			if tr != "" && !strings.HasPrefix(strings.ToLower(tr), "pool-") {
+				cleanedTargets = append(cleanedTargets, tr)
+			}
+		}
+		pool.Policy.TargetModels = cleanedTargets
+	}
+	if len(pool.Policy.ExcludedModels) > 0 {
+		cleanedExclusions := make([]string, 0, len(pool.Policy.ExcludedModels))
+		for _, e := range pool.Policy.ExcludedModels {
+			er := strings.TrimSpace(e)
+			if er != "" && !strings.HasPrefix(strings.ToLower(er), "pool-") {
+				cleanedExclusions = append(cleanedExclusions, er)
+			}
+		}
+		pool.Policy.ExcludedModels = cleanedExclusions
+	}
+
 	all := pool.AllMembers()
 	pool.Members = all
 	if len(all) > 0 {
