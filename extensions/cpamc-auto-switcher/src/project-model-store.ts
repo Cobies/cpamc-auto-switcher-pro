@@ -8,21 +8,45 @@ export interface StoredProjectModel {
 	updatedAt: number;
 }
 
-const STORE_DIR = path.join(os.homedir(), ".config", "cpamc-auto-switcher");
-const STORE_FILE = path.join(STORE_DIR, "project-models.json");
+const DEFAULT_STORE_DIR = path.join(os.homedir(), ".config", "cpamc-auto-switcher");
+const DEFAULT_STORE_FILE = path.join(DEFAULT_STORE_DIR, "project-models.json");
 
 /**
- * Carga de forma segura el mapa de modelos por proyecto: { [cwd: string]: StoredProjectModel }
+ * Obtiene la ruta física del archivo de persistencia (soporta override para pruebas aisladas).
  */
-export function loadProjectModelsMap(): Record<string, StoredProjectModel> {
+export function getStoreFilePath(): string {
+	return process.env.CPAMC_PROJECT_MODELS_FILE || DEFAULT_STORE_FILE;
+}
+
+/**
+ * Normaliza canónicamente el cwd para evitar discordancias por barras finales o rutas relativas.
+ */
+export function normalizeCwd(cwd: string): string {
+	if (!cwd) return "";
+	return path.resolve(path.normalize(cwd));
+}
+
+/**
+ * Carga de forma segura el mapa de modelos por proyecto: { [normalizedCwd: string]: StoredProjectModel }
+ */
+export function loadProjectModelsMap(storeFile = getStoreFilePath()): Record<string, StoredProjectModel> {
 	try {
-		if (!fs.existsSync(STORE_FILE)) {
+		if (!fs.existsSync(storeFile)) {
 			return {};
 		}
-		const raw = fs.readFileSync(STORE_FILE, "utf-8");
+		const raw = fs.readFileSync(storeFile, "utf-8");
 		const parsed = JSON.parse(raw);
 		return typeof parsed === "object" && parsed !== null ? parsed : {};
-	} catch {
+	} catch (err) {
+		// Protección ante corrupción: si el archivo existe pero el JSON es inválido, respaldar como .corrupt
+		try {
+			if (fs.existsSync(storeFile)) {
+				const backup = `${storeFile}.corrupt.${Date.now()}`;
+				fs.copyFileSync(storeFile, backup);
+			}
+		} catch {
+			// Silencioso ante errores de respaldo
+		}
 		return {};
 	}
 }
@@ -30,24 +54,27 @@ export function loadProjectModelsMap(): Record<string, StoredProjectModel> {
 /**
  * Guarda o actualiza el último modelo seleccionado para el directorio de trabajo actual (cwd).
  */
-export function saveProjectModel(cwd: string, provider: string, modelId: string): void {
+export function saveProjectModel(cwd: string, provider: string, modelId: string, storeFile = getStoreFilePath()): void {
 	if (!cwd || !provider || !modelId) return;
 
 	try {
-		if (!fs.existsSync(STORE_DIR)) {
-			fs.mkdirSync(STORE_DIR, { recursive: true });
+		const targetDir = path.dirname(storeFile);
+		if (!fs.existsSync(targetDir)) {
+			fs.mkdirSync(targetDir, { recursive: true });
 		}
 
-		const map = loadProjectModelsMap();
-		map[cwd] = {
+		const normCwd = normalizeCwd(cwd);
+		const map = loadProjectModelsMap(storeFile);
+		map[normCwd] = {
 			provider,
 			modelId,
 			updatedAt: Date.now(),
 		};
 
-		const tmpFile = `${STORE_FILE}.tmp.${Date.now()}`;
+		// Archivo temporal atómico blindado por PID y timestamp
+		const tmpFile = `${storeFile}.tmp.${process.pid}.${Date.now()}`;
 		fs.writeFileSync(tmpFile, JSON.stringify(map, null, 2), "utf-8");
-		fs.renameSync(tmpFile, STORE_FILE);
+		fs.renameSync(tmpFile, storeFile);
 	} catch {
 		// Silencioso ante fallos de I/O para no interrumpir el flujo principal
 	}
@@ -56,8 +83,9 @@ export function saveProjectModel(cwd: string, provider: string, modelId: string)
 /**
  * Obtiene el último modelo registrado para el cwd dado.
  */
-export function getProjectModel(cwd: string): StoredProjectModel | null {
+export function getProjectModel(cwd: string, storeFile = getStoreFilePath()): StoredProjectModel | null {
 	if (!cwd) return null;
-	const map = loadProjectModelsMap();
-	return map[cwd] || null;
+	const normCwd = normalizeCwd(cwd);
+	const map = loadProjectModelsMap(storeFile);
+	return map[normCwd] || null;
 }

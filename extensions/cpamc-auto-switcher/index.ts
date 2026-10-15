@@ -63,14 +63,26 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 			ctx.ui.notify?.("✅ Contexto de sesión compactado y reanudado.", "info");
 		}
 
-		// Restauración silenciosa del modelo del proyecto al iniciar o reiniciar sesión (/new, startup)
+		// Restauración dinámica del modelo del proyecto al iniciar o reiniciar sesión (/new, startup)
 		if ((reason === "new" || reason === "startup") && ctx.cwd) {
 			try {
 				const saved = getProjectModel(ctx.cwd);
 				if (saved && (ctx.model?.id !== saved.modelId || ctx.model?.provider !== saved.provider)) {
-					const targetModel = ctx.modelRegistry?.find?.(saved.modelId, saved.provider);
+					let targetModel = ctx.modelRegistry?.find?.(saved.provider, saved.modelId);
+					// Contingencia cold boot: si no está en memoria y refresh está disponible, refrescar catálogo
+					if (!targetModel && typeof ctx.modelRegistry?.refresh === "function") {
+						await ctx.modelRegistry.refresh({ allowNetwork: true }).catch(() => {});
+						targetModel = ctx.modelRegistry?.find?.(saved.provider, saved.modelId);
+					}
+
 					if (targetModel) {
 						await pi.setModel(targetModel);
+					} else if (saved && ctx.hasUI) {
+						// Notificación informativa no invasiva si el modelo o pool guardado fue disuelto
+						ctx.ui.notify?.(
+							`⚠️ Modelo del proyecto (${saved.provider}/${saved.modelId}) no disponible. Usando default.`,
+							"warning",
+						);
 					}
 				}
 			} catch {

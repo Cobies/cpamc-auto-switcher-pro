@@ -83,7 +83,26 @@ Claude models come from two entirely different technical providers that must NEV
    - Prefix MUST be `clau*` or `claude*` (NEVER starting with `agy_`).
    - Exposes Anthropic's full official catalog (`claude-3-5-haiku`, `claude-3-7-sonnet`, `claude-3-opus`).
 
-### 6. Separation of Concerns: CPAMC Native Inspection vs Pool Routing & Granular Coexistence
+### 6. Pool Account Rotation Governance & Decision Policy (MANDATORY)
+Every subagent, developer, and workflow MUST strictly uphold these 4 rotation pillars to guarantee continuous uptime, avoid flapping, and protect prompt caching:
+1. **Belonging & Health Sanitization**:
+   - Members must belong to the exact same pool and specialist model family.
+   - Credentials in `[INVALID]` or `[EXPIRED]` states, or accounts with prefix `-` / status `[OTHER]` (unassigned free accounts) are strictly excluded from pool rotation queues.
+2. **Predictive / Preventive Rotation (Before 429)**:
+   - Evaluated by the RAM Predictive Engine (`ShouldPreventiveCool`).
+   - If the active leader exceeds the fatigue threshold (>80% / >95% hourly request volume), it is rotated **ONLY IF** there is at least one healthy reserve with available quota (`hasHealthyReserve`).
+   - If no healthy reserve exists, the system does NOT rotate, keeping the active leader to maximize remaining throughput.
+   - Rotated accounts enter a mandatory cooling window (`CoolingMinutes`, 10-15m) to allow short-window (5h / RPM) quotas to recover.
+3. **Hysteresis & Proactive Session Rebalance (on `/new` or Session Startup)**:
+   - To preserve provider Prompt Caching and avoid rapid bouncing (flapping):
+     - Active leader exhaustion floor: Active leader must have `< 50%` available quota.
+     - Margin delta: Next reserve candidate must hold at least a `30%` quota advantage ($\Delta \ge 30\%$) over the active leader.
+     - Selection strategy: **Least-Used First** (highest free quota percentage wins).
+4. **Reactive Failover Rescue (Instant 429 / Connection Drops)**:
+   - Immediate failover triggers on `HTTP 429` (Too Many Requests), `quota exceeded`, `resource exhausted`, or network drops (`502`, `503`, `504`, `ECONNRESET`, `UND_ERR_BODY_TERMINATED`, `socket hang up`).
+   - Forces an instant rotation (`force = true`), bypassing hysteresis to immediately restore the execution stream.
+
+### 7. Separation of Concerns: CPAMC Native Inspection vs Pool Routing & Granular Coexistence
 - **CPAMC Native Credential Inspection (`GET /v8/management/credentials/models`)**:
   - The native CPAMC "Auth Files Management" credential inspection modal (`GET /v8/management/credentials/models?name=...`, handled via RPC `model.for_auth`) represents the physical capability of an OAuth credential.
   - Auto Switcher Pro ALWAYS returns the full native provider baseline models (`baselineAntigravityModels` for Google Antigravity) alongside any active pool targets.
