@@ -79,7 +79,6 @@ func TestModelCatalogForAuthDiskBackedPoolServesBareTargets(t *testing.T) {
 		"gemini-3-flash",
 		"gemini-3.8-flash-high",
 		"claude-sonnet-4-6",
-		"clau/claude-sonnet-4-6",
 	}
 	for _, want := range wantAll {
 		found := false
@@ -90,6 +89,16 @@ func TestModelCatalogForAuthDiskBackedPoolServesBareTargets(t *testing.T) {
 		}
 		if !found {
 			t.Fatalf("catalog missing %q: %v", want, ids)
+		}
+	}
+
+	// Must never contain virtual pool facades or prefixed routes
+	for _, id := range ids {
+		if strings.Contains(id, "/") {
+			t.Fatalf("modelCatalogForAuth must not contain prefixed routes, found %q", id)
+		}
+		if strings.HasPrefix(strings.ToLower(id), "pool-") {
+			t.Fatalf("modelCatalogForAuth must not contain virtual pool names, found %q", id)
 		}
 	}
 }
@@ -216,7 +225,7 @@ func TestHandleModelForAuthUsesRegistryMembership(t *testing.T) {
 		t.Fatalf("provider mismatch: %+v", resp)
 	}
 	ids := modelIDs(resp.Models)
-	for _, want := range []string{"gemini-3-flash", "claude-sonnet-4-6", "clau/claude-sonnet-4-6"} {
+	for _, want := range []string{"gemini-3-flash", "claude-sonnet-4-6"} {
 		found := false
 		for _, id := range ids {
 			if id == want {
@@ -225,6 +234,11 @@ func TestHandleModelForAuthUsesRegistryMembership(t *testing.T) {
 		}
 		if !found {
 			t.Fatalf("for_auth catalog missing %q: %v", want, ids)
+		}
+	}
+	for _, id := range ids {
+		if strings.Contains(id, "/") {
+			t.Fatalf("for_auth catalog must not contain prefixed routes, found %q", id)
 		}
 	}
 

@@ -269,7 +269,9 @@ func sortModelsByID(models []pluginModelInfo) {
 // register for one auth, derived from its pool memberships and baseline models:
 //   - Preserves all native baseline models (gemini-3.8-flash-high, gemini-3.7-flash-high, etc.)
 //     so the native CPAMC "Auth Files Management" credential modal displays its full native catalog.
-//   - Adds any pool-prefixed virtual routes and bare targets for pools the account serves.
+//   - Includes bare targets for pools the account serves (e.g. claude-sonnet-4-6).
+//   - Strictly excludes virtual pool facades (Pool-01-gemini) and prefixed routes (agy/...)
+//     to prevent contamination of the native credential inspection modal.
 func modelCatalogForAuth(diskPrefix string, memberPools []PoolDefinition) []pluginModelInfo {
 	seen := make(map[string]struct{})
 	models := make([]pluginModelInfo, 0, 32)
@@ -299,22 +301,13 @@ func modelCatalogForAuth(diskPrefix string, memberPools []PoolDefinition) []plug
 		add(m.ID)
 	}
 
+	// Add any bare pool targets (e.g. claude-sonnet-4-6), never virtual pool facades or prefixed routes
 	for _, pool := range memberPools {
 		targets := poolTargets(pool)
-		diskBacked := prefixMatchesPool(diskPrefix, pool.BasePrefix)
-		if pool.IsEnabled() {
-			cleanPoolName := strings.TrimSpace(pool.DisplayName)
-			if cleanPoolName == "" {
-				cleanPoolName = strings.TrimSpace(pool.ID)
-			}
-			if cleanPoolName != "" {
-				add(cleanPoolName)
-			}
-		}
 		for _, target := range targets {
-			add(target)
-			if !diskBacked {
-				add(pool.BasePrefix + "/" + target)
+			cleanTarget := cleanBareModelID(target)
+			if cleanTarget != "" && !strings.HasPrefix(strings.ToLower(cleanTarget), "pool-") {
+				add(cleanTarget)
 			}
 		}
 	}

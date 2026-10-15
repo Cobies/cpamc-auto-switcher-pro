@@ -859,9 +859,9 @@ export default function GroupManager({
       const resFileName = resNode?.data?.fileName || resNode?.name;
       if (!resFileName) return;
       reserveFileNames.push(resFileName);
-      // Invariante #5: Las cuentas de reserva NO reciben prefijo estampado en disco
-      // para evitar que CPAMC las publique como rutas de reserva (_1, _2...) en /model.
-      // Si la cuenta física tenía un prefijo residual antiguo, lo reseteamos a vacío.
+      // Homologación: Las cuentas de reserva maestras reciben prefijo indexado (_1, _2...)
+      // para que el planificador nativo de CPAMC no las confunda con cuentas libres sin prefijo.
+      // La regla /_(\d+)$/ de la extensión de Pi las oculta automáticamente de /model.
       if (registryMemberFileNames.has(resFileName)) {
         registryOnlyFiles.push(resFileName);
       } else if (isVirtualSource(resNode)) {
@@ -869,8 +869,11 @@ export default function GroupManager({
         const reservePrefix = `${trimmedBase}_${reserveNum}`;
         assignedPrefixes.add(reservePrefix);
         virtualJobs.push({ sourceFile: resFileName, prefix: reservePrefix, email: resNode.data?.email });
-      } else if (resNode.data?.prefix) {
-        updates.push({ name: resFileName, prefix: '' });
+      } else {
+        const reserveNum = nextReserveNumber(nodes, trimmedBase, assignedPrefixes);
+        const reservePrefix = `${trimmedBase}_${reserveNum}`;
+        assignedPrefixes.add(reservePrefix);
+        updates.push({ name: resFileName, prefix: reservePrefix });
       }
     });
 
@@ -893,9 +896,10 @@ export default function GroupManager({
           return cur;
         };
         // [Homologación Antigravity] Filtrar únicamente modelos que pertenezcan a Antigravity (gemini, claude, etc.)
-        // para NUNCA inyectar modelos ajenos (NVIDIA, OpenCode, GLM, Grok, etc.) en credenciales de Google
+        // para NUNCA inyectar modelos ajenos (NVIDIA, OpenCode, GLM, Grok, etc.) ni facadas virtuales de pool (Pool-XX-*)
         const isAntigravityModel = (id) => {
           const lower = (id || '').toLowerCase();
+          if (lower.startsWith('pool-') || lower.includes('pool-')) return false;
           return lower.includes('gemini') || lower.includes('claude') || lower.includes('sonnet') || lower.includes('opus') || lower.includes('haiku');
         };
 
