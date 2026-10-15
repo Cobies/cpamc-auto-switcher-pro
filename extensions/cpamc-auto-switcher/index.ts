@@ -63,8 +63,10 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 			ctx.ui.notify?.("✅ Contexto de sesión compactado y reanudado.", "info");
 		}
 
-		// Restauración dinámica del modelo del proyecto al iniciar o reiniciar sesión (/new, startup)
-		if ((reason === "new" || reason === "startup") && ctx.cwd) {
+		// Restauración dinámica del modelo del proyecto al reiniciar sesión (/new)
+		// Solo aplica en caliente durante la sesión activa en Herdr.
+		// En arranque en frío (startup) siempre se inicia con el modelo default de Pi.
+		if (reason === "new" && ctx.cwd) {
 			try {
 				const saved = getProjectModel(ctx.cwd);
 				if (saved && (ctx.model?.id !== saved.modelId || ctx.model?.provider !== saved.provider)) {

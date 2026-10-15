@@ -379,12 +379,12 @@ export class CpamcTuiAdapter {
 
 	private injectIntoFooter(isBusy: boolean): void {
 		const block = formatFooterRotationBlock(this.currentPair, isBusy);
-		if (!block) return;
+		const tui = this.tui || (this.ctx as any)?.tui;
+		const terminal = tui?.terminal as any;
+		const footer = (this.ctx as any)?.footer || terminal?.[Symbol.for("j0k3r-theme.footer")];
 
-		// Si j0k3r-theme está presente con setQuota
-		const footer = (this.ctx as any)?.footer;
 		if (typeof footer?.setQuota === "function") {
-			footer.setQuota(block);
+			footer.setQuota(block || undefined);
 		}
 	}
 

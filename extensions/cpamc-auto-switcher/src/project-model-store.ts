@@ -1,6 +1,4 @@
-import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 
 export interface StoredProjectModel {
 	provider: string;
@@ -8,15 +6,14 @@ export interface StoredProjectModel {
 	updatedAt: number;
 }
 
-const DEFAULT_STORE_DIR = path.join(os.homedir(), ".config", "cpamc-auto-switcher");
-const DEFAULT_STORE_FILE = path.join(DEFAULT_STORE_DIR, "project-models.json");
-
 /**
- * Obtiene la ruta física del archivo de persistencia (soporta override para pruebas aisladas).
+ * Almacén volátil en memoria (RAM del proceso activo de Pi / Herdr).
+ * Ciclo de vida:
+ * - Se inicializa vacío al arrancar el proceso de Pi / Herdr.
+ * - Solo retiene el modelo si el usuario lo selecciona explícitamente en la sesión viva.
+ * - Al salir de Herdr o terminar el proceso, el estado se descarta por completo.
  */
-export function getStoreFilePath(): string {
-	return process.env.CPAMC_PROJECT_MODELS_FILE || DEFAULT_STORE_FILE;
-}
+const volatileProjectModels = new Map<string, StoredProjectModel>();
 
 /**
  * Normaliza canónicamente el cwd para evitar discordancias por barras finales o rutas relativas.
@@ -27,65 +24,43 @@ export function normalizeCwd(cwd: string): string {
 }
 
 /**
- * Carga de forma segura el mapa de modelos por proyecto: { [normalizedCwd: string]: StoredProjectModel }
+ * Guarda o actualiza en memoria RAM el último modelo seleccionado para el directorio de trabajo (cwd).
  */
-export function loadProjectModelsMap(storeFile = getStoreFilePath()): Record<string, StoredProjectModel> {
-	try {
-		if (!fs.existsSync(storeFile)) {
-			return {};
-		}
-		const raw = fs.readFileSync(storeFile, "utf-8");
-		const parsed = JSON.parse(raw);
-		return typeof parsed === "object" && parsed !== null ? parsed : {};
-	} catch (err) {
-		// Protección ante corrupción: si el archivo existe pero el JSON es inválido, respaldar como .corrupt
-		try {
-			if (fs.existsSync(storeFile)) {
-				const backup = `${storeFile}.corrupt.${Date.now()}`;
-				fs.copyFileSync(storeFile, backup);
-			}
-		} catch {
-			// Silencioso ante errores de respaldo
-		}
-		return {};
-	}
-}
-
-/**
- * Guarda o actualiza el último modelo seleccionado para el directorio de trabajo actual (cwd).
- */
-export function saveProjectModel(cwd: string, provider: string, modelId: string, storeFile = getStoreFilePath()): void {
+export function saveProjectModel(cwd: string, provider: string, modelId: string): void {
 	if (!cwd || !provider || !modelId) return;
-
-	try {
-		const targetDir = path.dirname(storeFile);
-		if (!fs.existsSync(targetDir)) {
-			fs.mkdirSync(targetDir, { recursive: true });
-		}
-
-		const normCwd = normalizeCwd(cwd);
-		const map = loadProjectModelsMap(storeFile);
-		map[normCwd] = {
-			provider,
-			modelId,
-			updatedAt: Date.now(),
-		};
-
-		// Archivo temporal atómico blindado por PID y timestamp
-		const tmpFile = `${storeFile}.tmp.${process.pid}.${Date.now()}`;
-		fs.writeFileSync(tmpFile, JSON.stringify(map, null, 2), "utf-8");
-		fs.renameSync(tmpFile, storeFile);
-	} catch {
-		// Silencioso ante fallos de I/O para no interrumpir el flujo principal
-	}
+	const normCwd = normalizeCwd(cwd);
+	volatileProjectModels.set(normCwd, {
+		provider,
+		modelId,
+		updatedAt: Date.now(),
+	});
 }
 
 /**
- * Obtiene el último modelo registrado para el cwd dado.
+ * Obtiene el último modelo registrado en memoria RAM para el cwd dado.
+ * Retorna null si en la sesión activa no se ha cambiado el modelo para este proyecto.
  */
-export function getProjectModel(cwd: string, storeFile = getStoreFilePath()): StoredProjectModel | null {
+export function getProjectModel(cwd: string): StoredProjectModel | null {
 	if (!cwd) return null;
 	const normCwd = normalizeCwd(cwd);
-	const map = loadProjectModelsMap(storeFile);
-	return map[normCwd] || null;
+	return volatileProjectModels.get(normCwd) || null;
 }
+
+/**
+ * Retorna una instantánea del mapa en memoria (compatibilidad y depuración).
+ */
+export function loadProjectModelsMap(): Record<string, StoredProjectModel> {
+	const result: Record<string, StoredProjectModel> = {};
+	for (const [key, val] of volatileProjectModels.entries()) {
+		result[key] = { ...val };
+	}
+	return result;
+}
+
+/**
+ * Limpia el almacén en memoria (aislamiento para pruebas unitarias).
+ */
+export function clearProjectModels(): void {
+	volatileProjectModels.clear();
+}
+
