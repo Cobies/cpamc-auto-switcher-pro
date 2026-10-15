@@ -365,3 +365,53 @@ func TestScanOrphanArtifactsNeverFlagsLivePluginInRuntimeDir(t *testing.T) {
 		t.Fatalf("stray header should have been purged, but still exists")
 	}
 }
+
+func TestReplaceOrCopyFile(t *testing.T) {
+	tempDir := t.TempDir()
+	src := filepath.Join(tempDir, "source.html")
+	dest := filepath.Join(tempDir, "dest.html")
+
+	_ = os.WriteFile(src, []byte("<!doctype html>v1.26.4"), 0644)
+	_ = os.WriteFile(dest, []byte("<!doctype html>v1.26.1"), 0644)
+
+	if err := replaceOrCopyFile(src, dest, 0644); err != nil {
+		t.Fatalf("replaceOrCopyFile failed: %v", err)
+	}
+
+	content, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read dest failed: %v", err)
+	}
+	if string(content) != "<!doctype html>v1.26.4" {
+		t.Fatalf("expected <!doctype html>v1.26.4, got %q", string(content))
+	}
+}
+
+func TestAtomicWriteFileOverwritesExisting(t *testing.T) {
+	tempDir := t.TempDir()
+	dest := filepath.Join(tempDir, "test.yaml")
+	_ = os.WriteFile(dest, []byte("initial: data\n"), 0644)
+
+	newData := []byte("updated: data\n")
+	if err := atomicWriteFile(dest, newData, 0644); err != nil {
+		t.Fatalf("atomicWriteFile failed: %v", err)
+	}
+
+	readBack, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read destination failed: %v", err)
+	}
+	if string(readBack) != string(newData) {
+		t.Fatalf("expected %q, got %q", string(newData), string(readBack))
+	}
+
+	// Verify no temporary files left in tempDir
+	entries, _ := os.ReadDir(tempDir)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".auto-switcher-atomic-") {
+			t.Fatalf("residual atomic temp file found: %s", e.Name())
+		}
+	}
+}
+
+

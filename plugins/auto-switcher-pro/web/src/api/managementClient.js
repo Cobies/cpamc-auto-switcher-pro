@@ -392,6 +392,18 @@ export async function apiFetch(endpoint, options = {}) {
     if (res.status === 409) {
       throw new Error('409 Conflict: Resource conflict detected on server');
     }
+    let errorDetail = '';
+    try {
+      const errJson = await res.clone().json();
+      if (errJson && typeof errJson === 'object') {
+        errorDetail = errJson.error || errJson.message || '';
+      }
+    } catch (_) {
+      // ignore json parse failure on non-json error responses
+    }
+    if (errorDetail) {
+      throw new Error(`Management API request failed with status ${res.status}: ${errorDetail}`);
+    }
     throw new Error(`Management API request failed with status ${res.status}`);
   }
 

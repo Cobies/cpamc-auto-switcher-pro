@@ -499,8 +499,41 @@ func cleanOrphanConfigProviders(configPath, authDir string) ([]string, error) {
 	return cleanedResult, nil
 }
 
+// replaceOrCopyFile attempts an atomic rename first. If rename fails (e.g., EBUSY on Docker
+// single-file bind mounts where dest is an active VFS mount point, or EXDEV across filesystems),
+// it safely falls back to direct in-place overwrite (O_WRONLY|O_TRUNC) and disk sync.
+func replaceOrCopyFile(src, dest string, perm os.FileMode) error {
+	err := os.Rename(src, dest)
+	if err == nil {
+		return nil
+	}
+
+	// Fallback: If rename failed, try in-place copy
+	in, openErr := os.Open(src)
+	if openErr != nil {
+		return fmt.Errorf("renombrar falló (%v) y abrir origen falló: %w", err, openErr)
+	}
+	defer in.Close()
+
+	out, openErr := os.OpenFile(dest, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, perm)
+	if openErr != nil {
+		return fmt.Errorf("renombrar falló (%v) y abrir destino falló: %w", err, openErr)
+	}
+	defer out.Close()
+
+	if _, copyErr := io.Copy(out, in); copyErr != nil {
+		return fmt.Errorf("renombrar falló (%v) y copia falló: %w", err, copyErr)
+	}
+
+	if syncErr := out.Sync(); syncErr != nil {
+		return fmt.Errorf("renombrar falló (%v) y sync falló: %w", err, syncErr)
+	}
+
+	return nil
+}
+
 // atomicWriteFile writes data to a temporary file in the same directory, syncs to disk,
-// and atomically renames it to destination, preventing truncated or half-written files.
+// and atomically renames (or overwrites in place if mountpoint) to destination, preventing truncated or half-written files.
 func atomicWriteFile(dest string, data []byte, perm os.FileMode) error {
 	dir := filepath.Dir(dest)
 	tmpFile, err := os.CreateTemp(dir, ".auto-switcher-atomic-*.tmp")
@@ -533,11 +566,12 @@ func atomicWriteFile(dest string, data []byte, perm os.FileMode) error {
 		return fmt.Errorf("ajustar permisos: %w", err)
 	}
 
-	if err := os.Rename(tmpName, dest); err != nil {
-		return fmt.Errorf("renombrar atomico: %w", err)
+	if err := replaceOrCopyFile(tmpName, dest, perm); err != nil {
+		return fmt.Errorf("reemplazo atomico/sobrescritura: %w", err)
 	}
 
-	tmpName = "" // Success, disarm defer cleanup
+	_ = os.Remove(tmpName) // Clean up temp file if replaceOrCopyFile used copy fallback
+	tmpName = ""          // Success, disarm defer cleanup
 	return nil
 }
 
@@ -823,6 +857,9 @@ func updateConsole(staticDir string) (UpdateConsoleResult, error) {
 	bakPath := filepath.Join(staticDir, "management.html.bak")
 	tmpPath := filepath.Join(staticDir, "management.html.tmp")
 
+	// Ensure temporary download file is always cleaned up
+	defer os.Remove(tmpPath)
+
 	res := UpdateConsoleResult{Ok: false}
 
 	// 1. Compute current MD5
@@ -903,13 +940,13 @@ func updateConsole(staticDir string) (UpdateConsoleResult, error) {
 		_ = atomicWriteFile(bakPath, curData, 0644)
 	}
 
-	// 6. Atomic replacement
-	if err := os.Rename(tmpPath, mgmtPath); err != nil {
+	// 6. Replacement (atomic rename with Docker bind-mount fallback)
+	if err := replaceOrCopyFile(tmpPath, mgmtPath, 0644); err != nil {
 		// Rollback if failed
 		if bakData, bErr := os.ReadFile(bakPath); bErr == nil {
 			_ = atomicWriteFile(mgmtPath, bakData, 0644)
 		}
-		return res, fmt.Errorf("reemplazo atómico falló: %w", err)
+		return res, fmt.Errorf("reemplazo de consola falló: %w", err)
 	}
 
 	newMD5, _ := computeFileMD5(mgmtPath)
