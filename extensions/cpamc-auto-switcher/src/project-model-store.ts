@@ -51,7 +51,7 @@ function readStoreFromDisk(): Record<string, StoredProjectModel> {
 	try {
 		const filePath = getShmStorePath();
 		if (!fs.existsSync(filePath)) {
-			if (memoryFallback.size > 0) {
+			if (memoryFallback.size > 0 && !fs.existsSync("/dev/shm") && !fs.existsSync(os.tmpdir())) {
 				const fallbackObj: Record<string, StoredProjectModel> = {};
 				for (const [k, v] of memoryFallback.entries()) {
 					fallbackObj[k] = { ...v };
@@ -87,7 +87,7 @@ function writeStoreToDisk(data: Record<string, StoredProjectModel>): void {
 		fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), "utf-8");
 		fs.renameSync(tempPath, filePath);
 	} catch {
-		// Fallback silencioso a Map en memoria si /dev/shm no estuviera disponible
+		// Fallback a Map en memoria RAM si el sistema de archivos no estuviera disponible
 		try {
 			if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
 		} catch {}
@@ -135,6 +135,7 @@ export function clearProjectModel(cwd: string): void {
 		delete store[normCwd];
 		writeStoreToDisk(store);
 	}
+	memoryFallback.delete(normCwd);
 }
 
 /**

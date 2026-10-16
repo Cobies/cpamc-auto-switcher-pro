@@ -92,11 +92,16 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 		// Detección de reanudación de sesión en Herdr (snapshot previo restaurado)
 		const isResumedSession =
 			reason === "resume" || (reason === "startup" && (ctx.sessionManager?.getEntries?.()?.length ?? 0) > 0);
-		if (isResumedSession && ctx?.hasUI) {
-			ctx.ui.notify?.(
-				`ℹ️ Sesión previa de Herdr reanudada (${ctx.model?.id || "modelo de sesión"}). Usa /new para sesión limpia.`,
-				"info",
-			);
+		if (isResumedSession) {
+			if (ctx.cwd && ctx.model?.id && ctx.model?.provider) {
+				saveProjectModel(ctx.cwd, ctx.model.provider, ctx.model.id);
+			}
+			if (ctx?.hasUI) {
+				ctx.ui.notify?.(
+					`ℹ️ Sesión previa de Herdr reanudada (${ctx.model?.id || "modelo de sesión"}). Usa /new para sesión limpia.`,
+					"info",
+				);
+			}
 		}
 
 		// Restauración dinámica del modelo del proyecto al reiniciar sesión (/new)
@@ -124,6 +129,11 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 							`⚠️ Modelo del proyecto (${saved.provider}/${saved.modelId}) no disponible. Usando default.`,
 							"warning",
 						);
+					}
+				} else if (saved && ctx.model?.id === saved.modelId) {
+					// El modelo activo ya coincide con el modelo recordado de la sesión
+					if (ctx.hasUI && ctx.model) {
+						ctx.ui.notify?.(`ℹ️ Manteniendo modelo de sesión: ${ctx.model.id}`, "info");
 					}
 				} else if (ctx.hasUI && ctx.model) {
 					ctx.ui.notify?.(`ℹ️ Sesión iniciada con modelo default: ${ctx.model.id}`, "info");
@@ -195,6 +205,10 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("turn_end", async (_event: any, ctx: ExtensionContext) => {
+		// Mantener siempre actualizado el modelo con el que el usuario está trabajando activamente
+		if (ctx.cwd && ctx.model?.id && ctx.model?.provider) {
+			saveProjectModel(ctx.cwd, ctx.model.provider, ctx.model.id);
+		}
 		await adapter?.update(false, ctx);
 	});
 
@@ -209,8 +223,12 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 	});
 
 	// Limpieza en transiciones de sesión de Pi
-	pi.on("session_before_switch", async () => {
+	pi.on("session_before_switch", async (event: any, ctx?: ExtensionContext) => {
 		clearTimer();
+		// Capturar y registrar el modelo activo antes de que la sesión sea sustituida (/new o switch)
+		if (event?.reason === "new" && ctx?.cwd && ctx?.model?.id && ctx?.model?.provider) {
+			saveProjectModel(ctx.cwd, ctx.model.provider, ctx.model.id);
+		}
 		adapter?.setContext(null);
 	});
 

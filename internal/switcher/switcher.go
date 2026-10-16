@@ -282,9 +282,9 @@ func (s *Switcher) fetchAccountsConcurrently(ctx context.Context, targetProvider
 				if errQuota != nil {
 					state.QuotaErr = errQuota
 				} else {
-					evalProfile := meta.Prefix
+					evalProfile := prefix
 					if evalProfile == "" {
-						evalProfile = parsed.Profile
+						evalProfile = profile
 					}
 					parsedQuota, errParse := quota.ParseQuotaSummaryForProvider(f.Provider, qBytes, evalProfile)
 					if errParse != nil {

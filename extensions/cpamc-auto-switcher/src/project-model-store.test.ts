@@ -167,6 +167,16 @@ describe("Project Model Store & Volatile Session Lifecycle", () => {
 		assert.equal(sessionModel.provider, "cpamc");
 		assert.equal(sessionModel.modelId, "Pool-01-gemini");
 	});
+
+	it("keeps synchronous RAM fallback updated so models are immediately available", () => {
+		const projectCwd = "/home/wilox/projects/sio-auto-test";
+		saveProjectModel(projectCwd, "cpamc", "Pool-03-codex");
+
+		// Comprobar que loadProjectModelsMap refleja el valor inmediatamente
+		const map = loadProjectModelsMap();
+		assert.equal(map[path.resolve(projectCwd)]?.modelId, "Pool-03-codex");
+		assert.equal(getProjectModel(projectCwd)?.modelId, "Pool-03-codex");
+	});
 });
 
 

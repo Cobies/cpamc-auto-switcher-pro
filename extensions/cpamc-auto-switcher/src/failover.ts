@@ -209,12 +209,8 @@ function schedule(ctx: any, source: string, force = false): Promise<void> {
 
 			if (output.startsWith("[ROTATED]")) {
 				notify(ctx, `🔄 ${output}`, "info");
-			} else {
-				const message = output.replace(/^\[OK\]\s*/, "").trim();
-				if (message) {
-					notify(ctx, message, "info");
-				}
 			}
+			// Chequeos rutinarios y métricas sin rotación operan en segundo plano silencioso
 		} catch (err: any) {
 			// Manejo defensivo: si no está instalado, advertencia limpia y silenciosa
 			if (err?.code === "ENOENT") {

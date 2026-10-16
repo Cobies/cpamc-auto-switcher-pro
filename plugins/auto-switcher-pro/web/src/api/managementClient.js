@@ -2184,9 +2184,9 @@ export const ANTIGRAVITY_SUBSCRIPTION_URL =
   'https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist';
 
 export const ANTIGRAVITY_QUOTA_URLS = [
+  'https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary',
   'https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary',
   'https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:retrieveUserQuotaSummary',
-  'https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary',
 ];
 
 export const ANTIGRAVITY_HEADERS = {

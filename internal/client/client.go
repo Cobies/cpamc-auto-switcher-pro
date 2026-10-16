@@ -14,9 +14,9 @@ import (
 
 // Antigravity quota endpoints in fallback priority order
 var AntigravityQuotaEndpoints = []string{
+	"https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
 	"https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
 	"https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:retrieveUserQuotaSummary",
-	"https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
 }
 
 const CodexQuotaEndpoint = "https://chatgpt.com/backend-api/wham/usage"

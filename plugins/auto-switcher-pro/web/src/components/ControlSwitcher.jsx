@@ -264,7 +264,7 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
                 body: JSON.stringify({
                   authIndex: f.auth_index,
                   method: 'POST',
-                  url: 'https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary',
+                  url: 'https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary',
                   header: {
                     Authorization: 'Bearer $TOKEN$',
                     'Content-Type': 'application/json',
