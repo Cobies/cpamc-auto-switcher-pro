@@ -17,6 +17,7 @@ import {
   CANONICAL_PROVIDER_MODELS,
 } from '../api/managementClient';
 import SpecialistModal from './SpecialistModal';
+import QuotaClock from './QuotaClock';
 import './AutoAuthFiles.css';
 
 // Computes deterministic pool group colors: unassigned cards stay neutral (no color glow),
@@ -346,6 +347,7 @@ export default function AutoAuthFiles({
         percent: 0,
         percentLabel: 'Agotada (429)',
         resetLabel,
+        resetMs: info.retryAtMs,
         warning: true,
       };
       const fiveHourRow = {
@@ -353,6 +355,7 @@ export default function AutoAuthFiles({
         percent: 0,
         percentLabel: 'Agotada (429)',
         resetLabel,
+        resetMs: info.retryAtMs,
         warning: true,
       };
       // A cooldown resetting within ~6h indicates the 5-hour window is the
@@ -522,34 +525,38 @@ export default function AutoAuthFiles({
         {visibleGroups.map((group, gIdx) => (
           <div key={gIdx} className="quota-group">
             <div className="group-title">{group.title}</div>
-            {(group.rows || []).map((row, rIdx) => {
-              const isNoData = row.percent === null || row.percent === undefined;
-              const fillClass = isNoData
-                ? 'no-data'
-                : row.percent < 15
-                ? 'critical'
-                : row.percent < 35
-                ? 'warning'
-                : '';
-              const fillStyle = isNoData ? { width: '100%' } : { width: `${row.percent}%` };
+            <div className="quota-clocks-row" data-testid={`quota-clocks-${gIdx}`}>
+              {(group.rows || []).map((row, rIdx) => {
+                const isWeekly = (row.label || '').toLowerCase().includes('week');
+                const totalMinutes = isWeekly ? 10080 : 300;
+                const windowKey = isWeekly ? 'weekly' : '5h';
+                const consumedPercent =
+                  row.percent === null || row.percent === undefined
+                    ? null
+                    : row.percent === 0
+                    ? 100
+                    : Math.max(0, Math.min(100, 100 - row.percent));
+                const remainingMinutes =
+                  row.resetMs !== null && row.resetMs !== undefined
+                    ? Math.max(0, Math.round((row.resetMs - Date.now()) / 60000))
+                    : null;
 
-              return (
-                <div key={rIdx} className="meter-row">
-                  <div className="meter-header">
-                    <span className="meter-label">{row.label}</span>
-                    <span className="meter-meta">
-                      <span className="meta-percent">{row.percentLabel}</span>
-                      <span className={`meta-reset ${row.warning ? 'meta-reset-soon' : ''}`}>
-                        {row.resetLabel}
-                      </span>
-                    </span>
-                  </div>
-                  <div className="track">
-                    <div className={`fill ${fillClass}`} style={fillStyle} />
-                  </div>
-                </div>
-              );
-            })}
+                return (
+                  <QuotaClock
+                    key={rIdx}
+                    totalMinutes={totalMinutes}
+                    remainingMinutes={remainingMinutes}
+                    consumedPercent={consumedPercent}
+                    label={row.label}
+                    windowKey={windowKey}
+                    resetLabel={row.resetLabel}
+                    percentLabel={row.percentLabel}
+                    isLoading={isCardLoading}
+                    testId={`quota-clock-${windowKey}-${masterKey || 'card'}-${rIdx}`}
+                  />
+                );
+              })}
+            </div>
           </div>
         ))}
 

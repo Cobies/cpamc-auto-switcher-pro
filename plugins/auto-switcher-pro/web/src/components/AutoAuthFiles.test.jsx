@@ -715,9 +715,12 @@ describe('AutoAuthFiles Component - Dedicated View & Lifecycle Engine', () => {
     expect(screen.getAllByText('GEMINI MODELS').length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText('CLAUDE AND GPT MODELS').length).toBeGreaterThanOrEqual(1);
 
-    // Limit window rows rendered
+    // Limit window rows rendered as circular QuotaClocks side by side
     expect(screen.getAllByText('Five Hour Limit').length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText('Weekly Limit').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('Ventana de 5 horas').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('Semanal').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByRole('meter').length).toBeGreaterThanOrEqual(2);
   });
 
   it('renders honest "sin datos" telemetry (never fabricated) when live quota is unreachable', async () => {

@@ -664,9 +664,18 @@
 .quota-group {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding-top: 4px;
+  gap: 4px;
+  padding-top: 5px;
   border-top: 1px dashed rgba(51, 65, 85, 0.4);
+}
+
+.quota-clocks-row {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  margin-top: 3px;
 }
 
 .group-title {

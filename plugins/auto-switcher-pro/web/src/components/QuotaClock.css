@@ -1,0 +1,109 @@
+/* ==========================================================================
+   QuotaClock — Dual Concentric Circular Quota Clocks (SVG)
+   Dark mode optimized for Auto Switcher Pro card containers
+   ========================================================================== */
+
+.quota-clock-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  text-align: center;
+  flex: 1 1 0;
+  min-width: 120px;
+  max-width: 160px;
+  padding: 6px 4px 4px;
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px solid rgba(51, 65, 85, 0.4);
+  border-radius: 8px;
+  box-sizing: border-box;
+}
+
+.quota-clock-svg-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+.quota-clock-svg {
+  display: block;
+  overflow: visible;
+}
+
+/* Ring smooth transitions (no decorative shadows or glows per spec) */
+.quota-clock-ring {
+  transition: stroke-dashoffset 0.6s cubic-bezier(0.4, 0, 0.2, 1), stroke 0.3s ease;
+}
+
+.quota-clock-needle-dot {
+  transition: cx 0.6s cubic-bezier(0.4, 0, 0.2, 1), cy 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Center Typography */
+.quota-clock-center-small {
+  font-family: inherit;
+  letter-spacing: 0.02em;
+}
+
+.quota-clock-center-large {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  letter-spacing: -0.02em;
+}
+
+.quota-clock-center-sub {
+  font-family: inherit;
+}
+
+.quota-clock-center-empty {
+  font-family: ui-monospace, monospace;
+}
+
+/* Under Clock Details */
+.quota-clock-details {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.quota-clock-title-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.15;
+}
+
+.quota-clock-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #f1f5f9;
+  white-space: nowrap;
+}
+
+.quota-clock-canonical-label {
+  font-size: 8.5px;
+  color: #94a3b8;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.quota-clock-status {
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1.2;
+  margin-top: 1px;
+}
+
+.quota-clock-secondary {
+  font-size: 8.5px;
+  color: #94a3b8;
+  line-height: 1.15;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: nowrap;
+  max-width: 125px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
