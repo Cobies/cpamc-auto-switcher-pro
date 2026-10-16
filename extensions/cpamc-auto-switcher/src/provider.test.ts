@@ -1,6 +1,34 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { isCleanIncludedModel, buildPoolLabelMap } from "./provider.ts";
+import { register } from "node:module";
+
+const loaderCode = `
+import { existsSync } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+export async function resolve(specifier, context, nextResolve) {
+  if (specifier.endsWith(".js") && specifier.startsWith(".")) {
+    try {
+      const resolvedUrl = new URL(specifier, context.parentURL);
+      const filePath = fileURLToPath(resolvedUrl);
+      if (!existsSync(filePath)) {
+        const tsPath = filePath.replace(/\\.js$/, ".ts");
+        if (existsSync(tsPath)) {
+          return {
+            shortCircuit: true,
+            url: pathToFileURL(tsPath).href,
+          };
+        }
+      }
+    } catch {}
+  }
+  return nextResolve(specifier, context);
+}
+`;
+
+register("data:text/javascript," + encodeURIComponent(loaderCode));
+
+const { isCleanIncludedModel, buildPoolLabelMap } = await import("./provider.js");
 
 describe("Dynamic Provider Filtering & Granular Coexistence", () => {
     const mockFilterData = {

@@ -4,7 +4,7 @@ import { initFailoverHook, scheduleAutoSwitcher } from "./src/failover.js";
 import { registerModelPicker } from "./src/picker.js";
 import { CpamcTuiAdapter } from "./src/adapter.js";
 import { querySwitcherAccounts, checkProactivePoolRebalance } from "./src/store.js";
-import { saveProjectModel, getProjectModel } from "./src/project-model-store.js";
+import { saveProjectModel, getProjectModel, clearProjectModel } from "./src/project-model-store.js";
 
 /**
  * CPAMC Auto-Switcher Unified Extension for Pi & Gentle-Shell
@@ -37,6 +37,32 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 	// 3. Inicializar selector complementario /cpamc-model
 	registerModelPicker(pi);
 
+	// 3b. Comando para restablecer el modelo del proyecto actual al default de Pi
+	pi.registerCommand("model-default", {
+		description: "Restablece el modelo del proyecto actual al default configurado en Pi",
+		handler: async (_args, ctx) => {
+			if (ctx.cwd) {
+				clearProjectModel(ctx.cwd);
+			}
+			const settings = (ctx as any)?.settingsManager;
+			const defaultProvider = settings?.getDefaultProvider?.() || "cpamc";
+			const defaultModelId = settings?.getDefaultModel?.();
+			if (defaultProvider && defaultModelId) {
+				const target = ctx.modelRegistry?.find?.(defaultProvider, defaultModelId);
+				if (target) {
+					await pi.setModel(target);
+					if (ctx.hasUI) {
+						ctx.ui.notify?.(`✅ Modelo restablecido al default de Pi: ${defaultModelId}`, "info");
+					}
+					return;
+				}
+			}
+			if (ctx.hasUI) {
+				ctx.ui.notify?.("✅ Memoria de sesión restablecida para este proyecto.", "info");
+			}
+		},
+	});
+
 	// 4. Adaptador reactivo de UI (Sidebar QuotaCard + Footer)
 	let adapter: CpamcTuiAdapter | null = null;
 	let timer: NodeJS.Timeout | null = null;
@@ -63,6 +89,16 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 			ctx.ui.notify?.("✅ Contexto de sesión compactado y reanudado.", "info");
 		}
 
+		// Detección de reanudación de sesión en Herdr (snapshot previo restaurado)
+		const isResumedSession =
+			reason === "resume" || (reason === "startup" && (ctx.sessionManager?.getEntries?.()?.length ?? 0) > 0);
+		if (isResumedSession && ctx?.hasUI) {
+			ctx.ui.notify?.(
+				`ℹ️ Sesión previa de Herdr reanudada (${ctx.model?.id || "modelo de sesión"}). Usa /new para sesión limpia.`,
+				"info",
+			);
+		}
+
 		// Restauración dinámica del modelo del proyecto al reiniciar sesión (/new)
 		// Solo aplica en caliente durante la sesión activa en Herdr.
 		// En arranque en frío (startup) siempre se inicia con el modelo default de Pi.
@@ -79,6 +115,9 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 
 					if (targetModel) {
 						await pi.setModel(targetModel);
+						if (ctx.hasUI) {
+							ctx.ui.notify?.(`ℹ️ Manteniendo modelo de sesión: ${targetModel.id}`, "info");
+						}
 					} else if (saved && ctx.hasUI) {
 						// Notificación informativa no invasiva si el modelo o pool guardado fue disuelto
 						ctx.ui.notify?.(
@@ -86,6 +125,8 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 							"warning",
 						);
 					}
+				} else if (ctx.hasUI && ctx.model) {
+					ctx.ui.notify?.(`ℹ️ Sesión iniciada con modelo default: ${ctx.model.id}`, "info");
 				}
 			} catch {
 				// Silencioso ante fallos al restaurar modelo de proyecto

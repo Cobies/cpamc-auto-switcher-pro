@@ -67,8 +67,12 @@ function pctColor(pctStr: string): string {
  * Formatea el bloque de telemetría de rotación en una sola línea compacta:
  * `│⏸ agy_clau 100% │ ⏭ agy_clau_1 100%`
  */
-export function formatFooterRotationBlock(pair: PoolRotationPair | null, isBusy = false): string {
-	if (!pair) return "";
+export function formatFooterRotationBlock(pair: PoolRotationPair | null, isBusy = false, originTag?: string): string {
+	const originPart = originTag ? ` ${MUTED}· ${originTag}${RESET}` : "";
+
+	if (!pair) {
+		return originTag ? `${SEP}${originPart}` : "";
+	}
 
 	if (pair.isNativeReadOnly) {
 		const pActiveColor = pctColor(pair.active.minAvailable);
@@ -77,7 +81,7 @@ export function formatFooterRotationBlock(pair: PoolRotationPair | null, isBusy 
 		const wInfo = pair.active.consumedWeekly ? `${pair.active.consumedWeekly}` : "";
 		const cd = [hInfo, wInfo].filter(Boolean).join("/");
 		const cdStr = cd ? ` ↻ ${cd}` : "";
-		return `${SEP} ⚡ ${LEADER_COLOR}${activeLabel}${RESET} ${pActiveColor}${pair.active.minAvailable}${RESET}${MUTED}${cdStr}${RESET}`;
+		return `${SEP} ⚡ ${LEADER_COLOR}${activeLabel}${RESET} ${pActiveColor}${pair.active.minAvailable}${RESET}${MUTED}${cdStr}${RESET}${originPart}`;
 	}
 
 	const icon = isBusy ? `${PLAY_COLOR}▶${RESET}` : `${PAUSE_COLOR}⏸${RESET}`;
@@ -86,7 +90,7 @@ export function formatFooterRotationBlock(pair: PoolRotationPair | null, isBusy 
 	const activePart = `${icon} ${LEADER_COLOR}${activeLabel}${RESET} ${pActiveColor}${pair.active.minAvailable}${RESET}`;
 
 	if (!pair.next) {
-		return `${SEP} ${activePart}`;
+		return `${SEP} ${activePart}${originPart}`;
 	}
 
 	const nextIcon = `\x1b[38;2;157;124;216m⏭${RESET}`;
@@ -94,7 +98,7 @@ export function formatFooterRotationBlock(pair: PoolRotationPair | null, isBusy 
 	const nextLabel = pair.next.prefix || pair.next.accountId;
 	const nextPart = `${nextIcon} ${NEXT_COLOR}${nextLabel}${RESET} ${pNextColor}${pair.next.minAvailable}${RESET}`;
 
-	return `${SEP} ${activePart} ${SEP} ${nextPart}`;
+	return `${SEP} ${activePart} ${SEP} ${nextPart}${originPart}`;
 }
 
 function visibleLen(str: string): number {
@@ -377,8 +381,25 @@ export class CpamcTuiAdapter {
 		}
 	}
 
+	private getModelOriginTag(): string | undefined {
+		if (!this.ctx?.model) return undefined;
+		const settings = (this.ctx as any)?.settingsManager;
+		const defaultProvider = settings?.getDefaultProvider?.() || "cpamc";
+		const defaultModelId = settings?.getDefaultModel?.();
+
+		if (
+			defaultModelId &&
+			this.ctx.model.id === defaultModelId &&
+			(this.ctx.model.provider || "cpamc") === defaultProvider
+		) {
+			return "default";
+		}
+		return "sesión";
+	}
+
 	private injectIntoFooter(isBusy: boolean): void {
-		const block = formatFooterRotationBlock(this.currentPair, isBusy);
+		const originTag = this.getModelOriginTag();
+		const block = formatFooterRotationBlock(this.currentPair, isBusy, originTag);
 		const tui = this.tui || (this.ctx as any)?.tui;
 		const terminal = tui?.terminal as any;
 		const footer = (this.ctx as any)?.footer || terminal?.[Symbol.for("j0k3r-theme.footer")];

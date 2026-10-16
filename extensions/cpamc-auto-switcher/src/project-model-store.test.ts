@@ -1,17 +1,61 @@
-import { describe, it, beforeEach } from "node:test";
+import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import {
+import fs from "node:fs";
+import os from "node:os";
+import { register } from "node:module";
+
+const loaderCode = `
+import { existsSync } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+export async function resolve(specifier, context, nextResolve) {
+  if (specifier.endsWith(".js") && specifier.startsWith(".")) {
+    try {
+      const resolvedUrl = new URL(specifier, context.parentURL);
+      const filePath = fileURLToPath(resolvedUrl);
+      if (!existsSync(filePath)) {
+        const tsPath = filePath.replace(/\\.js$/, ".ts");
+        if (existsSync(tsPath)) {
+          return {
+            shortCircuit: true,
+            url: pathToFileURL(tsPath).href,
+          };
+        }
+      }
+    } catch {}
+  }
+  return nextResolve(specifier, context);
+}
+`;
+
+register("data:text/javascript," + encodeURIComponent(loaderCode));
+
+const {
 	normalizeCwd,
 	saveProjectModel,
 	getProjectModel,
 	loadProjectModelsMap,
 	clearProjectModels,
-} from "./project-model-store.ts";
+	clearProjectModel,
+	setCustomStorePath,
+	getShmStorePath,
+} = await import("./project-model-store.js");
 
 describe("Project Model Store & Volatile Session Lifecycle", () => {
+	const testStorePath = path.join(
+		fs.existsSync("/dev/shm") ? "/dev/shm" : os.tmpdir(),
+		`test-herdr-${process.pid}-project-models.json`,
+	);
+
 	beforeEach(() => {
+		setCustomStorePath(testStorePath);
 		clearProjectModels();
+	});
+
+	afterEach(() => {
+		clearProjectModels();
+		setCustomStorePath(null);
 	});
 
 	it("normalizes paths removing trailing slashes and resolving relative dots", () => {
@@ -32,6 +76,40 @@ describe("Project Model Store & Volatile Session Lifecycle", () => {
 		assert.ok(retrieved.updatedAt > 0);
 	});
 
+	it("shares state across independent panes within the same Herdr workspace (/dev/shm)", () => {
+		// Simula Pane 1 seleccionando un modelo para el proyecto
+		saveProjectModel("/home/wilox/projects/sio-hotel", "cpamc", "Pool-04-claude");
+
+		// Simula Pane 2 (otro proceso/instancia que lee la misma memoria compartida)
+		const pane2Retrieved = getProjectModel("/home/wilox/projects/sio-hotel");
+		assert.ok(pane2Retrieved);
+		assert.equal(pane2Retrieved.modelId, "Pool-04-claude");
+	});
+
+	it("isolates different Herdr workspaces by workspace id", () => {
+		const originalWsId = process.env.HERDR_WORKSPACE_ID;
+		try {
+			setCustomStorePath(null); // Usar resolución canónica basada en env
+			process.env.HERDR_WORKSPACE_ID = "workspace-ALPHA";
+			clearProjectModels();
+			saveProjectModel("/projects/shared", "cpamc", "Pool-01-gemini");
+			assert.equal(getProjectModel("/projects/shared")?.modelId, "Pool-01-gemini");
+
+			// Cambiar a otro workspace
+			process.env.HERDR_WORKSPACE_ID = "workspace-BETA";
+			// El nuevo workspace debe estar limpio (sin modelo previo forzado)
+			assert.equal(getProjectModel("/projects/shared"), null);
+
+			// Volver al workspace ALPHA y verificar que su estado persiste
+			process.env.HERDR_WORKSPACE_ID = "workspace-ALPHA";
+			assert.equal(getProjectModel("/projects/shared")?.modelId, "Pool-01-gemini");
+		} finally {
+			process.env.HERDR_WORKSPACE_ID = "workspace-ALPHA";
+			clearProjectModels();
+			process.env.HERDR_WORKSPACE_ID = originalWsId;
+		}
+	});
+
 	it("updates existing cwd model without altering other projects in the same process", () => {
 		saveProjectModel("/projects/proj-a", "cpamc", "Pool-01-gemini");
 		saveProjectModel("/projects/proj-b", "cpamc", "claude-sonnet-4-6");
@@ -44,6 +122,16 @@ describe("Project Model Store & Volatile Session Lifecycle", () => {
 		assert.equal(map[path.resolve("/projects/proj-b")]?.modelId, "claude-sonnet-4-6");
 	});
 
+	it("clears model for a specific cwd without affecting other projects", () => {
+		saveProjectModel("/projects/proj-a", "cpamc", "Pool-01-gemini");
+		saveProjectModel("/projects/proj-b", "cpamc", "claude-sonnet-4-6");
+
+		clearProjectModel("/projects/proj-a");
+
+		assert.equal(getProjectModel("/projects/proj-a"), null);
+		assert.equal(getProjectModel("/projects/proj-b")?.modelId, "claude-sonnet-4-6");
+	});
+
 	it("returns null for projects without explicit selection in the current session", () => {
 		assert.equal(getProjectModel("/projects/unselected-proj"), null);
 	});
@@ -54,7 +142,7 @@ describe("Project Model Store & Volatile Session Lifecycle", () => {
 		saveProjectModel(projectCwd, "cpamc", "Pool-01-gemini");
 		assert.equal(getProjectModel(projectCwd)?.modelId, "Pool-01-gemini");
 
-		// Se simula la salida de Herdr (muere el proceso y su memoria RAM)
+		// Se simula la salida de Herdr o reinicio del sistema (se purga el archivo volátil)
 		clearProjectModels();
 
 		// Al volver a iniciar Herdr, debe regresar al default de Pi (sin modelo previo forzado)
@@ -80,5 +168,6 @@ describe("Project Model Store & Volatile Session Lifecycle", () => {
 		assert.equal(sessionModel.modelId, "Pool-01-gemini");
 	});
 });
+
 
 
