@@ -160,16 +160,34 @@ var activeRegistry = func() *PoolRegistry { return DefaultRegistry() }
 // baselineAntigravityModels is the standard Antigravity catalog published
 // natively for credentials without pool membership. It keeps free accounts
 // serving their native family while the plugin owns the provider catalog.
+// Only confirmed active models supported upstream are listed here.
 var baselineAntigravityModels = []pluginModelInfo{
-	{ID: "gemini-3-flash", Object: "model", OwnedBy: antigravityProviderKey, DisplayName: "Gemini 3 Flash"},
-	{ID: "gemini-3.1-flash-lite", Object: "model", OwnedBy: antigravityProviderKey, DisplayName: "Gemini 3.1 Flash Lite"},
-	{ID: "gemini-3.1-flash-image", Object: "model", OwnedBy: antigravityProviderKey, DisplayName: "Gemini 3.1 Flash Image"},
-	{ID: "gemini-3.1-pro-low", Object: "model", OwnedBy: antigravityProviderKey, DisplayName: "Gemini 3.1 Pro Low"},
-	{ID: "gemini-3.5-flash-lite", Object: "model", OwnedBy: antigravityProviderKey, DisplayName: "Gemini 3.5 Flash Lite"},
-	{ID: "gemini-3.6-flash-high", Object: "model", OwnedBy: antigravityProviderKey, DisplayName: "Gemini 3.6 Flash High"},
-	{ID: "gemini-3.7-flash-high", Object: "model", OwnedBy: antigravityProviderKey, DisplayName: "Gemini 3.7 Flash High"},
 	{ID: "gemini-3.8-flash-high", Object: "model", OwnedBy: antigravityProviderKey, DisplayName: "Gemini 3.8 Flash High"},
-	{ID: "gemini-pro-agent", Object: "model", OwnedBy: antigravityProviderKey, DisplayName: "Gemini Pro Agent"},
+	{ID: "gemini-3.5-flash-lite", Object: "model", OwnedBy: antigravityProviderKey, DisplayName: "Gemini 3.5 Flash Lite"},
+	{ID: "gemini-3.1-flash-lite", Object: "model", OwnedBy: antigravityProviderKey, DisplayName: "Gemini 3.1 Flash Lite"},
+	{ID: "gemini-3-flash", Object: "model", OwnedBy: antigravityProviderKey, DisplayName: "Gemini 3 Flash"},
+}
+
+// deprecatedModelFallbacks maps retired or discontinued upstream model names
+// to their current valid active counterpart in the same family.
+// This prevents upstream HTTP 404s and 12-hour cascading cooldowns across all accounts.
+var deprecatedModelFallbacks = map[string]string{
+	"gemini-3.7-flash-high":  "gemini-3.8-flash-high",
+	"gemini-3.6-flash-high":  "gemini-3.8-flash-high",
+	"gemini-3.1-pro-low":     "gemini-3.8-flash-high",
+	"gemini-pro-agent":       "gemini-3.8-flash-high",
+	"gemini-2.5-flash-high":  "gemini-3.8-flash-high",
+	"gemini-3.1-flash-image": "gemini-3.8-flash-high",
+}
+
+// ResolveActiveModelFallback rewrites any known retired/deprecated upstream model names
+// to their current valid active counterpart in the same family.
+func ResolveActiveModelFallback(model string) string {
+	trimmed := strings.TrimSpace(model)
+	if fallback, ok := deprecatedModelFallbacks[strings.ToLower(trimmed)]; ok {
+		return fallback
+	}
+	return trimmed
 }
 
 // cloneBaseline returns a copy of the baseline catalog.
@@ -180,6 +198,7 @@ func cloneBaseline() []pluginModelInfo {
 }
 
 // cleanBareModelID strips any leading provider/pool prefixes (e.g. agy/agy/gemini-3-flash -> gemini-3-flash)
+// and normalizes deprecated models to their active fallback.
 func cleanBareModelID(id string) string {
 	cur := strings.TrimSpace(id)
 	for {
@@ -190,7 +209,7 @@ func cleanBareModelID(id string) string {
 			break
 		}
 	}
-	return cur
+	return ResolveActiveModelFallback(cur)
 }
 
 // poolTargets extracts the pool's target model list (empty when unset or paused).
@@ -370,6 +389,19 @@ func routeDecisionFor(registry *PoolRegistry, requestedModel string) modelRouteR
 		return modelRouteResponse{}
 	}
 
+	// 0. Deprecated model auto-fallback interceptor:
+	// If the requested model is a known retired model (e.g. gemini-3.7-flash-high),
+	// route it directly to the active model to prevent upstream 404 and cascading cooldowns.
+	if fallback, ok := deprecatedModelFallbacks[strings.ToLower(trimmed)]; ok {
+		return modelRouteResponse{
+			Handled:     true,
+			TargetKind:  "provider",
+			Target:      antigravityProviderKey,
+			TargetModel: fallback,
+			Reason:      fmt.Sprintf("auto-switcher-pro deprecated model auto-fallback (%s -> %s)", trimmed, fallback),
+		}
+	}
+
 	slash := strings.Index(trimmed, "/")
 	if slash <= 0 {
 		// Direct Clean Pool Identifier invocation (e.g. "Pool-01-gemini")
@@ -386,7 +418,7 @@ func routeDecisionFor(registry *PoolRegistry, requestedModel string) modelRouteR
 		if activeAuth == "" {
 			activeAuth = strings.TrimSpace(pool.LeaderAuth)
 		}
-		resolvedModel := pool.ActiveModelForAccount(activeAuth)
+		resolvedModel := ResolveActiveModelFallback(pool.ActiveModelForAccount(activeAuth))
 		return modelRouteResponse{
 			Handled:     true,
 			TargetKind:  "provider",
@@ -408,12 +440,13 @@ func routeDecisionFor(registry *PoolRegistry, requestedModel string) modelRouteR
 	}
 
 	for _, target := range poolTargets(pool) {
-		if strings.EqualFold(target, rest) {
+		if strings.EqualFold(target, rest) || strings.EqualFold(ResolveActiveModelFallback(target), ResolveActiveModelFallback(rest)) {
+			effectiveTarget := ResolveActiveModelFallback(rest)
 			return modelRouteResponse{
 				Handled:     true,
 				TargetKind:  "provider",
 				Target:      antigravityProviderKey,
-				TargetModel: rest,
+				TargetModel: effectiveTarget,
 				Reason:      fmt.Sprintf("auto-switcher-pro 2N pool route (%s)", pool.BasePrefix),
 			}
 		}
@@ -585,9 +618,9 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 			predEngine.RecordActivity(email)
 
 			// Resolver el modelo especialista específico de esta cuenta (member_models o fallback del pool)
-			resolvedTargetModel := pool.ActiveModelForAccount(exactID)
+			resolvedTargetModel := ResolveActiveModelFallback(pool.ActiveModelForAccount(exactID))
 			if strings.TrimSpace(resolvedTargetModel) == "" {
-				resolvedTargetModel = originalModel
+				resolvedTargetModel = ResolveActiveModelFallback(originalModel)
 			}
 
 			analytics.RecordEvent(analytics.RotationEvent{

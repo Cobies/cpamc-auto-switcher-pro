@@ -56,6 +56,22 @@ export function formatRemainingTime(minutes, isWeekly) {
 }
 
 /**
+ * Translates English quota labels and status text to natural Spanish.
+ * @param {string} text
+ * @returns {string}
+ */
+export function translateQuotaText(text) {
+  if (!text || typeof text !== 'string') return text;
+  let res = text;
+  res = res.replace(/\bQuota available\b/gi, 'Cuota disponible');
+  res = res.replace(/(\d+)%\s*remaining/gi, '$1% restante');
+  res = res.replace(/\bFive Hour Limit\b/gi, 'Límite de 5 horas');
+  res = res.replace(/\bWeekly Limit\b/gi, 'Límite semanal');
+  res = res.replace(/\bRefreshes in\b/gi, 'Reinicia en');
+  return res;
+}
+
+/**
  * QuotaClock: Reusable circular dual-ring gauge for quota windows.
  *
  * Outer ring (Blue): Window elapsed time (0-100%) starting at 12 o'clock with tick marks & needle dot.
@@ -173,7 +189,7 @@ export function QuotaClock({
       return {
         state: 'easy',
         statusText: 'Ritmo holgado',
-        secondaryText: percentLabel || 'Consumo óptimo',
+        secondaryText: translateQuotaText(percentLabel) || 'Consumo óptimo',
         statusColor: '#22c55e',
         ringColor: '#22c55e',
       };
@@ -182,7 +198,7 @@ export function QuotaClock({
       return {
         state: 'moderate',
         statusText: 'Ritmo ajustado',
-        secondaryText: percentLabel || 'Consumo al límite',
+        secondaryText: translateQuotaText(percentLabel) || 'Consumo al límite',
         statusColor: '#f59e0b',
         ringColor: '#f59e0b',
       };
@@ -190,7 +206,7 @@ export function QuotaClock({
     return {
       state: 'fast',
       statusText: 'Vas muy rápido',
-      secondaryText: percentLabel || 'Riesgo de agotamiento',
+      secondaryText: translateQuotaText(percentLabel) || 'Riesgo de agotamiento',
       statusColor: '#ef4444',
       ringColor: '#ef4444',
     };
@@ -254,7 +270,8 @@ export function QuotaClock({
 
   // Display title text
   const displayTitle = is5h ? 'Ventana de 5 horas' : isWeekly ? 'Semanal' : label;
-  const canonicalWindowName = is5h ? 'Five Hour Limit' : isWeekly ? 'Weekly Limit' : label;
+  const rawCanonicalWindowName = is5h ? 'Five Hour Limit' : isWeekly ? 'Weekly Limit' : label;
+  const canonicalWindowName = translateQuotaText(rawCanonicalWindowName);
 
   // Accessibility label
   const ariaLabel = useMemo(() => {
@@ -281,8 +298,8 @@ export function QuotaClock({
         <svg
           className="quota-clock-svg"
           viewBox="0 0 120 120"
-          width="114"
-          height="114"
+          width="86"
+          height="86"
           xmlns="http://www.w3.org/2000/svg"
         >
           {/* Tick marks around outer ring */}
@@ -294,8 +311,8 @@ export function QuotaClock({
                 y1={t.y1}
                 x2={t.x2}
                 y2={t.y2}
-                stroke="rgba(148, 163, 184, 0.45)"
-                strokeWidth="1.2"
+                stroke="rgba(148, 163, 184, 0.35)"
+                strokeWidth="1"
                 strokeLinecap="round"
               />
             ))}
@@ -307,8 +324,8 @@ export function QuotaClock({
             cy={cy}
             r={rOuter}
             fill="none"
-            stroke="rgba(56, 189, 248, 0.15)"
-            strokeWidth="5"
+            stroke="rgba(56, 189, 248, 0.12)"
+            strokeWidth="4.5"
           />
 
           {/* Outer ring fill (Elapsed time - sky blue) */}
@@ -319,7 +336,7 @@ export function QuotaClock({
             r={rOuter}
             fill="none"
             stroke="#38bdf8"
-            strokeWidth="5"
+            strokeWidth="4.5"
             strokeDasharray={outerCircumference}
             strokeDashoffset={outerOffset}
             strokeLinecap="round"
@@ -332,7 +349,7 @@ export function QuotaClock({
               className="quota-clock-needle-dot"
               cx={dotCoords.x}
               cy={dotCoords.y}
-              r="3"
+              r="2.8"
               fill="#38bdf8"
               stroke="#0f172a"
               strokeWidth="1.2"
@@ -345,8 +362,8 @@ export function QuotaClock({
             cy={cy}
             r={rInner}
             fill="none"
-            stroke="rgba(51, 65, 85, 0.4)"
-            strokeWidth="5"
+            stroke="rgba(51, 65, 85, 0.35)"
+            strokeWidth="4.5"
           />
 
           {/* Inner ring fill (Quota consumed - dynamic pace color) */}
@@ -357,7 +374,7 @@ export function QuotaClock({
             r={rInner}
             fill="none"
             stroke={pace.ringColor}
-            strokeWidth="5"
+            strokeWidth="4.5"
             strokeDasharray={innerCircumference}
             strokeDashoffset={innerOffset}
             strokeLinecap="round"
@@ -381,7 +398,7 @@ export function QuotaClock({
             <g className="quota-clock-center-text" textAnchor="middle">
               <text
                 x={cx}
-                y="48"
+                y="47"
                 className="quota-clock-center-small"
                 fill="#64748b"
                 fontSize="8"
@@ -394,21 +411,21 @@ export function QuotaClock({
                 y="62"
                 className="quota-clock-center-large"
                 fill="#f8fafc"
-                fontSize="11.5"
+                fontSize="12"
                 fontWeight="700"
               >
                 {remainingFormatted}
               </text>
               <text
                 x={cx}
-                y="74"
+                y="75"
                 className="quota-clock-center-sub"
                 fill={pace.statusColor}
                 fontSize="8.5"
                 fontWeight="600"
               >
                 {effectiveConsumedPct >= 100
-                  ? (percentLabel || '100% agotado')
+                  ? (translateQuotaText(percentLabel) || '100% agotado')
                   : `${effectiveConsumedPct}% usado`}
               </text>
             </g>
@@ -424,12 +441,15 @@ export function QuotaClock({
             {canonicalWindowName}
           </span>
         </div>
-        <div
-          className="quota-clock-status"
-          style={{ color: pace.statusColor }}
-          data-testid={`quota-clock-status-${windowKey || 'clock'}`}
-        >
-          {pace.statusText}
+        <div className="quota-clock-badge-status" style={{ borderColor: pace.ringColor, background: `${pace.ringColor}18` }}>
+          <span className="quota-clock-dot" style={{ backgroundColor: pace.statusColor }} />
+          <span
+            className="quota-clock-status"
+            style={{ color: pace.statusColor }}
+            data-testid={`quota-clock-status-${windowKey || 'clock'}`}
+          >
+            {pace.statusText}
+          </span>
         </div>
         <div className="quota-clock-secondary">
           {pace.secondaryText}

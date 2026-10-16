@@ -5,10 +5,18 @@ import {
   QuotaClock,
   parseRemainingMinutesFromLabel,
   formatRemainingTime,
+  translateQuotaText,
 } from './QuotaClock';
 
 describe('QuotaClock Component & Utilities', () => {
   describe('Helper Functions', () => {
+    it('translateQuotaText translates English labels to natural Spanish', () => {
+      expect(translateQuotaText('Five Hour Limit')).toBe('Límite de 5 horas');
+      expect(translateQuotaText('Weekly Limit')).toBe('Límite semanal');
+      expect(translateQuotaText('Quota available')).toBe('Cuota disponible');
+      expect(translateQuotaText('74% remaining')).toBe('74% restante');
+      expect(translateQuotaText('Refreshes in 4h 45m')).toBe('Reinicia en 4h 45m');
+    });
     it('parseRemainingMinutesFromLabel correctly parses various time string formats', () => {
       expect(parseRemainingMinutesFromLabel('Refreshes in 4h 45m')).toBe(285);
       expect(parseRemainingMinutesFromLabel('Refreshes in 5d 12h')).toBe(5 * 1440 + 12 * 60);
@@ -44,7 +52,7 @@ describe('QuotaClock Component & Utilities', () => {
 
       expect(screen.getByText('Ritmo holgado')).toBeTruthy();
       expect(screen.getByText('Ventana de 5 horas')).toBeTruthy();
-      expect(screen.getByText('Five Hour Limit')).toBeTruthy();
+      expect(screen.getByText('Límite de 5 horas')).toBeTruthy();
       expect(screen.getByText('3h 0m')).toBeTruthy(); // 180 min = 3h 0m
       expect(screen.getByText('25% usado')).toBeTruthy();
 
@@ -112,6 +120,7 @@ describe('QuotaClock Component & Utilities', () => {
       );
 
       expect(screen.getByText('Ritmo holgado')).toBeTruthy();
+      expect(screen.getByText('Cuota disponible')).toBeTruthy();
       expect(screen.getByText('5h 0m')).toBeTruthy();
       expect(screen.getByText('0% usado')).toBeTruthy();
     });

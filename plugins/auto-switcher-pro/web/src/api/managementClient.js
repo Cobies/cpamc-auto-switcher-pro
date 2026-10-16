@@ -1392,17 +1392,9 @@ export async function deleteAuthFile(fileName, options = {}) {
 export const CANONICAL_PROVIDER_MODELS = {
   gemini: [
     'gemini-3.8-flash-high',
-    'gemini-3.7-flash-high',
-    'gemini-3.6-flash-high',
     'gemini-3.5-flash-lite',
-    'gemini-3.1-pro-low',
     'gemini-3.1-flash-lite',
-    'gemini-3.1-flash-image',
     'gemini-3-flash',
-    'gemini-pro-agent',
-    'gemini-2.5-pro',
-    'gemini-2.5-flash',
-    'gemini-2.0-flash',
   ],
   claude: [
     'claude-3-7-sonnet',
@@ -1420,6 +1412,15 @@ export const CANONICAL_PROVIDER_MODELS = {
     'o1-preview',
     'o3-mini',
   ],
+};
+
+export const DEPRECATED_MODEL_FALLBACKS = {
+  'gemini-3.7-flash-high': 'gemini-3.8-flash-high',
+  'gemini-3.6-flash-high': 'gemini-3.8-flash-high',
+  'gemini-3.1-pro-low': 'gemini-3.8-flash-high',
+  'gemini-pro-agent': 'gemini-3.8-flash-high',
+  'gemini-2.5-flash-high': 'gemini-3.8-flash-high',
+  'gemini-3.1-flash-image': 'gemini-3.8-flash-high',
 };
 
 /**

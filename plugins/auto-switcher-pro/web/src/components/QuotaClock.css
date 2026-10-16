@@ -10,13 +10,19 @@
   justify-content: flex-start;
   text-align: center;
   flex: 1 1 0;
-  min-width: 120px;
-  max-width: 160px;
-  padding: 6px 4px 4px;
-  background: rgba(15, 23, 42, 0.45);
+  min-width: 105px;
+  max-width: 150px;
+  padding: 6px 3px 6px;
+  background: rgba(15, 23, 42, 0.35);
   border: 1px solid rgba(51, 65, 85, 0.4);
   border-radius: 8px;
   box-sizing: border-box;
+  transition: all 0.2s ease;
+}
+
+.quota-clock-wrapper:hover {
+  background: rgba(15, 23, 42, 0.55);
+  border-color: rgba(56, 189, 248, 0.35);
 }
 
 .quota-clock-svg-container {
@@ -66,7 +72,7 @@
   align-items: center;
   gap: 2px;
   width: 100%;
-  margin-top: 4px;
+  margin-top: 1px;
 }
 
 .quota-clock-title-wrap {
@@ -77,33 +83,53 @@
 }
 
 .quota-clock-title {
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 700;
   color: #f1f5f9;
   white-space: nowrap;
 }
 
 .quota-clock-canonical-label {
-  font-size: 8.5px;
-  color: #94a3b8;
+  font-size: 7.5px;
+  color: #64748b;
   font-weight: 500;
   white-space: nowrap;
+  line-height: 1;
+  opacity: 0.85;
+}
+
+.quota-clock-badge-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  margin-top: 2px;
+}
+
+.quota-clock-dot {
+  width: 4.5px;
+  height: 4.5px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
 }
 
 .quota-clock-status {
-  font-size: 9.5px;
+  font-size: 8.5px;
   font-weight: 700;
-  line-height: 1.2;
-  margin-top: 1px;
+  line-height: 1.1;
+  white-space: nowrap;
 }
 
 .quota-clock-secondary {
-  font-size: 8.5px;
+  font-size: 8px;
   color: #94a3b8;
-  line-height: 1.15;
+  line-height: 1.1;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   white-space: nowrap;
-  max-width: 125px;
+  max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
 }

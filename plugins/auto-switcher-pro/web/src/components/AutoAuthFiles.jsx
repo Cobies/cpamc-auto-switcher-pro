@@ -522,43 +522,58 @@ export default function AutoAuthFiles({
           </div>
         </div>
 
-        {visibleGroups.map((group, gIdx) => (
-          <div key={gIdx} className="quota-group">
-            <div className="group-title">{group.title}</div>
-            <div className="quota-clocks-row" data-testid={`quota-clocks-${gIdx}`}>
-              {(group.rows || []).map((row, rIdx) => {
-                const isWeekly = (row.label || '').toLowerCase().includes('week');
-                const totalMinutes = isWeekly ? 10080 : 300;
-                const windowKey = isWeekly ? 'weekly' : '5h';
-                const consumedPercent =
-                  row.percent === null || row.percent === undefined
-                    ? null
-                    : row.percent === 0
-                    ? 100
-                    : Math.max(0, Math.min(100, 100 - row.percent));
-                const remainingMinutes =
-                  row.resetMs !== null && row.resetMs !== undefined
-                    ? Math.max(0, Math.round((row.resetMs - Date.now()) / 60000))
-                    : null;
+        {visibleGroups.map((group, gIdx) => {
+          // Sort to always place 5-hour window on the left and weekly window on the right
+          const sortedRows = [...(group.rows || [])].sort((a, b) => {
+            const aIs5h =
+              (a.label || '').toLowerCase().includes('5') ||
+              (a.label || '').toLowerCase().includes('five');
+            const bIs5h =
+              (b.label || '').toLowerCase().includes('5') ||
+              (b.label || '').toLowerCase().includes('five');
+            if (aIs5h && !bIs5h) return -1;
+            if (!aIs5h && bIs5h) return 1;
+            return 0;
+          });
 
-                return (
-                  <QuotaClock
-                    key={rIdx}
-                    totalMinutes={totalMinutes}
-                    remainingMinutes={remainingMinutes}
-                    consumedPercent={consumedPercent}
-                    label={row.label}
-                    windowKey={windowKey}
-                    resetLabel={row.resetLabel}
-                    percentLabel={row.percentLabel}
-                    isLoading={isCardLoading}
-                    testId={`quota-clock-${windowKey}-${masterKey || 'card'}-${rIdx}`}
-                  />
-                );
-              })}
+          return (
+            <div key={gIdx} className="quota-group">
+              <div className="group-title">{group.title}</div>
+              <div className="quota-clocks-row" data-testid={`quota-clocks-${gIdx}`}>
+                {sortedRows.map((row, rIdx) => {
+                  const isWeekly = (row.label || '').toLowerCase().includes('week');
+                  const totalMinutes = isWeekly ? 10080 : 300;
+                  const windowKey = isWeekly ? 'weekly' : '5h';
+                  const consumedPercent =
+                    row.percent === null || row.percent === undefined
+                      ? null
+                      : row.percent === 0
+                      ? 100
+                      : Math.max(0, Math.min(100, 100 - row.percent));
+                  const remainingMinutes =
+                    row.resetMs !== null && row.resetMs !== undefined
+                      ? Math.max(0, Math.round((row.resetMs - Date.now()) / 60000))
+                      : null;
+
+                  return (
+                    <QuotaClock
+                      key={rIdx}
+                      totalMinutes={totalMinutes}
+                      remainingMinutes={remainingMinutes}
+                      consumedPercent={consumedPercent}
+                      label={row.label}
+                      windowKey={windowKey}
+                      resetLabel={row.resetLabel}
+                      percentLabel={row.percentLabel}
+                      isLoading={isCardLoading}
+                      testId={`quota-clock-${windowKey}-${masterKey || 'card'}-${rIdx}`}
+                    />
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
 
         {/* Real Activity from CPAMC native recent_requests buckets */}
         <div className="card-activity-wrap">

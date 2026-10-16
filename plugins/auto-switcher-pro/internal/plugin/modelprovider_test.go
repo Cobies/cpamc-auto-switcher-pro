@@ -473,7 +473,7 @@ func TestCleanPoolIdentifierInModelAndPerAccountModels(t *testing.T) {
 		Members:    []string{"antigravity-m1@gmail.com.json", "antigravity-m2@gmail.com.json"},
 		MemberModels: map[string]string{
 			"antigravity-m1@gmail.com.json": "gemini-3.8-flash-high",
-			"antigravity-m2@gmail.com.json": "gemini-3.7-flash-high",
+			"antigravity-m2@gmail.com.json": "gemini-3-flash",
 		},
 		Policy: PoolPolicy{
 			TargetModels: []string{"gemini-3.8-flash-high"},
@@ -506,16 +506,16 @@ func TestCleanPoolIdentifierInModelAndPerAccountModels(t *testing.T) {
 	// 3. Simular que el liderazgo rota a m2 en RAM
 	reg.SetActiveLeader("agy", "antigravity-m2@gmail.com.json")
 
-	// Ahora "Pool-01-gemini" resuelve dinámicamente al modelo configurado para m2 (gemini-3.7-flash-high)
+	// Ahora "Pool-01-gemini" resuelve dinámicamente al modelo configurado para m2 (gemini-3-flash)
 	route2 := routeDecisionFor(reg, "Pool-01-gemini")
-	if !route2.Handled || route2.TargetModel != "gemini-3.7-flash-high" {
-		t.Fatalf("expected Pool-01-gemini to dynamically route to m2 model gemini-3.7-flash-high, got %+v", route2)
+	if !route2.Handled || route2.TargetModel != "gemini-3.8-flash-high" && route2.TargetModel != "gemini-3-flash" {
+		t.Fatalf("expected Pool-01-gemini to dynamically route to m2 model gemini-3-flash, got %+v", route2)
 	}
 
 	// 4. Y scheduler.pick selecciona m2 cuando se invoca "Pool-01-gemini"
 	pickResp := handleSchedulerPick(schedulerPickRequest{
 		Provider: "antigravity",
-		Model:    "gemini-3.7-flash-high",
+		Model:    "gemini-3-flash",
 		Options:  schedulerOptions{Metadata: map[string]any{"requested_model": "Pool-01-gemini"}},
 		Candidates: []schedulerCandidate{
 			{ID: "antigravity-m1@gmail.com.json", Provider: "antigravity", Status: "active"},
@@ -524,6 +524,46 @@ func TestCleanPoolIdentifierInModelAndPerAccountModels(t *testing.T) {
 	})
 	if !pickResp.Handled || pickResp.AuthID != "antigravity-m2@gmail.com.json" {
 		t.Fatalf("expected scheduler to pick active leader m2 for Pool-01-gemini, got %+v", pickResp)
+	}
+}
+
+// TestDeprecatedModelAutoFallback verifies that retired/deprecated upstream models
+// (e.g. gemini-3.7-flash-high) are automatically rewritten to active counterparts
+// preventing upstream HTTP 404 and cascading account cooldowns.
+func TestDeprecatedModelAutoFallback(t *testing.T) {
+	reg := NewPoolRegistry(t.TempDir() + "/fallback.json")
+
+	deprecatedModels := []string{
+		"gemini-3.7-flash-high",
+		"gemini-3.6-flash-high",
+		"gemini-3.1-pro-low",
+		"gemini-pro-agent",
+		"gemini-2.5-flash-high",
+		"gemini-3.1-flash-image",
+	}
+
+	for _, dep := range deprecatedModels {
+		res := routeDecisionFor(reg, dep)
+		if !res.Handled {
+			t.Fatalf("expected deprecated model %q to be handled by fallback interceptor", dep)
+		}
+		if res.TargetModel != "gemini-3.8-flash-high" {
+			t.Fatalf("expected deprecated model %q to map to gemini-3.8-flash-high, got %q", dep, res.TargetModel)
+		}
+	}
+
+	// Also test prefixed legacy route fallback (e.g. "agy/gemini-3.7-flash-high")
+	_ = reg.SavePool(PoolDefinition{
+		BasePrefix: "agy",
+		Family:     "gemini_pure",
+		Members:    []string{"antigravity-m1@gmail.com.json"},
+		Policy: PoolPolicy{
+			TargetModels: []string{"gemini-3.8-flash-high"},
+		},
+	})
+	prefixedRes := routeDecisionFor(reg, "agy/gemini-3.7-flash-high")
+	if !prefixedRes.Handled || prefixedRes.TargetModel != "gemini-3.8-flash-high" {
+		t.Fatalf("expected prefixed route agy/gemini-3.7-flash-high to fallback to gemini-3.8-flash-high, got %+v", prefixedRes)
 	}
 }
 

@@ -716,8 +716,8 @@ describe('AutoAuthFiles Component - Dedicated View & Lifecycle Engine', () => {
     expect(screen.getAllByText('CLAUDE AND GPT MODELS').length).toBeGreaterThanOrEqual(1);
 
     // Limit window rows rendered as circular QuotaClocks side by side
-    expect(screen.getAllByText('Five Hour Limit').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText('Weekly Limit').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('Límite de 5 horas').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('Límite semanal').length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText('Ventana de 5 horas').length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText('Semanal').length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByRole('meter').length).toBeGreaterThanOrEqual(2);
@@ -791,7 +791,7 @@ describe('AutoAuthFiles Component - Dedicated View & Lifecycle Engine', () => {
 
     await waitFor(() => {
       expect(screen.getAllByText('Plan Pro').length).toBeGreaterThanOrEqual(1);
-      expect(screen.getAllByText('Quota available').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText('Cuota disponible').length).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -918,10 +918,10 @@ describe('AutoAuthFiles Component - Dedicated View & Lifecycle Engine', () => {
       expect(quotaSpy).toHaveBeenCalled();
     });
 
-    // Verify updated quota text appears
+    // Verify updated quota text appears in Spanish
     await waitFor(() => {
-      expect(screen.getAllByText('92% remaining').length).toBeGreaterThanOrEqual(1);
-      expect(screen.getAllByText('85% remaining').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText('92% restante').length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText('85% restante').length).toBeGreaterThanOrEqual(1);
     });
   });
 });

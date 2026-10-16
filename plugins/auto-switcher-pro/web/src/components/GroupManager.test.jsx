@@ -153,6 +153,7 @@ describe('GroupManager Component - Dedicated Full Screen Pool & Group Engine', (
     await waitFor(() => {
       expect(patchSpy).toHaveBeenCalledWith([
         { name: 'account-free-1.json', prefix: 'g3' },
+        { name: 'account-free-2.json', prefix: 'g3_1' },
       ]);
     });
   });
@@ -340,6 +341,7 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
     await waitFor(() => {
       expect(patchSpy).toHaveBeenCalledWith([
         { name: 'free1.json', prefix: 'g9' },
+        { name: 'free2.json', prefix: 'g9_2' },
       ]);
     });
   });

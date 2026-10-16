@@ -25,18 +25,19 @@ const (
 
 // ScanResult summarizes findings from health inspection
 type ScanResult struct {
-	Ok                  bool                  `json:"ok"`
-	Timestamp           string                `json:"timestamp"`
-	TotalAuthFiles      int                   `json:"total_auth_files"`
-	ResidualAccounts    []ResidualAccountInfo `json:"residual_accounts"`
-	OrphanClones        []string              `json:"orphan_clones"`
-	OrphanArtifacts     []string              `json:"orphan_artifacts,omitempty"`
-	OrphanProviders     []OrphanProviderInfo  `json:"orphan_providers,omitempty"`
-	ActivePoolsCount    int                   `json:"active_pools_count"`
-	ConsoleVersionLocal string                `json:"console_version_local"`
-	ConsoleLatestGithub string                `json:"console_latest_github"`
-	ConsoleUpdateAvail  bool                  `json:"console_update_available"`
-	Message             string                `json:"message"`
+	Ok                         bool                  `json:"ok"`
+	Timestamp                  string                `json:"timestamp"`
+	TotalAuthFiles             int                   `json:"total_auth_files"`
+	ResidualAccounts           []ResidualAccountInfo `json:"residual_accounts"`
+	OrphanClones               []string              `json:"orphan_clones"`
+	OrphanArtifacts            []string              `json:"orphan_artifacts,omitempty"`
+	OrphanProviders            []OrphanProviderInfo  `json:"orphan_providers,omitempty"`
+	DeprecatedModelAssignments []string              `json:"deprecated_model_assignments,omitempty"`
+	ActivePoolsCount           int                   `json:"active_pools_count"`
+	ConsoleVersionLocal        string                `json:"console_version_local"`
+	ConsoleLatestGithub        string                `json:"console_latest_github"`
+	ConsoleUpdateAvail         bool                  `json:"console_update_available"`
+	Message                    string                `json:"message"`
 }
 
 type OrphanProviderInfo struct {
@@ -56,12 +57,14 @@ type ResidualAccountInfo struct {
 }
 
 type CleanResult struct {
-	Ok              bool     `json:"ok"`
-	CleanedFiles    []string `json:"cleaned_files"`
-	PurgedClones    []string `json:"purged_clones"`
-	PurgedArtifacts []string `json:"purged_artifacts,omitempty"`
-	PurgedProviders []string `json:"purged_providers,omitempty"`
-	Message         string   `json:"message"`
+	Ok                 bool     `json:"ok"`
+	CleanedFiles       []string `json:"cleaned_files"`
+	PurgedClones       []string `json:"purged_clones"`
+	PurgedArtifacts    []string `json:"purged_artifacts,omitempty"`
+	PurgedProviders    []string `json:"purged_providers,omitempty"`
+	MigratedPoolModels []string `json:"migrated_pool_models,omitempty"`
+	ResetCooldowns     []string `json:"reset_cooldowns,omitempty"`
+	Message            string   `json:"message"`
 }
 
 type UpdateConsoleResult struct {
@@ -743,9 +746,26 @@ func scanHealth(authDir, staticDir string) (ScanResult, error) {
 	res.OrphanArtifacts = scanOrphanArtifacts()
 	res.OrphanProviders = scanOrphanConfigProviders("", authDir)
 
+	// 4. Scan pools for deprecated model assignments
+	for _, p := range reg.ListPools() {
+		for acc, m := range p.MemberModels {
+			if fb := ResolveActiveModelFallback(m); fb != m {
+				res.DeprecatedModelAssignments = append(res.DeprecatedModelAssignments, fmt.Sprintf("%s en pool %s (%s -> %s)", acc, p.BasePrefix, m, fb))
+			}
+		}
+		for _, tm := range p.Policy.TargetModels {
+			if fb := ResolveActiveModelFallback(tm); fb != tm {
+				res.DeprecatedModelAssignments = append(res.DeprecatedModelAssignments, fmt.Sprintf("target %s en pool %s (%s -> %s)", tm, p.BasePrefix, tm, fb))
+			}
+		}
+	}
+
 	res.Message = fmt.Sprintf("Escaneo completado: %d cuentas con residuos detectadas.", len(res.ResidualAccounts))
 	if len(res.OrphanProviders) > 0 {
 		res.Message += fmt.Sprintf(" Se detectaron %d proveedor(es) huérfano(s) en config.yaml.", len(res.OrphanProviders))
+	}
+	if len(res.DeprecatedModelAssignments) > 0 {
+		res.Message += fmt.Sprintf(" Se detectaron %d asignaciones a modelos obsoletos listas para migración.", len(res.DeprecatedModelAssignments))
 	}
 	return res, nil
 }
@@ -824,12 +844,44 @@ func cleanHealth(authDir string) (CleanResult, error) {
 			dirty = true
 			p.Policy.TargetModels = cleanedTargets
 		}
+		if p.MemberModels != nil {
+			for acc, m := range p.MemberModels {
+				fb := ResolveActiveModelFallback(m)
+				if fb != m {
+					p.MemberModels[acc] = fb
+					res.MigratedPoolModels = append(res.MigratedPoolModels, fmt.Sprintf("%s en pool %s: %s -> %s", acc, p.BasePrefix, m, fb))
+					dirty = true
+				}
+			}
+		}
 		if dirty {
 			_ = reg.SavePool(p)
 		}
 	}
 
+	// 3. Proactivamente limpiar cooldowns residuales en las credenciales usando el host bridge si está disponible
+	if hostCaller != nil {
+		if raw, err := hostCaller(hostMethodAuthList, map[string]any{}); err == nil {
+			var listed hostAuthListResult
+			if json.Unmarshal(raw, &listed) == nil {
+				for _, f := range listed.Files {
+					if strings.TrimSpace(f.AuthIndex) != "" {
+						if _, rErr := hostCaller("host.routing.reset_cooldown", map[string]any{"auth_index": f.AuthIndex}); rErr == nil {
+							res.ResetCooldowns = append(res.ResetCooldowns, f.Name)
+						}
+					}
+				}
+			}
+		}
+	}
+
 	res.Message = fmt.Sprintf("Se limpiaron %d archivo(s) de credenciales y el estado de los pools quedó saneado.", len(res.CleanedFiles))
+	if len(res.MigratedPoolModels) > 0 {
+		res.Message += fmt.Sprintf(" Se migraron %d modelo(s) obsoleto(s) a sus equivalentes vigentes.", len(res.MigratedPoolModels))
+	}
+	if len(res.ResetCooldowns) > 0 {
+		res.Message += fmt.Sprintf(" Se resetearon cooldowns en %d credencial(es).", len(res.ResetCooldowns))
+	}
 
 	orphans := scanOrphanArtifacts()
 	if len(orphans) > 0 {
