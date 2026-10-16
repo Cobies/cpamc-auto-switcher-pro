@@ -241,8 +241,15 @@ export default function AutoAuthFiles({
           return { ok: true, name: targetFileName };
         }
       }
-      // Fallback para cuentas libres / fuera de pools: exclusiones nativas en CPAMC
-      return await patchAuthFileExclusions(targetFileName, exclusionsToSave);
+      // Salvaguarda Arquitectónica (Gobernanza Virtual Pura - Mandamiento III):
+      // NUNCA inyectar listas masivas de exclusión en archivos físicos .json de cuentas libres.
+      // Las credenciales físicas en disco deben preservar excluded_models: [] de fábrica
+      // para que CPAMC nativo no mutile el catálogo en Auth Files Management.
+      // Si la acción es restaurar/purgar (exclusionsToSave vacío []), permitimos sanear el disco.
+      if (Array.isArray(exclusionsToSave) && exclusionsToSave.length === 0) {
+        return await patchAuthFileExclusions(targetFileName, []);
+      }
+      return { ok: true, name: targetFileName };
     },
     [specialistModal.card, registeredPools]
   );

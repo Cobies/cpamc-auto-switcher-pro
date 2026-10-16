@@ -813,7 +813,7 @@ export default function Maintenance({ onReloadRequested }) {
                       <span className="tag-warning">Requiere Depuración</span>
                     </div>
                     <p className="incident-desc">
-                      Se detectaron nombres de modelos ajenos de otros proveedores o prefijos anidados repetidos (<code>agy/agy/...</code>).
+                      Se detectaron exclusiones físicas en disco (<code>excluded_models</code>), modelos ajenos de otros proveedores o prefijos anidados repetidos (<code>agy/agy/...</code>). Las credenciales deben operar con Aislamiento Virtual Puro (<code>excluded_models: []</code>) para no mutilar el catálogo nativo de CPAMC.
                     </p>
 
                     <div className="incident-sample-table-wrap">
