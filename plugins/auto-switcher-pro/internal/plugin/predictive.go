@@ -190,9 +190,11 @@ func (pe *PredictiveEngine) ShouldPreventiveCool(accountEmail string) bool {
 	// 2. ¿Tiene agotamiento crítico de cuota viva (< 15% restante en ventana de 5h o semanal)?
 	if pe.quotas != nil {
 		if q, ok := pe.quotas[key]; ok {
-			// Si la cuota restante de 5 horas o la semanal está por debajo del 15%
-			if (q.Window5hPct > 0 && q.Window5hPct < 15.0) || (q.WeeklyPct > 0 && q.WeeklyPct < 15.0) {
-				return true
+			// Si la cuota restante de 5 horas o la semanal está por debajo del 15% (incluyendo agotamiento total al 0.0%)
+			if !q.UpdatedAt.IsZero() {
+				if q.Window5hPct < 15.0 || q.WeeklyPct < 15.0 {
+					return true
+				}
 			}
 		}
 	}
@@ -209,6 +211,38 @@ func (pe *PredictiveEngine) ShouldPreventiveCool(accountEmail string) bool {
 
 	limit := float64(pe.config.MaxReqsPerHour) * (pe.config.ThresholdPct / 100.0)
 	return float64(count) >= limit
+}
+
+// IsCriticalQuotaOrCooldown evalúa si la cuenta tiene cuota críticamente agotada (<15%) o cooldown activo,
+// lo cual justifica una rotación inmediata sin exigir margen de histeresis para evitar un 429 fatal.
+func (pe *PredictiveEngine) IsCriticalQuotaOrCooldown(accountEmail string) bool {
+	pe.mu.RLock()
+	defer pe.mu.RUnlock()
+
+	if accountEmail == "" {
+		return false
+	}
+	key := normalizeAccountKey(accountEmail)
+
+	// 1. ¿Está en período de enfriamiento activo?
+	if coolUntil, ok := pe.cooling[key]; ok {
+		if time.Now().Before(coolUntil) {
+			return true
+		}
+	}
+
+	// 2. ¿Tiene agotamiento crítico de cuota viva (< 15% restante en ventana de 5h o semanal)?
+	if pe.quotas != nil {
+		if q, ok := pe.quotas[key]; ok {
+			if !q.UpdatedAt.IsZero() {
+				if q.Window5hPct < 15.0 || q.WeeklyPct < 15.0 {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
 }
 
 // GetAccountStatus devuelve el porcentaje de fatiga y minutos restantes de descanso

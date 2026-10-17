@@ -160,7 +160,30 @@ export async function querySwitcherAccounts(force = false): Promise<SwitcherAcco
 		return cachedAccounts;
 	} catch (err: any) {
 		// Fallback gracioso: si no está el CLI binario cpamc-auto-switcher en el PATH,
-		// conservar la caché existente o devolver lista vacía sin arrojar error crítico.
+		// reconstruir a partir de getStoredPools() en auto-switcher-pro-state.json
+		const pools = getStoredPools();
+		if (pools.length > 0 && cachedAccounts.length === 0) {
+			const fallbackList: SwitcherAccount[] = [];
+			for (const p of pools) {
+				const active = p.active_leader || p.leader_auth || "";
+				if (active) {
+					fallbackList.push({
+						status: "ACTIVE",
+						provider: "antigravity",
+						profile: p.base_prefix,
+						accountId: maskEmailFromAuth(active),
+						prefix: p.base_prefix,
+						consumed5h: "--",
+						consumedWeekly: "--",
+						minAvailable: "--",
+					});
+				}
+			}
+			if (fallbackList.length > 0) {
+				cachedAccounts = fallbackList;
+				lastFetchTime = Date.now();
+			}
+		}
 		return cachedAccounts;
 	} finally {
 		isFetching = false;

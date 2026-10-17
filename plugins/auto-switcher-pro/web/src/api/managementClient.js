@@ -2494,6 +2494,62 @@ export async function fetchCardQuota(cardOrNode, options = {}) {
     }
   }
 
+  // 3. Telemetría viva hacia el plugin Go CGO en segundo plano:
+  // Si obtuvimos métricas de cuota válidas, despachar en silencio hacia
+  // /v0/management/auto-switcher-pro/predictive/telemetry para alimentar
+  // el motor predictivo en Go sin demorar la respuesta de la UI.
+  if (groups.length > 0) {
+    try {
+      let win5h = 100.0;
+      let winWeekly = 100.0;
+      let win5hResetIn = 0;
+      let winWeeklyResetIn = 0;
+
+      for (const g of groups) {
+        for (const r of g.rows || []) {
+          const l = (r.label || '').toLowerCase();
+          if (l.includes('5') || l.includes('five')) {
+            win5h = typeof r.percent === 'number' ? r.percent : 100.0;
+            if (r.resetMs) {
+              win5hResetIn = Math.max(0, Math.round((r.resetMs - Date.now()) / 1000));
+            }
+          } else if (l.includes('week')) {
+            winWeekly = typeof r.percent === 'number' ? r.percent : 100.0;
+            if (r.resetMs) {
+              winWeeklyResetIn = Math.max(0, Math.round((r.resetMs - Date.now()) / 1000));
+            }
+          }
+        }
+      }
+
+      const accKey =
+        cardOrNode?.fileName ||
+        cardOrNode?.name ||
+        cardOrNode?.masterFileName ||
+        cardOrNode?.email ||
+        cardOrNode?.auth_index ||
+        '';
+
+      if (accKey) {
+        // Fire-and-forget background push to Go CGO plugin
+        apiFetch('/v0/management/auto-switcher-pro/predictive/telemetry', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            account_key: accKey,
+            window_5h_pct: win5h,
+            weekly_pct: winWeekly,
+            window_5h_reset_in: win5hResetIn,
+            weekly_reset_in: winWeeklyResetIn,
+            plan: plan || 'Unknown',
+          }),
+        }).catch(() => {});
+      }
+    } catch {
+      // Ignorar errores en segundo plano
+    }
+  }
+
   return {
     plan,
     groups,
@@ -2554,6 +2610,27 @@ export async function updatePredictiveConfig(config, options = {}) {
     body: JSON.stringify(config),
   });
   return res.json();
+}
+
+/**
+ * Ejecuta una rotación virtual forzada de líder en un pool registrado del plugin.
+ *
+ * @param {string} [idOrPrefix]
+ * @param {Object} [options]
+ * @returns {Promise<{ ok: boolean, pool_id: string, prefix: string, old_leader: string, new_leader: string, message: string }>}
+ */
+export async function rotatePool(idOrPrefix = '', options = {}) {
+  const res = await apiFetch('/v0/management/auto-switcher-pro/pools/rotate', {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(idOrPrefix ? { prefix: idOrPrefix } : {}),
+  });
+  const data = await res.json();
+  if (!res.ok || !data?.ok) {
+    throw new Error(data?.message || 'Error al ejecutar rotación de pool');
+  }
+  return data;
 }
 
 

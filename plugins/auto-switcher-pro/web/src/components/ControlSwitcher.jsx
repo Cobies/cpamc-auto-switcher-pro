@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { apiFetch, patchAuthFilePrefix, getPredictiveState, updatePredictiveConfig, listPools } from '../api/managementClient';
+import { apiFetch, patchAuthFilePrefix, getPredictiveState, updatePredictiveConfig, listPools, rotatePool } from '../api/managementClient';
 
 /**
  * Paleta de 8 colores del Espectro TrueColor (24-bit RGB)
@@ -843,8 +843,21 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
     setCheckOutput('');
     setActionError('');
     try {
+      // 1. Invocar rotación / chequeo forzado en el backend real del plugin
+      let rotateMsg = '';
+      try {
+        const rotRes = await rotatePool();
+        if (rotRes?.ok) {
+          const leader = (rotRes.new_leader || '').replace(/^antigravity-/, '').replace(/\.json$/, '');
+          rotateMsg = ` · Rotado hacia ${leader || rotRes.new_leader}`;
+        }
+      } catch (rotErr) {
+        // Si no hay pools o no requirió rotación, continuar normalmente
+      }
+
+      // 2. Recargar datos frescos de la vista
       await loadData();
-      setCheckOutput('⚡ Chequeo de cuotas completado con éxito.');
+      setCheckOutput(`⚡ Chequeo forzado evaluado en servidor con éxito${rotateMsg}.`);
     } catch (err) {
       setActionError(`Error en chequeo forzado: ${err.message}`);
     } finally {

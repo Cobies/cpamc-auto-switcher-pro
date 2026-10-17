@@ -325,3 +325,79 @@ func TestPoolRegistry_ContingencyPurgeVirtualPoolNames(t *testing.T) {
 		}
 	}
 }
+
+func TestPoolRegistry_RotatePoolLeader(t *testing.T) {
+	tempDir := t.TempDir()
+	stateFile := filepath.Join(tempDir, "rotate-pools.json")
+	reg := NewPoolRegistry(stateFile)
+
+	pool := PoolDefinition{
+		Family:     "gemini_pure",
+		BasePrefix: "agy",
+		LeaderAuth: "antigravity-leader.json",
+		Reserves:   []string{"antigravity-res1.json", "antigravity-res2.json"},
+	}
+	if err := reg.SavePool(pool); err != nil {
+		t.Fatalf("SavePool failed: %v", err)
+	}
+
+	// 1. Rotate from leader -> res1
+	updated, oldL, newL, err := reg.RotatePoolLeader("agy")
+	if err != nil {
+		t.Fatalf("RotatePoolLeader failed: %v", err)
+	}
+	if oldL != "antigravity-leader.json" || newL != "antigravity-res1.json" {
+		t.Fatalf("expected rotation to res1, got old=%q, new=%q", oldL, newL)
+	}
+	if updated.ActiveLeader != "antigravity-res1.json" {
+		t.Fatalf("expected updated ActiveLeader to be res1, got %q", updated.ActiveLeader)
+	}
+
+	// 2. Rotate from res1 -> res2
+	updated, oldL, newL, err = reg.RotatePoolLeader("agy")
+	if err != nil {
+		t.Fatalf("RotatePoolLeader failed: %v", err)
+	}
+	if oldL != "antigravity-res1.json" || newL != "antigravity-res2.json" {
+		t.Fatalf("expected rotation to res2, got old=%q, new=%q", oldL, newL)
+	}
+
+	// 3. Rotate from res2 -> leader (circular wrap)
+	updated, oldL, newL, err = reg.RotatePoolLeader("agy")
+	if err != nil {
+		t.Fatalf("RotatePoolLeader failed: %v", err)
+	}
+	if oldL != "antigravity-res2.json" || newL != "antigravity-leader.json" {
+		t.Fatalf("expected wrap rotation to leader, got old=%q, new=%q", oldL, newL)
+	}
+
+	// 4. HTTP POST /auto-switcher-pro/pools/rotate via DefaultRegistry
+	defReg := DefaultRegistry()
+	_ = defReg.SavePool(pool)
+	rawResp, err := handlePoolsHTTP(ManagementRequestPayload{
+		Method: http.MethodPost,
+		Path:   "/v0/management/auto-switcher-pro/pools/rotate",
+		Body:   []byte(`{"prefix":"agy"}`),
+	})
+	if err != nil {
+		t.Fatalf("handlePoolsHTTP /rotate failed: %v", err)
+	}
+	var envelope struct {
+		Result struct {
+			Body string `json:"Body"`
+		} `json:"result"`
+	}
+	_ = json.Unmarshal(rawResp, &envelope)
+	bodyBytes := rawResp
+	if envelope.Result.Body != "" {
+		bodyBytes, _ = base64.StdEncoding.DecodeString(envelope.Result.Body)
+	}
+
+	var httpResp struct {
+		OK        bool   `json:"ok"`
+		NewLeader string `json:"new_leader"`
+	}
+	if err := json.Unmarshal(bodyBytes, &httpResp); err != nil || !httpResp.OK || httpResp.NewLeader != "antigravity-res1.json" {
+		t.Fatalf("unexpected HTTP rotate response: %s (raw: %s)", string(bodyBytes), string(rawResp))
+	}
+}

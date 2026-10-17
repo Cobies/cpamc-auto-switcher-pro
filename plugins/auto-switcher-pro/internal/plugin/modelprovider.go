@@ -279,6 +279,53 @@ func ResolveActiveModelFallback(model string) string {
 	return trimmed
 }
 
+// HarvestUpstreamModelDeprecation captures an upstream 404/410/model_not_found error
+// at runtime, computes the fuzzy canonical replacement, caches it in dynamicDeprecatedCache,
+// and auto-migrates registered pool definitions in RAM and persistent state.
+func HarvestUpstreamModelDeprecation(rawModel string, statusCode int) (fallback string, autoMigrated bool) {
+	trimmed := strings.TrimSpace(rawModel)
+	if trimmed == "" {
+		return "", false
+	}
+	// Extract bare model
+	bare := cleanBareModelID(trimmed)
+	lower := strings.ToLower(bare)
+
+	// If statusCode is 404 or 410, this model is retired upstream
+	if statusCode == 404 || statusCode == 410 || strings.Contains(lower, "not_found") {
+		fb := fuzzyFamilyFallback(bare)
+		if fb != "" && fb != bare {
+			dynamicDeprecatedCache.Store(lower, fb)
+			dynamicDeprecatedCache.Store(strings.ToLower(trimmed), fb)
+
+			// Auto-sanear pools registrados si hacían referencia a este modelo extinto
+			reg := DefaultRegistry()
+			migrated := false
+			for _, p := range reg.ListPools() {
+				poolChanged := false
+				for acc, m := range p.MemberModels {
+					if strings.EqualFold(m, bare) || strings.EqualFold(m, trimmed) {
+						p.MemberModels[acc] = fb
+						poolChanged = true
+					}
+				}
+				for i, tm := range p.Policy.TargetModels {
+					if strings.EqualFold(tm, bare) || strings.EqualFold(tm, trimmed) {
+						p.Policy.TargetModels[i] = fb
+						poolChanged = true
+					}
+				}
+				if poolChanged {
+					_ = reg.SavePool(p)
+					migrated = true
+				}
+			}
+			return fb, migrated
+		}
+	}
+	return ResolveActiveModelFallback(trimmed), false
+}
+
 // cloneBaseline returns a copy of the baseline catalog.
 func cloneBaseline() []pluginModelInfo {
 	out := make([]pluginModelInfo, len(baselineAntigravityModels))
@@ -508,7 +555,17 @@ func routeDecisionFor(registry *PoolRegistry, requestedModel string) modelRouteR
 		if activeAuth == "" {
 			activeAuth = strings.TrimSpace(pool.LeaderAuth)
 		}
-		resolvedModel := ResolveActiveModelFallback(pool.ActiveModelForAccount(activeAuth))
+		// Armonización estricta: resolver TargetModel contra el objetivo especialista soberano del pool
+		// garantizando que cualquier miembro que scheduler.pick elija reciba el mismo modelo válido.
+		canonicalTarget := ""
+		targets := poolTargets(pool)
+		if len(targets) > 0 && strings.TrimSpace(targets[0]) != "" {
+			canonicalTarget = targets[0]
+		}
+		if canonicalTarget == "" {
+			canonicalTarget = pool.ActiveModelForAccount(activeAuth)
+		}
+		resolvedModel := ResolveActiveModelFallback(canonicalTarget)
 		return modelRouteResponse{
 			Handled:     true,
 			TargetKind:  "provider",
@@ -671,17 +728,46 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 	}
 	leaderEmail := strings.TrimSuffix(strings.TrimPrefix(leaderAuth, "antigravity-"), ".json")
 
+	// Blindaje de Prompt Caching (Histeresis & Sticky Session):
+	// Para no destruir los embeddings en caché de Google Antigravity a mitad de una tarea larga:
+	// 1) Si el líder no está en enfriamiento forzado ni tiene cuota crítica (<15%), se mantiene sticky.
+	// 2) Si califica para enfriamiento por volumen/fatiga pero su cuota es >= 15%, solo se rota si
+	//    alguna reserva disponible tiene una ventaja de cuota de al menos +30% (Δ >= 30%).
 	hasHealthyReserve := false
+	reserveWithBetterQuota := false
+	leaderQuota, hasLeaderQuota := predEngine.GetLiveQuota(leaderEmail)
+
 	if len(cascade) > 1 {
 		for _, resAuth := range cascade[1:] {
 			if _, ok := available[strings.ToLower(resAuth)]; ok {
 				hasHealthyReserve = true
-				break
+				if hasLeaderQuota {
+					resEmail := strings.TrimSuffix(strings.TrimPrefix(resAuth, "antigravity-"), ".json")
+					if resQ, ok := predEngine.GetLiveQuota(resEmail); ok {
+						// Histeresis: la reserva debe tener al menos +30% de ventaja en cuota de 5h
+						if (resQ.Window5hPct - leaderQuota.Window5hPct) >= 30.0 {
+							reserveWithBetterQuota = true
+							break
+						}
+					}
+				} else {
+					reserveWithBetterQuota = true
+					break
+				}
 			}
 		}
 	}
 
-	skipLeaderPredictive := hasHealthyReserve && predEngine.ShouldPreventiveCool(leaderEmail)
+	// Si el líder tiene cuota crítica (<15%) o cooldown activo, rotar si hay reserva sana
+	// Si solo es fatiga por requests (>80%), aplicar histeresis: requerir reserva con +30% ventaja
+	skipLeaderPredictive := false
+	if hasHealthyReserve {
+		if predEngine.IsCriticalQuotaOrCooldown(leaderEmail) {
+			skipLeaderPredictive = true
+		} else if predEngine.ShouldPreventiveCool(leaderEmail) && reserveWithBetterQuota {
+			skipLeaderPredictive = true
+		}
+	}
 
 	for i, authFile := range cascade {
 		// Si el motor predictivo decidió enfriar al líder actual y estamos en i == 0, rotar al siguiente miembro

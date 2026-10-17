@@ -93,4 +93,15 @@ func TestPredictiveEngine(t *testing.T) {
 	if !pe.ShouldPreventiveCool(quotaAcc) {
 		t.Fatalf("account with 10%% 5h quota should trigger preventive cooling")
 	}
+
+	// Boundary condition: total exhaustion at 0.0% must also trigger preventive cooling
+	pe.RecordLiveQuota(AccountQuotaTelemetry{
+		AccountKey:      quotaAcc,
+		Window5hPct:     0.0, // Absolute exhaustion
+		WeeklyPct:       0.0,
+		Window5hResetIn: 7200,
+	})
+	if !pe.ShouldPreventiveCool(quotaAcc) {
+		t.Fatalf("account with 0%% quota must trigger preventive cooling")
+	}
 }

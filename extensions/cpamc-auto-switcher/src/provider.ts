@@ -74,6 +74,10 @@ function resolveCacheTargets(): string[] {
  */
 function resolveSignalFileTargets(): string[] {
     const targets = new Set<string>();
+    // Prioridad 1: Memoria compartida volátil (/dev/shm) para latencia cero (<5ms)
+    if (existsSync("/dev/shm")) {
+        targets.add("/dev/shm/auto-switcher-pro.epoch");
+    }
     if (process.env.AUTO_SWITCHER_STATE_PATH) {
         targets.add(process.env.AUTO_SWITCHER_STATE_PATH);
     }
@@ -145,6 +149,23 @@ let cachedFilterData: {
     bareExclusions: Set<string>;
     registeredPoolBases: Set<string>;
 } | null = null;
+let lastKnownEpoch: string | null = null;
+
+function readCurrentSignalEpoch(): string | null {
+    const epochTargets = [
+        "/dev/shm/auto-switcher-pro.epoch",
+        join(homedir(), "services", "cliproxy", "plugins", "auto-switcher-pro.epoch"),
+    ];
+    for (const target of epochTargets) {
+        try {
+            if (existsSync(target)) {
+                const val = readFileSync(target, "utf-8").trim();
+                if (val) return val;
+            }
+        } catch {}
+    }
+    return null;
+}
 
 function buildStrictThinkingLevelMap(levels: string[]): Record<string, string | null> {
     if (!levels || levels.length === 0) {
@@ -440,6 +461,14 @@ async function fetchAccountPrefixesAndExclusions(baseUrl: string, signal?: Abort
     const mgmtKey = resolveManagementKey();
     if (!mgmtKey) return null;
 
+    // Gobernanza por Atomic Epoch (/dev/shm):
+    // Si la caché en RAM está viva y el número de época no ha cambiado,
+    // devolver la caché inmediatamente sin descargar todos los JSONs de credenciales.
+    const currentEpoch = readCurrentSignalEpoch();
+    if (cachedFilterData && currentEpoch && lastKnownEpoch === currentEpoch) {
+        return cachedFilterData;
+    }
+
     try {
         const timeout = AbortSignal.timeout(10000);
         const combinedSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
@@ -613,6 +642,7 @@ async function fetchAccountPrefixesAndExclusions(baseUrl: string, signal?: Abort
             registeredPoolBases,
         };
         cachedFilterData = result;
+        lastKnownEpoch = currentEpoch || readCurrentSignalEpoch();
         return result;
     } catch {
         return cachedFilterData;

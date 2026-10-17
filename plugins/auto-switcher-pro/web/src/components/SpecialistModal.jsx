@@ -96,6 +96,8 @@ export default function SpecialistModal({
     setSelectedModel(m);
   };
 
+  const isUnassignedAccount = Boolean(card?.isUnassigned);
+
   const handleSave = async () => {
     if (!targetFileName) {
       setErrorMessage('No se encontró el archivo de credenciales para actualizar.');
@@ -112,7 +114,7 @@ export default function SpecialistModal({
       const exclusionsToSave = computeSpecialistExclusions(sourcePool, selectedModel);
 
       const dispatchPatch = patchFn || patchAuthFileExclusions;
-      await dispatchPatch(targetFileName, exclusionsToSave, selectedModel);
+      const patchRes = await dispatchPatch(targetFileName, exclusionsToSave, selectedModel);
 
       if (typeof onSaved === 'function') {
         onSaved({
@@ -120,6 +122,7 @@ export default function SpecialistModal({
           exclusions: exclusionsToSave,
           mode: 'specialist',
           targetModel: selectedModel,
+          ...(patchRes && typeof patchRes === 'object' ? patchRes : {}),
         });
       }
       onClose();
@@ -250,6 +253,31 @@ export default function SpecialistModal({
               })
             )}
           </div>
+
+          {/* Advertencia para Cuentas Libres */}
+          {isUnassignedAccount && (
+            <div
+              style={{
+                margin: '12px 0 0',
+                padding: '10px 14px',
+                borderRadius: '8px',
+                background: 'rgba(234, 179, 8, 0.12)',
+                border: '1px solid rgba(234, 179, 8, 0.35)',
+                color: '#fef08a',
+                fontSize: '12px',
+                lineHeight: 1.45,
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '8px',
+              }}
+              data-testid="unassigned-account-warning"
+            >
+              <span>ℹ️</span>
+              <span>
+                Esta es una <strong>cuenta libre</strong> (no asignada a ningún pool). Sus credenciales en disco se mantienen intactas en modo nativo. Para activar el ruteo especialista y aislar su modelo en RAM, agrégala a un pool desde <strong>Group Manager</strong>.
+              </span>
+            </div>
+          )}
 
           {/* Resumen dinámico en vivo */}
           {selectedModel && (

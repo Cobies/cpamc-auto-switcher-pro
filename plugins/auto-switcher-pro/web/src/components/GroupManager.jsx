@@ -1237,12 +1237,10 @@ export default function GroupManager({
           parts.push(`${masterUpdates.length} cuenta(s) maestra(s) liberada(s)`);
         }
         setSuccessFeedback(`💥 Pool "${pool.basePrefix}" disuelto exitosamente (${parts.join(', ')}).`);
-        setTimeout(() => setSuccessFeedback(''), 4000);
       }
       if (typeof onReloadRequested === 'function') {
         await onReloadRequested();
       }
-      setTimeout(() => setSuccessFeedback(''), 4000);
     } catch (err) {
       setErrorMessage(`Error al disolver pool: ${err.message}`);
     } finally {

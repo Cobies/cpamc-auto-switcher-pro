@@ -88,6 +88,11 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 					"Description": "Crea o actualiza un pool de balanceo de carga en el registro del plugin",
 				},
 				{
+					"Method":      http.MethodPost,
+					"Path":        poolsRoutePath + "/rotate",
+					"Description": "Rota de forma atómica y puramente virtual el líder activo de un pool en RAM hacia la siguiente reserva",
+				},
+				{
 					"Method":      http.MethodDelete,
 					"Path":        poolsRoutePath,
 					"Description": "Disuelve un pool de balanceo de carga del registro del plugin",
@@ -131,6 +136,16 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 					"Method":      http.MethodPost,
 					"Path":        predictiveRoutePath,
 					"Description": "Actualiza la configuración del motor de rebalanceo predictivo",
+				},
+				{
+					"Method":      http.MethodGet,
+					"Path":        predictiveRoutePath + "/telemetry",
+					"Description": "Obtiene telemetría viva de cuotas de las cuentas",
+				},
+				{
+					"Method":      http.MethodPost,
+					"Path":        predictiveRoutePath + "/telemetry",
+					"Description": "Ingiere telemetría viva de cuotas por cuenta individual o en lote",
 				},
 				{
 					"Method":      http.MethodGet,

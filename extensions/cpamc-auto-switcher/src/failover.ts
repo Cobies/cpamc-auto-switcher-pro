@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const CLI = "cpamc-auto-switcher";
@@ -183,6 +186,42 @@ function notify(ctx: any, message: string, level: "info" | "warning" = "info"): 
 	}
 }
 
+async function attemptVirtualRotation(ctx: any): Promise<boolean> {
+	try {
+		const rawUrl = (process.env.CLIPROXYAPI_BASE_URL || process.env.CPAMC_URL || "http://127.0.0.1:8317").trim().replace(/\/+$/, "").replace(/\/v1$/, "");
+		const baseUrl = rawUrl || "http://127.0.0.1:8317";
+		const keyFile = join(homedir(), ".cliproxy_management_key");
+		let key = (process.env.CLIPROXYAPI_MANAGEMENT_KEY || "").trim();
+		if (!key && existsSync(keyFile)) {
+			key = readFileSync(keyFile, "utf-8").trim();
+		}
+		const headers: Record<string, string> = {
+			"Content-Type": "application/json",
+		};
+		if (key) {
+			headers["Authorization"] = `Bearer ${key}`;
+		}
+		const res = await fetch(`${baseUrl}/v0/management/auto-switcher-pro/pools/rotate`, {
+			method: "POST",
+			headers,
+			body: JSON.stringify({}),
+			signal: ctx?.signal,
+		});
+		if (res.ok) {
+			const data = (await res.json()) as any;
+			if (data?.ok) {
+				const poolName = data.prefix || data.pool_id || "Pool";
+				const newLeader = data.new_leader ? ` hacia ${data.new_leader.replace(/^antigravity-/, "").replace(/\.json$/, "")}` : "";
+				notify(ctx, `🔄 [Failover Virtual] ${poolName} rotó exitosamente${newLeader}`, "info");
+				return true;
+			}
+		}
+	} catch {
+		// En caso de error de red o timeout, recaer en método secundario
+	}
+	return false;
+}
+
 function schedule(ctx: any, source: string, force = false): Promise<void> {
 	if (force) {
 		const now = Date.now();
@@ -194,6 +233,13 @@ function schedule(ctx: any, source: string, force = false): Promise<void> {
 
 	const check = async (): Promise<void> => {
 		try {
+			// Prioridad 1: Rotación Virtual Pura en Auto Switcher Pro (sin mutar credenciales físicas en disco)
+			const virtualRotated = await attemptVirtualRotation(ctx);
+			if (virtualRotated) {
+				return;
+			}
+
+			// Prioridad 2: Modo legacy fallback mediante CLI si existe en el entorno
 			const result = await runAutoSwitcher(ctx?.signal, force);
 			const output = (result.stdout || result.stderr).trim();
 
@@ -210,12 +256,9 @@ function schedule(ctx: any, source: string, force = false): Promise<void> {
 			if (output.startsWith("[ROTATED]")) {
 				notify(ctx, `🔄 ${output}`, "info");
 			}
-			// Chequeos rutinarios y métricas sin rotación operan en segundo plano silencioso
 		} catch (err: any) {
-			// Manejo defensivo: si no está instalado, advertencia limpia y silenciosa
-			if (err?.code === "ENOENT") {
-				notify(ctx, "cpamc-auto-switcher no encontrado en PATH. Failover automático pausado.", "warning");
-			} else {
+			// Manejo defensivo: en entornos virtuales puros, la ausencia del CLI binario es completamente inocua
+			if (err?.code !== "ENOENT") {
 				notify(ctx, `cpamc-auto-switcher (${source}): ${err?.message || err}`, "warning");
 			}
 		}
@@ -254,13 +297,43 @@ export function initFailoverHook(pi: ExtensionAPI): void {
 	});
 
 	// 3. After every main agent assistant turn finishes
+	let consecutiveAutoRecoveries = 0;
+	let lastRecoveryTimestamp = 0;
+
 	pi.on("turn_end", (event: any, ctx: any) => {
 		const message = event?.message;
 		const toolResults = event?.toolResults;
+		const now = Date.now();
+
+		// Reiniciar contador de recuperaciones si pasaron más de 60 segundos desde la última
+		if (now - lastRecoveryTimestamp > 60_000) {
+			consecutiveAutoRecoveries = 0;
+		}
 
 		if (message?.stopReason === "error" && isRateLimitOrNetworkError(message?.errorMessage)) {
 			schedule(ctx, "turn network/unexpected EOF error", true);
-			notify(ctx, "⚡ Microcorte de streaming detectado. Rotando y auto-reanudando agente...", "warning");
+
+			// Blindaje de Tokens contra Loops Infinitos de Reanudación:
+			// Si ya se intentó recuperar consecutivamente sin éxito (máx 2 reintentos),
+			// no seguir inyectando turnos ciegos que quemen miles de tokens de contexto.
+			if (consecutiveAutoRecoveries >= 2) {
+				notify(
+					ctx,
+					"🛑 Límite de auto-recuperaciones consecutivas alcanzado para proteger tu presupuesto de tokens. Revisa la conectividad de CPAMC.",
+					"error",
+				);
+				consecutiveAutoRecoveries = 0;
+				return;
+			}
+
+			consecutiveAutoRecoveries++;
+			lastRecoveryTimestamp = now;
+
+			notify(
+				ctx,
+				`⚡ Microcorte de streaming detectado (intento ${consecutiveAutoRecoveries}/2). Rotando cuenta y auto-reanudando agente...`,
+				"warning",
+			);
 			return {
 				entries: [
 					{
@@ -273,6 +346,9 @@ export function initFailoverHook(pi: ExtensionAPI): void {
 				continue: true,
 			};
 		}
+
+		// Si el turno concluyó con éxito, limpiar el contador de recuperaciones
+		consecutiveAutoRecoveries = 0;
 
 		// Detectar parálisis por falso stop (ej. el LLM escupió solo "Now" sin tools y se durmió)
 		if (isPrematureStop(message, toolResults)) {

@@ -346,11 +346,20 @@ func (r *PoolRegistry) Save() error {
 	}
 
 	// Emit atomic epoch signal for reactive hot-reload in Pi extensions (cpamc-auto-switcher)
-	epochFile := filepath.Join(dir, "auto-switcher-pro.epoch")
 	epochData := []byte(fmt.Sprintf("%d", time.Now().UnixNano()))
+	epochFile := filepath.Join(dir, "auto-switcher-pro.epoch")
 	tmpEpoch := fmt.Sprintf("%s.tmp.%d", epochFile, time.Now().UnixNano())
 	if err := os.WriteFile(tmpEpoch, epochData, 0644); err == nil {
 		_ = os.Rename(tmpEpoch, epochFile)
+	}
+
+	// Emit to shared memory (/dev/shm) for ultra-low latency (<5ms) inter-process signaling
+	if fi, err := os.Stat("/dev/shm"); err == nil && fi.IsDir() {
+		shmEpoch := "/dev/shm/auto-switcher-pro.epoch"
+		tmpShm := fmt.Sprintf("%s.tmp.%d", shmEpoch, time.Now().UnixNano())
+		if err := os.WriteFile(tmpShm, epochData, 0644); err == nil {
+			_ = os.Rename(tmpShm, shmEpoch)
+		}
 	}
 
 	return nil
@@ -406,8 +415,9 @@ func (r *PoolRegistry) GetPool(idOrPrefix string) (PoolDefinition, bool) {
 	return PoolDefinition{}, false
 }
 
-// SetActiveLeader dynamically updates the volatile in-memory active leader for a pool
+// SetActiveLeader dynamically updates the active leader for a pool
 // when Auto Switcher Pro rotates leadership among pool members.
+// It updates in-memory state and persists atomically to disk, emitting the .epoch signal.
 func (r *PoolRegistry) SetActiveLeader(basePrefix, activeAuth string) {
 	key := strings.ToLower(strings.TrimSpace(basePrefix))
 	auth := strings.TrimSpace(activeAuth)
@@ -415,7 +425,6 @@ func (r *PoolRegistry) SetActiveLeader(basePrefix, activeAuth string) {
 		return
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.activeLeaders == nil {
 		r.activeLeaders = make(map[string]string)
 	}
@@ -424,6 +433,44 @@ func (r *PoolRegistry) SetActiveLeader(basePrefix, activeAuth string) {
 		p.ActiveLeader = auth
 		r.pools[key] = p
 	}
+	r.mu.Unlock()
+
+	_ = r.Save()
+}
+
+// RotatePoolLeader advances leadership in the given pool to the next available member.
+// It updates memory and persists the state atomically, emitting the .epoch signal.
+func (r *PoolRegistry) RotatePoolLeader(idOrPrefix string) (PoolDefinition, string, string, error) {
+	pool, ok := r.GetPool(idOrPrefix)
+	if !ok {
+		return PoolDefinition{}, "", "", fmt.Errorf("pool %q not found", idOrPrefix)
+	}
+
+	members := pool.AllMembers()
+	if len(members) < 2 {
+		return pool, pool.ActiveLeader, pool.ActiveLeader, errors.New("pool has no reserve members to rotate")
+	}
+
+	current := pool.ActiveLeader
+	if current == "" {
+		current = pool.LeaderAuth
+	}
+
+	currIdx := -1
+	for i, m := range members {
+		if strings.EqualFold(m, current) {
+			currIdx = i
+			break
+		}
+	}
+
+	nextIdx := (currIdx + 1) % len(members)
+	nextLeader := members[nextIdx]
+
+	r.SetActiveLeader(pool.BasePrefix, nextLeader)
+
+	updatedPool, _ := r.GetPool(pool.BasePrefix)
+	return updatedPool, current, nextLeader, nil
 }
 
 // PruneStaleAccounts checks registered pools against physical credential files in
@@ -702,7 +749,7 @@ func isPoolsPath(rawPath string) bool {
 		normalized = normalized[:idx]
 	}
 	normalized = strings.TrimRight(normalized, "/")
-	return strings.HasSuffix(normalized, poolsRoutePath)
+	return strings.HasSuffix(normalized, poolsRoutePath) || strings.HasSuffix(normalized, poolsRoutePath+"/rotate")
 }
 
 // handlePoolsHTTP dispatches GET, POST, DELETE operations on /v0/management/auto-switcher-pro/pools.
@@ -720,6 +767,60 @@ func handlePoolsHTTP(req ManagementRequestPayload) ([]byte, error) {
 		})
 
 	case http.MethodPost:
+		// Saneamiento de rotación virtual: POST /auto-switcher-pro/pools/rotate
+		if strings.HasSuffix(strings.TrimRight(req.Path, "/"), "/rotate") {
+			var rotPayload struct {
+				ID         string `json:"id"`
+				Prefix     string `json:"prefix"`
+				BasePrefix string `json:"base_prefix"`
+				PoolID     string `json:"pool_id"`
+			}
+			if len(req.Body) > 0 {
+				_ = json.Unmarshal(req.Body, &rotPayload)
+			}
+			target := strings.TrimSpace(rotPayload.ID)
+			if target == "" {
+				target = strings.TrimSpace(rotPayload.Prefix)
+			}
+			if target == "" {
+				target = strings.TrimSpace(rotPayload.BasePrefix)
+			}
+			if target == "" {
+				target = strings.TrimSpace(rotPayload.PoolID)
+			}
+
+			if target == "" {
+				pools := registry.ListPools()
+				if len(pools) > 0 {
+					target = pools[0].BasePrefix
+				}
+			}
+
+			if target == "" {
+				return jsonManagementResponse(http.StatusBadRequest, map[string]string{
+					"error":   "no_pools",
+					"message": "no active pool found to rotate",
+				})
+			}
+
+			p, oldLeader, newLeader, err := registry.RotatePoolLeader(target)
+			if err != nil {
+				return jsonManagementResponse(http.StatusBadRequest, map[string]string{
+					"error":   "rotate_failed",
+					"message": err.Error(),
+				})
+			}
+
+			return jsonManagementResponse(http.StatusOK, map[string]any{
+				"ok":         true,
+				"pool_id":    p.ID,
+				"prefix":     p.BasePrefix,
+				"old_leader": oldLeader,
+				"new_leader": newLeader,
+				"message":    fmt.Sprintf("Pool %s rotated to %s", p.BasePrefix, newLeader),
+			})
+		}
+
 		if len(req.Body) == 0 {
 			return jsonManagementResponse(http.StatusBadRequest, map[string]string{
 				"error":   "bad_request",

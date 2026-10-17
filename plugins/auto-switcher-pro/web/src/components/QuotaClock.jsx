@@ -182,7 +182,39 @@ export function QuotaClock({
       };
     }
 
-    const tPct = timePercent !== null ? timePercent : 0;
+    const tPct = timePercent !== null ? timePercent : null;
+
+    // Si no disponemos del tiempo transcurrido (resetTime no disponible o nulo),
+    // evaluar el estado honestamente basándonos en el nivel de consumo absoluto,
+    // evitando falsos positivos de "Vas muy rápido" cuando la cuenta está al 75% disponible.
+    if (tPct === null) {
+      if (effectiveConsumedPct <= 50) {
+        return {
+          state: 'easy',
+          statusText: 'Ritmo holgado',
+          secondaryText: translateQuotaText(percentLabel) || 'Consumo óptimo',
+          statusColor: '#22c55e',
+          ringColor: '#22c55e',
+        };
+      }
+      if (effectiveConsumedPct <= 80) {
+        return {
+          state: 'moderate',
+          statusText: 'Ritmo ajustado',
+          secondaryText: translateQuotaText(percentLabel) || 'Consumo al límite',
+          statusColor: '#f59e0b',
+          ringColor: '#f59e0b',
+        };
+      }
+      return {
+        state: 'fast',
+        statusText: 'Vas muy rápido',
+        secondaryText: translateQuotaText(percentLabel) || 'Riesgo de agotamiento',
+        statusColor: '#ef4444',
+        ringColor: '#ef4444',
+      };
+    }
+
     const diff = effectiveConsumedPct - tPct;
 
     if (diff <= 5) {

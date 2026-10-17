@@ -188,9 +188,13 @@ export default function AutoAuthFiles({
   const handleOpenSpecialist = useCallback(
     (targetCard) => {
       const inherited = resolveInheritedCardModels(targetCard, effectiveCatalogModels);
+      const isUnassigned = !targetCard?.poolId && !targetCard?.activePoolBase;
       setSpecialistModal({
         isOpen: true,
-        card: targetCard,
+        card: {
+          ...targetCard,
+          isUnassigned,
+        },
         inheritedModels: inherited,
       });
     },
@@ -250,13 +254,22 @@ export default function AutoAuthFiles({
       if (Array.isArray(exclusionsToSave) && exclusionsToSave.length === 0) {
         return await patchAuthFileExclusions(targetFileName, []);
       }
-      return { ok: true, name: targetFileName };
+      return {
+        ok: true,
+        name: targetFileName,
+        unassignedNotice: `ℹ️ La cuenta "${maskDisplayIdentifier(targetFileName)}" es una cuenta libre (no asignada a ningún pool). Sus credenciales se mantienen en modo nativo. Para fijar un especialista virtual, agrégala a un pool desde Group Manager.`,
+      };
     },
     [specialistModal.card, registeredPools]
   );
 
   const handleSpecialistSaved = useCallback(
     async (result) => {
+      if (result?.unassignedNotice) {
+        setErrorMessage(result.unassignedNotice);
+        setTimeout(() => setErrorMessage(''), 6000);
+        return;
+      }
       setSuccessMessage(
         `⚙️ Configuración de especialista actualizada para ${maskDisplayIdentifier(result.fileName)}.`
       );

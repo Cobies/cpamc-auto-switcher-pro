@@ -1,3 +1,4 @@
+import { existsSync, watch } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { initDynamicProvider } from "./src/provider.js";
 import { initFailoverHook, scheduleAutoSwitcher } from "./src/failover.js";
@@ -173,6 +174,25 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 		// Actualización inicial segura
 		await adapter.update(false, ctx);
 
+		// Bus Reactivo Instantáneo (<5ms) en Memoria Compartida (/dev/shm)
+		// Dispara actualización visual inmediata sin esperar al intervalo de 25s
+		const shmEpochPath = "/dev/shm/auto-switcher-pro.epoch";
+		let shmWatcher: ReturnType<typeof watch> | null = null;
+		let shmDebounce: NodeJS.Timeout | null = null;
+		try {
+			if (existsSync(shmEpochPath)) {
+				shmWatcher = watch(shmEpochPath, () => {
+					if (shmDebounce) clearTimeout(shmDebounce);
+					shmDebounce = setTimeout(async () => {
+						try {
+							await querySwitcherAccounts(true);
+							await adapter?.update(false, ctx);
+						} catch {}
+					}, 50);
+				});
+			}
+		} catch {}
+
 		// Intervalo en segundo plano cada 25s protegido contra stale context
 		let ticks = 0;
 		timer = setInterval(async () => {
@@ -187,6 +207,10 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 				}
 			} catch {
 				clearTimer();
+				if (shmWatcher) {
+					try { shmWatcher.close(); } catch {}
+					shmWatcher = null;
+				}
 			}
 		}, 25_000);
 	});

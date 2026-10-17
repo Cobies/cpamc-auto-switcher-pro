@@ -623,6 +623,13 @@ func TestDeprecatedModelAutoFallback(t *testing.T) {
 			t.Fatalf("active model %q should remain untouched, got %q", active, got)
 		}
 	}
+
+	// Test autonomous harvest of upstream 404
+	fallback, migrated := HarvestUpstreamModelDeprecation("gemini-3.7-flash-high", 404)
+	if fallback != "gemini-3.8-flash-high" {
+		t.Fatalf("expected harvest fallback gemini-3.8-flash-high, got %q", fallback)
+	}
+	_ = migrated
 }
 
 

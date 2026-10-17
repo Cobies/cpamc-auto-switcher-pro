@@ -184,5 +184,21 @@ describe('QuotaClock Component & Utilities', () => {
       const dot = container.querySelector('.quota-clock-needle-dot');
       expect(dot).toBeTruthy();
     });
+
+    it('handles null remainingMinutes/timePercent honestly without false "Vas muy rápido" alarm', () => {
+      // 25% consumed with null remainingMinutes must evaluate to "Ritmo holgado" (green), not "Vas muy rápido"
+      render(
+        <QuotaClock
+          totalMinutes={300}
+          remainingMinutes={null}
+          consumedPercent={25}
+          label="Ventana de 5 horas"
+          windowKey="5h"
+          testId="test-clock-no-reset"
+        />
+      );
+      expect(screen.getByText('Ritmo holgado')).toBeTruthy();
+      expect(screen.queryByText('Vas muy rápido')).toBeNull();
+    });
   });
 });
