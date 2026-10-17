@@ -16,7 +16,10 @@ const (
 	argonStatusRoutePath      = "/auto-switcher-pro/argon/status"
 	argonSyncSessionRoutePath = "/auto-switcher-pro/argon/sync-session"
 	defaultArgonDaemonURL     = "http://127.0.0.1:8319"
+	maxArgonCookieBytes       = 64 * 1024 // 64 KB limit
 )
+
+var reArgonTime = regexp.MustCompile(`(\d{1,2}):(\d{2})`)
 
 // Error classifications for Gemini Argon web automation
 const (
@@ -115,8 +118,7 @@ func ClassifyArgonError(errText string) (errType string, isRetryable bool, coold
 		// Default to 1 hour cooldown if time is not parsed
 		cd := int64(3600)
 		// Try to parse hours/minutes if present
-		reTime := regexp.MustCompile(`(\d{1,2}):(\d{2})`)
-		if m := reTime.FindStringSubmatch(lower); len(m) == 3 {
+		if m := reArgonTime.FindStringSubmatch(lower); len(m) == 3 {
 			h, _ := strconv.Atoi(m[1])
 			min, _ := strconv.Atoi(m[2])
 			now := time.Now()
@@ -213,15 +215,27 @@ func (s *ArgonSessionStore) IngestSession(payload SyncSessionPayload, authDir st
 		return ArgonAccountInfo{}, fmt.Errorf("cookies vacías: se requiere token de sesión __Secure-1PSID")
 	}
 
+	if len(rawCookies) > maxArgonCookieBytes {
+		return ArgonAccountInfo{}, fmt.Errorf("payload de cookies excede el límite seguro de %d bytes", maxArgonCookieBytes)
+	}
+
 	// Validate presence of critical Google cookies
 	if !strings.Contains(rawCookies, "__Secure-1PSID") && !strings.Contains(rawCookies, "SID") {
 		return ArgonAccountInfo{}, fmt.Errorf("formato inválido: no se detectó cookie __Secure-1PSID ni SID")
 	}
 
-	authUser := strings.TrimSpace(payload.AuthUser)
-	if authUser == "" {
-		authUser = "0"
+	// Strict sanitization of AuthUser against path traversal and special characters
+	rawAuthUser := strings.TrimSpace(payload.AuthUser)
+	safeAuthUser := ""
+	for _, r := range rawAuthUser {
+		if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '_' {
+			safeAuthUser += string(r)
+		}
 	}
+	if safeAuthUser == "" {
+		safeAuthUser = "0"
+	}
+	authUser := safeAuthUser
 
 	email := strings.TrimSpace(payload.Email)
 	if email == "" {

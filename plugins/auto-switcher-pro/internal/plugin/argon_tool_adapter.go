@@ -83,50 +83,58 @@ func ParseSyntheticToolCalls(text string) ([]OpenAIToolCall, string, bool) {
 	var calls []OpenAIToolCall
 	cleanText := trimmed
 
-	// 1. Check for fenced blocks: ```tool_call ... ``` or ```json ... ```
-	fenceIdx := strings.Index(cleanText, "```")
-	for fenceIdx != -1 {
-		rest := cleanText[fenceIdx+3:]
-		// find closing fence
-		closeIdx := strings.Index(rest, "```")
-		if closeIdx == -1 {
+	// 1. Scan code fences: ``` ... ```
+	cursor := 0
+	for {
+		if cursor >= len(cleanText) {
 			break
 		}
-		fenceContent := rest[:closeIdx]
-		// extract balanced JSON inside fenceContent
+		startRel := strings.Index(cleanText[cursor:], "```")
+		if startRel == -1 {
+			break
+		}
+		start := cursor + startRel
+		rest := cleanText[start+3:]
+		closeRel := strings.Index(rest, "```")
+		if closeRel == -1 {
+			break
+		}
+		end := start + 3 + closeRel + 3
+		fenceContent := rest[:closeRel]
+
 		if jsonStr, _, _, ok := extractBalancedJSON(fenceContent); ok {
 			if tc, valid := extractToolFromJSON(jsonStr, len(calls)); valid {
 				calls = append(calls, tc)
-				wholeFence := cleanText[fenceIdx : fenceIdx+3+closeIdx+3]
-				cleanText = strings.Replace(cleanText, wholeFence, "", 1)
-				fenceIdx = strings.Index(cleanText, "```")
+				cleanText = cleanText[:start] + cleanText[end:]
+				// cursor stays at start
 				continue
 			}
 		}
-		fenceIdx = strings.Index(cleanText[fenceIdx+3:], "```")
-		if fenceIdx != -1 {
-			fenceIdx += fenceIdx + 3
-		}
+		// If not a tool call fence, advance cursor past this code block
+		cursor = end
 	}
 
-	// 2. Check for inline tool_call: "tool_call { ... }"
-	toolCallIdx := strings.Index(cleanText, "tool_call")
-	for toolCallIdx != -1 {
-		after := cleanText[toolCallIdx+len("tool_call"):]
+	// 2. Scan inline tool calls: tool_call { ... }
+	cursor = 0
+	for {
+		if cursor >= len(cleanText) {
+			break
+		}
+		tcRel := strings.Index(cleanText[cursor:], "tool_call")
+		if tcRel == -1 {
+			break
+		}
+		tcStart := cursor + tcRel
+		after := cleanText[tcStart+len("tool_call"):]
 		if jsonStr, _, endRel, ok := extractBalancedJSON(after); ok {
 			if tc, valid := extractToolFromJSON(jsonStr, len(calls)); valid {
 				calls = append(calls, tc)
-				wholeInline := cleanText[toolCallIdx : toolCallIdx+len("tool_call")+endRel]
-				cleanText = strings.Replace(cleanText, wholeInline, "", 1)
-				toolCallIdx = strings.Index(cleanText, "tool_call")
+				inlineEnd := tcStart + len("tool_call") + endRel
+				cleanText = cleanText[:tcStart] + cleanText[inlineEnd:]
 				continue
 			}
 		}
-		next := strings.Index(cleanText[toolCallIdx+len("tool_call"):], "tool_call")
-		if next == -1 {
-			break
-		}
-		toolCallIdx += len("tool_call") + next
+		cursor = tcStart + len("tool_call")
 	}
 
 	cleanText = strings.TrimSpace(cleanText)
