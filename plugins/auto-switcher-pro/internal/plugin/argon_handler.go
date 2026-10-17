@@ -171,38 +171,63 @@ func ClassifyArgonError(errText string) (errType string, isRetryable bool, coold
 
 // ProbeDaemon checks if the companion Playwright daemon is running on port 8319.
 func (s *ArgonSessionStore) ProbeDaemon() (status string, isBusy bool, memMB float64, activeTask string) {
-	daemonURL := s.daemonURL
-	if daemonURL == "" {
-		daemonURL = defaultArgonDaemonURL
+	var candidates []string
+	if s.daemonURL != "" && s.daemonURL != defaultArgonDaemonURL {
+		candidates = []string{s.daemonURL}
+	} else {
+		candidates = []string{
+			"http://127.0.0.1:8319",
+			"http://172.19.0.1:8319",
+			"http://host.docker.internal:8319",
+		}
 	}
 
-	resp, err := s.httpClient.Get(daemonURL + "/health")
-	if err != nil {
-		return "offline", false, 0, ""
-	}
-	defer resp.Body.Close()
+	seen := make(map[string]struct{})
+	for _, targetURL := range candidates {
+		trimmed := strings.TrimRight(strings.TrimSpace(targetURL), "/")
+		if trimmed == "" {
+			continue
+		}
+		if _, dup := seen[trimmed]; dup {
+			continue
+		}
+		seen[trimmed] = struct{}{}
 
-	if resp.StatusCode != http.StatusOK {
-		return "offline", false, 0, ""
+		resp, err := s.httpClient.Get(trimmed + "/health")
+		if err != nil {
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			continue
+		}
+
+		// Save the working daemon URL for subsequent calls
+		s.daemonURL = trimmed
+
+		var data struct {
+			Status     string  `json:"status"`
+			IsBusy     bool    `json:"isBusy"`
+			ActiveTask string  `json:"activeTask"`
+			MemoryMB   float64 `json:"memoryMB"`
+			Idle       bool    `json:"idle"`
+		}
+
+		err = json.NewDecoder(resp.Body).Decode(&data)
+		resp.Body.Close()
+
+		if err != nil {
+			return "online", false, 0, ""
+		}
+
+		if data.Idle {
+			return "idle", data.IsBusy, data.MemoryMB, data.ActiveTask
+		}
+		return "online", data.IsBusy, data.MemoryMB, data.ActiveTask
 	}
 
-	var data struct {
-		Status     string  `json:"status"`
-		IsBusy     bool    `json:"isBusy"`
-		ActiveTask string  `json:"activeTask"`
-		MemoryMB   float64 `json:"memoryMB"`
-		Idle       bool    `json:"idle"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		// Valid HTTP 200 response from daemon even if JSON varies
-		return "online", false, 0, ""
-	}
-
-	if data.Idle {
-		return "idle", data.IsBusy, data.MemoryMB, data.ActiveTask
-	}
-	return "online", data.IsBusy, data.MemoryMB, data.ActiveTask
+	return "offline", false, 0, ""
 }
 
 // IngestSession stores an active cookie session for an authuser.
