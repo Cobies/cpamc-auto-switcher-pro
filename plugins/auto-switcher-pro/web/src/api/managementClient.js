@@ -2663,6 +2663,30 @@ export async function rotatePool(idOrPrefix = '', options = {}) {
   return data;
 }
 
+/**
+ * Obtiene el estado del daemon companion y las sesiones de Gemini 4 Argon.
+ */
+export async function getArgonStatus(options = {}) {
+  const res = await apiFetch('/v0/management/auto-switcher-pro/argon/status', {
+    ...options,
+    method: 'GET',
+  });
+  return res.json();
+}
+
+/**
+ * Sincroniza e ingesta sesiones/cookies de Gemini Argon.
+ */
+export async function syncArgonSession(payload, options = {}) {
+  const res = await apiFetch('/v0/management/auto-switcher-pro/argon/sync-session', {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return res.json();
+}
+
 
 
 

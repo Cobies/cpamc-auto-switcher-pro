@@ -72,6 +72,8 @@ func familyCanonicalShortName(family, basePrefix string) string {
 	f := strings.ToLower(strings.TrimSpace(family))
 	b := strings.ToLower(strings.TrimSpace(basePrefix))
 	switch {
+	case strings.Contains(f, "argon") || strings.HasPrefix(b, "argon"):
+		return "argon"
 	case strings.Contains(f, "codex") || strings.HasPrefix(b, "codex"):
 		return "codex"
 	case strings.Contains(f, "claude") || strings.Contains(f, "sonnet") || strings.Contains(f, "opus") ||
@@ -101,6 +103,8 @@ func (p PoolDefinition) ActiveModelForAccount(authFile string) string {
 	}
 	fam := familyCanonicalShortName(p.Family, p.BasePrefix)
 	switch fam {
+	case "argon":
+		return "web-gemini/gemini-4-argon"
 	case "codex":
 		return "gpt-4o"
 	case "claude":

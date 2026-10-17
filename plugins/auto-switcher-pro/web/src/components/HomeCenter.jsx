@@ -80,6 +80,13 @@ export default function HomeCenter({ onNavigateTab, onOpenLicenseModal }) {
       badge: 'Directorio',
     },
     {
+      id: 'argon',
+      icon: '⚡',
+      title: 'Gemini 4 Argon Gateway',
+      desc: 'Puerta de enlace web, sincronización de sesiones 1-Click con Bookmarklet y monitoreo del daemon Playwright.',
+      badge: 'Web Gateway',
+    },
+    {
       id: 'maintenance',
       icon: '🩺',
       title: 'Salud & Mantenimiento',

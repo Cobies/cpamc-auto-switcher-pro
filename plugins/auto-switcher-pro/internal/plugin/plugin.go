@@ -172,6 +172,16 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 					"Path":        sseProxyRoutePath,
 					"Description": "SSE Proxy con keep-alive para streaming sin cortes (terminated)",
 				},
+				{
+					"Method":      http.MethodGet,
+					"Path":        argonStatusRoutePath,
+					"Description": "Consulta el estado del daemon companion y las sesiones de Gemini 4 Argon",
+				},
+				{
+					"Method":      http.MethodPost,
+					"Path":        argonSyncSessionRoutePath,
+					"Description": "Sincroniza e ingesta sesiones y cookies de Gemini Argon en caliente",
+				},
 			},
 			"resources": []map[string]any{
 				{
@@ -203,6 +213,11 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 					"Path":        "/create-prefixes",
 					"Menu":        "📋 Directorio de Cuentas",
 					"Description": "Directorio e inspección de cuentas vinculadas y prefijos (edición manual de emergencia)",
+				},
+				{
+					"Path":        "/argon",
+					"Menu":        "⚡ Gemini 4 Argon",
+					"Description": "Puerta de enlace, sesiones y monitoreo de Gemini 4 Argon Web",
 				},
 				{
 					"Path":        "/maintenance",
@@ -386,6 +401,11 @@ func HandleManagementHTTP(request []byte) ([]byte, error) {
 	// Health check routes
 	if isHealthPath(req.Path) {
 		return handleHealthHTTP(req)
+	}
+
+	// Argon Gateway routes
+	if isArgonPath(req.Path) {
+		return handleArgonHTTP(req)
 	}
 
 	// Readiness check routes

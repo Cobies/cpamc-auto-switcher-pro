@@ -847,7 +847,39 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 		}
 	}
 
-	// 4) No cascade member available: delegate to the builtin scheduler.
+	// 4) Failover Híbrido "Web Argon -> Flota Antigravity" sin Caída de Stream:
+	// Si el pool es de tipo Argon y ninguna cuenta web está disponible (cuota agotada, captcha o daemon offline),
+	// realizar failover híbrido transparente hacia la primera cuenta sana de la flota Google Antigravity.
+	if familyCanonicalShortName(pool.Family, pool.BasePrefix) == "argon" {
+		for _, cand := range req.Candidates {
+			candID := strings.TrimSpace(cand.ID)
+			lowerCand := strings.ToLower(candID)
+			if strings.HasPrefix(lowerCand, "antigravity-") || strings.Contains(lowerCand, "agy") || strings.Contains(lowerCand, "google") {
+				reqs, fail := license.RecordRotation(true)
+				atomic.StoreInt64(&totalRotations, reqs)
+				atomic.StoreInt64(&totalFailovers, fail)
+
+				email := strings.TrimSuffix(strings.TrimPrefix(candID, "antigravity-"), ".json")
+				analytics.RecordEvent(analytics.RotationEvent{
+					PoolID:          pool.ID,
+					PoolPrefix:      pool.BasePrefix,
+					SelectedAccount: candID,
+					AccountEmail:    email,
+					IsFailover:      true,
+					CascadeIndex:    len(cascade) + 1,
+					TargetModel:     "gemini-3.8-flash-high",
+					StatusCode:      200,
+				})
+
+				return schedulerPickResponse{
+					Handled: true,
+					AuthID:  candID,
+				}
+			}
+		}
+	}
+
+	// 5) No cascade member available: delegate to the builtin scheduler.
 	return schedulerPickResponse{Handled: false}
 }
 
