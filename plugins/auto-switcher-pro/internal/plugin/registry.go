@@ -345,6 +345,14 @@ func (r *PoolRegistry) Save() error {
 		return fmt.Errorf("rename temp state to %s: %w", r.filePath, err)
 	}
 
+	// Emit atomic epoch signal for reactive hot-reload in Pi extensions (cpamc-auto-switcher)
+	epochFile := filepath.Join(dir, "auto-switcher-pro.epoch")
+	epochData := []byte(fmt.Sprintf("%d", time.Now().UnixNano()))
+	tmpEpoch := fmt.Sprintf("%s.tmp.%d", epochFile, time.Now().UnixNano())
+	if err := os.WriteFile(tmpEpoch, epochData, 0644); err == nil {
+		_ = os.Rename(tmpEpoch, epochFile)
+	}
+
 	return nil
 }
 

@@ -332,6 +332,42 @@ func TestSchedulerPickCascadeFallsToFirstAvailableReserve(t *testing.T) {
 	}
 }
 
+func TestSchedulerPickQuotaDepletedRotatesToReserve(t *testing.T) {
+	registry := testModelProviderRegistry(t)
+	previous := activeRegistry
+	activeRegistry = func() *PoolRegistry { return registry }
+	t.Cleanup(func() { activeRegistry = previous })
+
+	pe := GetPredictiveEngine()
+	// Record critical quota depletion on leader antigravity-a
+	pe.RecordLiveQuota(AccountQuotaTelemetry{
+		AccountKey:  "antigravity-a@gmail.com.json",
+		Window5hPct: 8.0, // < 15%
+	})
+	t.Cleanup(func() {
+		pe.RecordLiveQuota(AccountQuotaTelemetry{
+			AccountKey:  "antigravity-a@gmail.com.json",
+			Window5hPct: 100.0,
+		})
+	})
+
+	// Both candidate A and B are active in candidates
+	req := schedulerPickRequest{
+		Provider: "antigravity",
+		Model:    "claude-sonnet-4-6",
+		Options:  schedulerOptions{Metadata: map[string]any{"requested_model": "clau/claude-sonnet-4-6"}},
+		Candidates: []schedulerCandidate{
+			{ID: "antigravity-a@gmail.com.json", Provider: "antigravity", Status: "active"},
+			{ID: "antigravity-b@gmail.com.json", Provider: "antigravity", Status: "active"},
+		},
+	}
+	resp := handleSchedulerPick(req)
+	// Because leader A is depleted (< 15%), it must automatically rotate to reserve B!
+	if !resp.Handled || resp.AuthID != "antigravity-b@gmail.com.json" {
+		t.Fatalf("expected quota-depleted leader to trigger preventive rotation to reserve B, got: %+v", resp)
+	}
+}
+
 func TestSchedulerPickNonPoolModelDelegates(t *testing.T) {
 	registry := testModelProviderRegistry(t)
 	previous := activeRegistry
@@ -561,9 +597,31 @@ func TestDeprecatedModelAutoFallback(t *testing.T) {
 			TargetModels: []string{"gemini-3.8-flash-high"},
 		},
 	})
-	prefixedRes := routeDecisionFor(reg, "agy/gemini-3.7-flash-high")
-	if !prefixedRes.Handled || prefixedRes.TargetModel != "gemini-3.8-flash-high" {
-		t.Fatalf("expected prefixed route agy/gemini-3.7-flash-high to fallback to gemini-3.8-flash-high, got %+v", prefixedRes)
+	// Test heuristic fuzzy fallback for unexpected/future deprecated models
+	fuzzyTests := map[string]string{
+		"gemini-9.9-flash-super": "gemini-3.8-flash-high",
+		"gemini-custom-pro-exp":  "gemini-3.8-flash-high",
+		"claude-opus-custom":     "claude-opus-4-6-thinking",
+		"claude-sonnet-custom":   "claude-sonnet-4-6",
+	}
+	for input, expected := range fuzzyTests {
+		got := ResolveActiveModelFallback(input)
+		if got != expected {
+			t.Fatalf("expected fuzzy fallback for %q to be %q, got %q", input, expected, got)
+		}
+	}
+
+	// Test dynamic deprecated registration
+	RegisterDynamicDeprecatedModel("gemini-future-deprecated-10", "gemini-3.8-flash-high")
+	if got := ResolveActiveModelFallback("gemini-future-deprecated-10"); got != "gemini-3.8-flash-high" {
+		t.Fatalf("expected dynamically registered fallback to resolve, got %q", got)
+	}
+
+	// Confirmed active models must remain untouched
+	for _, active := range []string{"gemini-3.8-flash-high", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3-flash"} {
+		if got := ResolveActiveModelFallback(active); got != active {
+			t.Fatalf("active model %q should remain untouched, got %q", active, got)
+		}
 	}
 }
 

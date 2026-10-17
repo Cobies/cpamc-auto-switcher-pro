@@ -59,4 +59,38 @@ func TestPredictiveEngine(t *testing.T) {
 	if pe.ShouldPreventiveCool(acc) {
 		t.Fatalf("expected disabled engine to not force cooling")
 	}
+
+	// 5. Test Live Quota Telemetry Ingestion & Exhaustion Protection
+	pe.SetConfig(PredictiveConfig{
+		Enabled:        true,
+		MaxReqsPerHour: 80,
+		ThresholdPct:   80.0,
+		CoolingMinutes: 15,
+	})
+	quotaAcc := "quota-user@gmail.com"
+	pe.RecordLiveQuota(AccountQuotaTelemetry{
+		AccountKey:      quotaAcc,
+		Window5hPct:     100.0,
+		WeeklyPct:       95.0,
+		Window5hResetIn: 14400,
+		Plan:            "Pro",
+	})
+	q, ok := pe.GetLiveQuota(quotaAcc)
+	if !ok || q.Window5hPct != 100.0 {
+		t.Fatalf("expected live quota to be stored and retrieved, got %+v", q)
+	}
+	if pe.ShouldPreventiveCool(quotaAcc) {
+		t.Fatalf("account with 100%% quota should not cool down")
+	}
+
+	// When 5h quota is critically depleted (< 15%), it must trigger preventive cooling
+	pe.RecordLiveQuota(AccountQuotaTelemetry{
+		AccountKey:      quotaAcc,
+		Window5hPct:     10.0, // Critical depletion (< 15%)
+		WeeklyPct:       80.0,
+		Window5hResetIn: 3600,
+	})
+	if !pe.ShouldPreventiveCool(quotaAcc) {
+		t.Fatalf("account with 10%% 5h quota should trigger preventive cooling")
+	}
 }

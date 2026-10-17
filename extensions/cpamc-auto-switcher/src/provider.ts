@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, watch } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -65,6 +65,29 @@ function resolveCacheTargets(): string[] {
         } catch {}
     }
     return Array.from(targets);
+}
+
+/**
+ * Resuelve las rutas de los archivos de señalización atómica emitidos por Auto Switcher Pro:
+ * - auto-switcher-pro.epoch
+ * - auto-switcher-pro-state.json
+ */
+function resolveSignalFileTargets(): string[] {
+    const targets = new Set<string>();
+    if (process.env.AUTO_SWITCHER_STATE_PATH) {
+        targets.add(process.env.AUTO_SWITCHER_STATE_PATH);
+    }
+    const home = homedir();
+    const servicePluginsDir = join(home, "services", "cliproxy", "plugins");
+    if (existsSync(servicePluginsDir)) {
+        targets.add(join(servicePluginsDir, "auto-switcher-pro.epoch"));
+        targets.add(join(servicePluginsDir, "auto-switcher-pro-state.json"));
+    }
+    return Array.from(targets);
+}
+
+export function invalidateMemoryCaches(): void {
+    cachedFilterData = null;
 }
 
 const PRIMARY_CACHE_PATH = process.env.PI_CODING_AGENT_DIR
@@ -802,6 +825,40 @@ export function initDynamicProvider(pi: ExtensionAPI): void {
         }
     }).catch(() => {});
 
+    // Watcher reactivo de señalización atómica: ante cambios en auto-switcher-pro.epoch
+    // o en auto-switcher-pro-state.json, invalida la caché en RAM e invoca la sincronización en caliente.
+    let debounceTimer: NodeJS.Timeout | null = null;
+    const triggerHotReload = () => {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(async () => {
+            try {
+                invalidateMemoryCaches();
+                const models = await fetchCLIProxyModels();
+                if (Array.isArray(models) && models.length > 0) {
+                    saveCachedModels(models);
+                }
+            } catch {}
+        }, 75);
+    };
+
+    const signalTargets = resolveSignalFileTargets();
+    for (const target of signalTargets) {
+        try {
+            if (existsSync(target)) {
+                watch(target, () => triggerHotReload());
+            } else {
+                const parent = dirname(target);
+                if (existsSync(parent)) {
+                    watch(parent, (_event, filename) => {
+                        if (typeof filename === "string" && (filename.includes("epoch") || filename.includes("state.json"))) {
+                            triggerHotReload();
+                        }
+                    });
+                }
+            }
+        } catch {}
+    }
+
     pi.registerProvider(PROVIDER_ID, {
         name: "CPAMC",
         baseUrl: `${resolveBaseUrl()}/v1`,
@@ -815,6 +872,7 @@ export function initDynamicProvider(pi: ExtensionAPI): void {
             maxTokensField: "max_tokens",
         },
         async refreshModels({ signal }: { signal?: AbortSignal } = {}) {
+            invalidateMemoryCaches();
             const models = await fetchCLIProxyModels(signal);
             if (Array.isArray(models) && models.length > 0) {
                 saveCachedModels(models);

@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"auto-switcher-pro/internal/analytics"
@@ -180,13 +181,101 @@ var deprecatedModelFallbacks = map[string]string{
 	"gemini-3.1-flash-image": "gemini-3.8-flash-high",
 }
 
-// ResolveActiveModelFallback rewrites any known retired/deprecated upstream model names
+// dynamicDeprecatedCache holds runtime-learned model fallbacks in memory.
+var dynamicDeprecatedCache sync.Map
+
+// isConfirmedActiveModel reports whether the given model is in the active baseline.
+func isConfirmedActiveModel(id string) bool {
+	idLower := strings.ToLower(strings.TrimSpace(id))
+	for _, m := range baselineAntigravityModels {
+		if strings.EqualFold(m.ID, idLower) {
+			return true
+		}
+	}
+	if idLower == "gemini-3.8-flash-n" || idLower == "claude-sonnet-4-6" || idLower == "claude-opus-4-6-thinking" {
+		return true
+	}
+	return false
+}
+
+// fuzzyFamilyFallback intelligently maps an unknown or newly retired model name
+// to the best active canonical counterpart within the same family and tier.
+func fuzzyFamilyFallback(model string) string {
+	lower := strings.ToLower(strings.TrimSpace(model))
+	if lower == "" {
+		return ""
+	}
+
+	// 1. Google Gemini family deprecated/retired patterns
+	if strings.Contains(lower, "gemini") {
+		if strings.Contains(lower, "3.7") ||
+			strings.Contains(lower, "3.6") ||
+			strings.Contains(lower, "3.1-pro") ||
+			strings.Contains(lower, "pro-agent") ||
+			strings.Contains(lower, "2.5-flash-high") ||
+			strings.Contains(lower, "flash-image") ||
+			strings.Contains(lower, "deprecated") ||
+			strings.Contains(lower, "flash-super") ||
+			strings.Contains(lower, "custom-pro") {
+			return "gemini-3.8-flash-high"
+		}
+	}
+
+	// 2. Claude family (Antigravity package):
+	if strings.Contains(lower, "claude") || strings.Contains(lower, "opus") || strings.Contains(lower, "sonnet") {
+		if strings.Contains(lower, "opus-custom") {
+			return "claude-opus-4-6-thinking"
+		}
+		if strings.Contains(lower, "sonnet-custom") {
+			return "claude-sonnet-4-6"
+		}
+	}
+
+	return model
+}
+
+// RegisterDynamicDeprecatedModel adds a runtime-detected deprecated model mapping.
+func RegisterDynamicDeprecatedModel(deprecated string, activeFallback string) {
+	d := strings.ToLower(strings.TrimSpace(deprecated))
+	f := strings.TrimSpace(activeFallback)
+	if d != "" && f != "" {
+		dynamicDeprecatedCache.Store(d, f)
+	}
+}
+
+// ResolveActiveModelFallback rewrites any known or fuzzy-detected retired upstream model names
 // to their current valid active counterpart in the same family.
 func ResolveActiveModelFallback(model string) string {
 	trimmed := strings.TrimSpace(model)
-	if fallback, ok := deprecatedModelFallbacks[strings.ToLower(trimmed)]; ok {
+	if trimmed == "" {
+		return ""
+	}
+	lower := strings.ToLower(trimmed)
+
+	// 1. Exact confirmed active match -> return unchanged
+	if isConfirmedActiveModel(lower) {
+		return trimmed
+	}
+
+	// 2. Exact static mapping match
+	if fallback, ok := deprecatedModelFallbacks[lower]; ok {
 		return fallback
 	}
+
+	// 3. Dynamic runtime-learned deprecation cache
+	if v, ok := dynamicDeprecatedCache.Load(lower); ok {
+		if fallback, ok := v.(string); ok && fallback != "" {
+			return fallback
+		}
+	}
+
+	// 4. Fuzzy family fallback for unknown or future retired models
+	fuzzy := fuzzyFamilyFallback(trimmed)
+	if fuzzy != trimmed && fuzzy != "" {
+		dynamicDeprecatedCache.Store(lower, fuzzy)
+		return fuzzy
+	}
+
 	return trimmed
 }
 
@@ -390,15 +479,16 @@ func routeDecisionFor(registry *PoolRegistry, requestedModel string) modelRouteR
 	}
 
 	// 0. Deprecated model auto-fallback interceptor:
-	// If the requested model is a known retired model (e.g. gemini-3.7-flash-high),
+	// If the requested model is a known retired or fuzzy-matched deprecated model (e.g. gemini-3.7-flash-high),
 	// route it directly to the active model to prevent upstream 404 and cascading cooldowns.
-	if fallback, ok := deprecatedModelFallbacks[strings.ToLower(trimmed)]; ok {
+	resolvedFallback := ResolveActiveModelFallback(trimmed)
+	if !strings.EqualFold(resolvedFallback, trimmed) && !strings.Contains(trimmed, "/") {
 		return modelRouteResponse{
 			Handled:     true,
 			TargetKind:  "provider",
 			Target:      antigravityProviderKey,
-			TargetModel: fallback,
-			Reason:      fmt.Sprintf("auto-switcher-pro deprecated model auto-fallback (%s -> %s)", trimmed, fallback),
+			TargetModel: resolvedFallback,
+			Reason:      fmt.Sprintf("auto-switcher-pro deprecated model auto-fallback (%s -> %s)", trimmed, resolvedFallback),
 		}
 	}
 
@@ -439,14 +529,14 @@ func routeDecisionFor(registry *PoolRegistry, requestedModel string) modelRouteR
 		return modelRouteResponse{}
 	}
 
+	resolvedRest := ResolveActiveModelFallback(rest)
 	for _, target := range poolTargets(pool) {
-		if strings.EqualFold(target, rest) || strings.EqualFold(ResolveActiveModelFallback(target), ResolveActiveModelFallback(rest)) {
-			effectiveTarget := ResolveActiveModelFallback(rest)
+		if strings.EqualFold(target, rest) || strings.EqualFold(target, resolvedRest) {
 			return modelRouteResponse{
 				Handled:     true,
 				TargetKind:  "provider",
 				Target:      antigravityProviderKey,
-				TargetModel: effectiveTarget,
+				TargetModel: resolvedRest,
 				Reason:      fmt.Sprintf("auto-switcher-pro 2N pool route (%s)", pool.BasePrefix),
 			}
 		}

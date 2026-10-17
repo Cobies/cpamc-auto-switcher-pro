@@ -16,6 +16,49 @@ func isPredictivePath(p string) bool {
 func handlePredictiveHTTP(req ManagementRequestPayload) ([]byte, error) {
 	method := strings.ToUpper(strings.TrimSpace(req.Method))
 	pe := GetPredictiveEngine()
+	normPath := strings.ToLower(strings.TrimSpace(req.Path))
+
+	// Sub-ruta dedicada para telemetría viva de cuotas (/auto-switcher-pro/predictive/telemetry o /quota)
+	if strings.Contains(normPath, "/telemetry") || strings.Contains(normPath, "/quota") {
+		if method == http.MethodGet {
+			return jsonManagementResponse(http.StatusOK, map[string]interface{}{
+				"ok":     true,
+				"quotas": pe.GetAllLiveQuotas(),
+			})
+		}
+		if method == http.MethodPost {
+			var single AccountQuotaTelemetry
+			if err := json.Unmarshal(req.Body, &single); err == nil && single.AccountKey != "" {
+				pe.RecordLiveQuota(single)
+				return jsonManagementResponse(http.StatusOK, map[string]interface{}{
+					"ok":      true,
+					"message": "Telemetría de cuota registrada con éxito",
+					"quota":   single,
+				})
+			}
+			var batch struct {
+				Quotas []AccountQuotaTelemetry `json:"quotas"`
+			}
+			if err := json.Unmarshal(req.Body, &batch); err == nil && len(batch.Quotas) > 0 {
+				for _, q := range batch.Quotas {
+					pe.RecordLiveQuota(q)
+				}
+				return jsonManagementResponse(http.StatusOK, map[string]interface{}{
+					"ok":      true,
+					"count":   len(batch.Quotas),
+					"message": "Lote de telemetría registrado con éxito",
+				})
+			}
+			return jsonManagementResponse(http.StatusBadRequest, map[string]string{
+				"error":   "invalid_payload",
+				"message": "Formato de telemetría de cuota inválido",
+			})
+		}
+		return jsonManagementResponse(http.StatusMethodNotAllowed, map[string]string{
+			"error":   "method_not_allowed",
+			"message": "Método no permitido",
+		})
+	}
 
 	if method == http.MethodGet {
 		cfg := pe.GetConfig()
