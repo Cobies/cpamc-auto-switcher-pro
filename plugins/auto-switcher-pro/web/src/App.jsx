@@ -134,6 +134,8 @@ export default function App() {
   const [isGuideOpen, setIsGuideOpen] = useState(false);
   const [isLicenseOpen, setIsLicenseOpen] = useState(false);
   const [consoleToastVersion, setConsoleToastVersion] = useState(null);
+  const [manualKeyInput, setManualKeyInput] = useState('');
+  const [manualKeyError, setManualKeyError] = useState('');
   const consoleCheckExecutedRef = useRef(false);
   const graphRef = useRef(null);
 
@@ -777,6 +779,89 @@ export default function App() {
                   </li>
                   <li>Reload this panel or click "Retry Authentication" below.</li>
                 </ol>
+              </div>
+
+              <div
+                className="auth-manual-entry"
+                style={{
+                  margin: '18px 0',
+                  padding: '14px',
+                  background: 'rgba(56, 189, 248, 0.08)',
+                  borderRadius: '10px',
+                  border: '1px solid rgba(56, 189, 248, 0.25)',
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    color: '#38bdf8',
+                    marginBottom: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                  }}
+                >
+                  <span>⚡</span> O conecta directamente pegando tu Management Key:
+                </div>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <input
+                    type="password"
+                    data-testid="input-manual-key"
+                    placeholder="Pega tu Management Key de CPAMC aquí..."
+                    value={manualKeyInput}
+                    onChange={(e) => {
+                      setManualKeyInput(e.target.value);
+                      if (manualKeyError) setManualKeyError('');
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const trimmed = manualKeyInput.trim();
+                        if (!trimmed) {
+                          setManualKeyError('Por favor ingresa una clave válida');
+                          return;
+                        }
+                        try {
+                          localStorage.setItem('management_key', trimmed);
+                        } catch {}
+                        loadProfiles();
+                      }
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: '8px 12px',
+                      borderRadius: '6px',
+                      border: manualKeyError ? '1px solid #f85149' : '1px solid #30363d',
+                      background: '#0d1117',
+                      color: '#c9d1d9',
+                      fontSize: '13px',
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    data-testid="btn-connect-manual-key"
+                    onClick={() => {
+                      const trimmed = manualKeyInput.trim();
+                      if (!trimmed) {
+                        setManualKeyError('Por favor ingresa una clave válida');
+                        return;
+                      }
+                      try {
+                        localStorage.setItem('management_key', trimmed);
+                      } catch {}
+                      loadProfiles();
+                    }}
+                    style={{ whiteSpace: 'nowrap' }}
+                  >
+                    Conectar
+                  </button>
+                </div>
+                {manualKeyError && (
+                  <div style={{ color: '#f85149', fontSize: '12px', marginTop: '6px' }}>
+                    {manualKeyError}
+                  </div>
+                )}
               </div>
               <div className="auth-warning-actions">
                 <button

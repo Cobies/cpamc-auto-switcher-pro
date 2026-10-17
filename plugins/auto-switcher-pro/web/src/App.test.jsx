@@ -25,6 +25,32 @@ describe('App Host Component Integration', () => {
     expect(screen.getByText('Authentication Required')).toBeTruthy();
     expect(screen.getByTestId('btn-retry-auth')).toBeTruthy();
     expect(screen.getByTestId('btn-load-demo')).toBeTruthy();
+    expect(screen.getByTestId('input-manual-key')).toBeTruthy();
+    expect(screen.getByTestId('btn-connect-manual-key')).toBeTruthy();
+  });
+
+  it('allows entering management key manually and unlocks the application', async () => {
+    let mockKey = '';
+    vi.spyOn(managementClient, 'getManagementKey').mockImplementation(() => mockKey);
+    vi.spyOn(managementClient, 'loadAuthFilesWithPrefixes').mockImplementation(async () => {
+      if (!mockKey) throw new Error('Unauthenticated');
+      return [{ name: 'account-1.json', prefix: 'agy' }];
+    });
+
+    render(<App />);
+
+    expect(await screen.findByTestId('status-unauthenticated')).toBeTruthy();
+
+    const input = screen.getByTestId('input-manual-key');
+    const connectBtn = screen.getByTestId('btn-connect-manual-key');
+
+    // Introduce la clave y pulsa conectar
+    fireEvent.change(input, { target: { value: 'custom-secret-key-456' } });
+    mockKey = 'custom-secret-key-456';
+    fireEvent.click(connectBtn);
+
+    // Debe cargar los nodos y salir del estado no autenticado
+    expect(await screen.findByText('agy')).toBeTruthy();
   });
 
   it('switches to offline demo graph when user clicks View Offline Demo', async () => {

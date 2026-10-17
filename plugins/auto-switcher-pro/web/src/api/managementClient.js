@@ -260,6 +260,36 @@ export function getManagementKey(options = {}) {
     // Parsing error: fall through
   }
 
+  // 3. Try direct explicit storage (manual input or standalone panel fallback)
+  try {
+    const storage =
+      options.localStorage ||
+      (typeof window !== 'undefined' ? window.localStorage : null);
+
+    if (storage) {
+      const explicitKey =
+        storage.getItem('management_key') || storage.getItem('managementKey');
+      if (explicitKey && String(explicitKey).trim()) {
+        return String(explicitKey).trim();
+      }
+    }
+  } catch {
+    // Storage access restricted: fall through
+  }
+
+  // 4. Try URL search params (?key=... or ?management_key=...)
+  try {
+    if (typeof window !== 'undefined' && window.location && window.location.search) {
+      const params = new URLSearchParams(window.location.search);
+      const urlKey = params.get('key') || params.get('management_key');
+      if (urlKey && urlKey.trim()) {
+        return urlKey.trim();
+      }
+    }
+  } catch {
+    // Search params parsing error: fall through
+  }
+
   // Fail closed
   return '';
 }
