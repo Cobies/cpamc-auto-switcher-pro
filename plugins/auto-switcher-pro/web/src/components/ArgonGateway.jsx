@@ -7,6 +7,9 @@ export default function ArgonGateway() {
   const [statusData, setStatusData] = useState(null);
   const [error, setError] = useState(null);
   const [feedback, setFeedback] = useState(null);
+  const [copiedBookmarklet, setCopiedBookmarklet] = useState(false);
+  const [copiedDaemonCmd, setCopiedDaemonCmd] = useState(false);
+  const [maskEmails, setMaskEmails] = useState(false);
   const bookmarkletRef = useRef(null);
 
   // Manual cookie input state
@@ -35,7 +38,6 @@ export default function ArgonGateway() {
 
   useEffect(() => {
     loadStatus();
-    // Sondeo periódico cada 15 segundos
     const timer = setInterval(() => {
       loadStatus();
     }, 15000);
@@ -88,7 +90,19 @@ export default function ArgonGateway() {
   const handleCopyBookmarklet = () => {
     if (navigator.clipboard) {
       navigator.clipboard.writeText(bookmarkletCode);
-      setFeedback({ type: 'success', message: 'Código del Bookmarklet copiado al portapapeles. ¡Pégalo como URL en un nuevo marcador!' });
+      setCopiedBookmarklet(true);
+      setFeedback({ type: 'success', message: '¡Código del Bookmarklet copiado al portapapeles! Pégalo como URL en un nuevo marcador de tu navegador.' });
+      setTimeout(() => setCopiedBookmarklet(false), 3000);
+    }
+  };
+
+  const handleCopyDaemonCmd = () => {
+    const cmd = "bash /home/wilox/services/gemini-argon-daemon/start-daemon.sh";
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(cmd);
+      setCopiedDaemonCmd(true);
+      setFeedback({ type: 'success', message: 'Comando de inicio copiado al portapapeles.' });
+      setTimeout(() => setCopiedDaemonCmd(false), 3000);
     }
   };
 
@@ -125,14 +139,32 @@ export default function ArgonGateway() {
   const daemonStatus = statusData?.daemon_status || 'offline';
   const accounts = statusData?.accounts || [];
 
+  const formatEmail = (email) => {
+    if (!email) return 'gemini-argon@google.com';
+    if (!maskEmails) return email;
+    const parts = email.split('@');
+    if (parts.length !== 2) return email;
+    const name = parts[0];
+    const maskedName = name.length > 3 ? name.slice(0, 2) + '••••' + name.slice(-1) : name + '••';
+    return `${maskedName}@${parts[1]}`;
+  };
+
   return (
     <div className="argon-gateway" data-testid="argon-gateway">
-      {/* Header */}
+      {/* Header Section */}
       <header className="argon-header">
         <div className="argon-title-section">
           <div className="argon-icon-wrapper">⚡</div>
           <div>
-            <h1 className="argon-title">Gemini 4 Argon Gateway</h1>
+            <div className="argon-breadcrumb-tag">
+              <span>CPAMC</span>
+              <span>•</span>
+              <span>Web Reasoning Engine</span>
+            </div>
+            <h1 className="argon-title">
+              <span>Gemini 4 Argon Gateway</span>
+              <span className="argon-title-pill">2026 Pro</span>
+            </h1>
             <p className="argon-subtitle">
               Puerta de enlace web, sincronización de sesiones 1-Click y monitoreo de Playwright Companion
             </p>
@@ -140,6 +172,14 @@ export default function ArgonGateway() {
         </div>
 
         <div className="argon-actions">
+          <button
+            type="button"
+            className="argon-btn argon-btn-outline"
+            onClick={() => setMaskEmails(!maskEmails)}
+            title="Alternar privacidad de correos"
+          >
+            {maskEmails ? '👁️ Ver Emails' : '🔒 Ocultar Emails'}
+          </button>
           <button
             type="button"
             className="argon-btn argon-btn-outline"
@@ -153,99 +193,168 @@ export default function ArgonGateway() {
             className="argon-btn argon-btn-primary"
             onClick={() => setShowManualInput(!showManualInput)}
           >
-            🔑 Pegado Manual de Cookies
+            {showManualInput ? '✕ Cerrar Pegado' : '🔑 Pegado Manual de Cookies'}
           </button>
         </div>
       </header>
 
-      {/* Feedback banner */}
+      {/* Live Feedback Banner */}
       {feedback && (
         <div className={`argon-feedback-msg ${feedback.type}`}>
           {feedback.message}
         </div>
       )}
 
-      {/* Daemon Status Banner */}
+      {/* Playwright Daemon Status Telemetry Strip */}
       <div className={`argon-daemon-banner ${daemonStatus}`}>
-        <div className="daemon-pill">
-          <span className={`daemon-dot ${daemonStatus}`} />
-          <span>
-            {daemonStatus === 'online'
-              ? 'Playwright Daemon Activo'
-              : daemonStatus === 'idle'
-              ? 'Playwright Daemon en Suspensión (10 min idle)'
-              : 'Playwright Daemon Offline'}
-          </span>
+        <div className="daemon-left-block">
+          <div className="daemon-pill">
+            <span className={`daemon-dot ${daemonStatus}`} />
+            <span>
+              {daemonStatus === 'online'
+                ? 'Playwright Daemon Activo'
+                : daemonStatus === 'idle'
+                ? 'Playwright Daemon en Suspensión (10 min idle)'
+                : 'Playwright Daemon Offline'}
+            </span>
+          </div>
+
+          <div className="daemon-chips">
+            <span className="daemon-chip">
+              <span>Socket:</span>
+              <strong>Puerto 8319</strong>
+            </span>
+            {daemonStatus === 'online' && (
+              <>
+                <span className="daemon-chip">
+                  <span>RAM:</span>
+                  <strong>{statusData?.memory_mb ? `${statusData.memory_mb.toFixed(1)} MB` : 'Activo'}</strong>
+                </span>
+                <span className="daemon-chip">
+                  <span>Modo:</span>
+                  <strong style={{ color: statusData?.is_busy ? '#f59e0b' : '#34d399' }}>
+                    {statusData?.is_busy ? 'Procesando' : 'En espera'}
+                  </strong>
+                </span>
+              </>
+            )}
+            <span className="daemon-chip">
+              <span>Ahorro RAM:</span>
+              <strong>Auto-Sleep 10m</strong>
+            </span>
+          </div>
         </div>
 
-        <div className="daemon-info">
-          {daemonStatus === 'online' && (
-            <span>
-              Puerto 8319 • RAM: {statusData?.memory_mb ? `${statusData.memory_mb.toFixed(1)} MB` : 'Activo'} •{' '}
-              {statusData?.is_busy ? '⚠️ Ocupado procesando turno' : '✅ En espera'}
-            </span>
-          )}
-          {daemonStatus === 'idle' && (
-            <span>Puerto 8319 • Suspendido para ahorrar RAM. Se reactiva al primer requerimiento.</span>
-          )}
-          {daemonStatus === 'offline' && (
-            <span>
-              Companion no detectado en http://127.0.0.1:8319. Inicia <code>node gemini_daemon.js</code> para activar la ejecución web.
-            </span>
-          )}
-        </div>
+        {daemonStatus === 'offline' && (
+          <div className="daemon-offline-helper">
+            <span>Companion no detectado en http://127.0.0.1:8319. Inicia <code>node gemini_daemon.js</code> para activar la ejecución web.</span>
+            <button
+              type="button"
+              className="argon-btn argon-btn-outline"
+              style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem' }}
+              onClick={handleCopyDaemonCmd}
+            >
+              {copiedDaemonCmd ? '✓ ¡Copiado!' : '📋 Copiar comando'}
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* KPI Cards */}
+      {/* Bento Metric Tiles (4 KPIs) */}
       <div className="argon-kpi-grid">
-        <div className="argon-kpi-card">
-          <span className="kpi-label">Cuentas Argon Vinculadas</span>
+        <div className="argon-kpi-card accent-cyan">
+          <div className="kpi-header-row">
+            <span className="kpi-label">Cuentas Argon Vinculadas</span>
+            <span className="kpi-icon-watermark">🌐</span>
+          </div>
           <span className="kpi-value">{accounts.length}</span>
           <span className="kpi-tag">Google Gemini Web</span>
         </div>
 
-        <div className="argon-kpi-card">
-          <span className="kpi-label">En Rotación Activa</span>
-          <span className="kpi-value">{statusData?.total_active ?? 0}</span>
-          <span className="kpi-tag" style={{ color: '#34d399' }}>● Disponibles</span>
+        <div className="argon-kpi-card accent-emerald">
+          <div className="kpi-header-row">
+            <span className="kpi-label">En Rotación Activa</span>
+            <span className="kpi-icon-watermark">⚡</span>
+          </div>
+          <span className="kpi-value" style={{ color: '#34d399' }}>
+            {statusData?.total_active ?? 0}
+          </span>
+          <span className="kpi-tag" style={{ color: '#34d399' }}>
+            ● Disponibles en RAM
+          </span>
         </div>
 
-        <div className="argon-kpi-card">
-          <span className="kpi-label">En Cooldown / Límite</span>
-          <span className="kpi-value">{statusData?.in_cooldown ?? 0}</span>
-          <span className="kpi-tag" style={{ color: '#f59e0b' }}>Recuperación temporal</span>
+        <div className="argon-kpi-card accent-amber">
+          <div className="kpi-header-row">
+            <span className="kpi-label">En Cooldown / Límite</span>
+            <span className="kpi-icon-watermark">⏳</span>
+          </div>
+          <span className="kpi-value" style={{ color: '#fbbf24' }}>
+            {statusData?.in_cooldown ?? 0}
+          </span>
+          <span className="kpi-tag" style={{ color: '#f59e0b' }}>
+            Recuperación temporal
+          </span>
         </div>
 
-        <div className="argon-kpi-card">
-          <span className="kpi-label">Fallback Híbrido</span>
-          <span className="kpi-value" style={{ fontSize: '1.25rem', color: '#38bdf8' }}>Google Antigravity</span>
-          <span className="kpi-tag">Sin caídas 502/504</span>
+        <div className="argon-kpi-card accent-violet">
+          <div className="kpi-header-row">
+            <span className="kpi-label">Fallback Híbrido</span>
+            <span className="kpi-icon-watermark">🛡️</span>
+          </div>
+          <span className="kpi-value" style={{ fontSize: '1.45rem', color: '#c084fc' }}>
+            Google Antigravity
+          </span>
+          <span className="kpi-tag" style={{ color: '#a855f7' }}>
+            Sin caídas 502/504
+          </span>
         </div>
       </div>
 
-      {/* 1-Click Bookmarklet Synchronizer */}
+      {/* Hero Interactive 1-Click Bookmarklet Pod */}
       <div className="argon-sync-box">
         <div className="sync-box-header">
           <span className="sync-box-title">
-            <span>📌</span> Sincronizador 1-Click (Bookmarklet Universal)
+            <span>📌</span>
+            <span>Sincronizador 1-Click (Bookmarklet Universal)</span>
+            <span className="sync-badge-hero">Zero-Config</span>
           </span>
           <button
             type="button"
             className="argon-btn argon-btn-outline"
-            style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem' }}
+            style={{ fontSize: '0.78rem', padding: '0.4rem 0.85rem' }}
             onClick={handleCopyBookmarklet}
           >
-            📋 Copiar Código Bookmarklet
+            {copiedBookmarklet ? '✓ ¡Código Copiado!' : '📋 Copiar Código Bookmarklet'}
           </button>
         </div>
 
-        <p className="sync-box-desc">
-          Arrastra el botón azul directamente a la barra de marcadores de tu navegador. Cuando estés en{' '}
-          <strong>gemini.google.com</strong>, pulsa el marcador: enviará tus cookies de sesión automáticamente al
-          plugin sin necesidad de terminal ni de copiar archivos JSON a mano. Funciona en Linux, Windows y macOS.
-        </p>
+        {/* 3-Step Visual Pipeline */}
+        <div className="bookmarklet-pipeline">
+          <div className="pipeline-step">
+            <div className="step-num">1</div>
+            <div className="step-content">
+              <strong>Arrastra a Favoritos</strong>
+              <p>Arrastra el botón azul inferior a la barra de marcadores de tu navegador.</p>
+            </div>
+          </div>
+          <div className="pipeline-step">
+            <div className="step-num">2</div>
+            <div className="step-content">
+              <strong>Abre Gemini Web</strong>
+              <p>Visita <code>gemini.google.com</code> con tu cuenta Google personal iniciada.</p>
+            </div>
+          </div>
+          <div className="pipeline-step">
+            <div className="step-num">3</div>
+            <div className="step-content">
+              <strong>Pulsa el Marcador</strong>
+              <p>1 solo clic sincroniza las cookies al instante sin abrir terminales ni JSONs.</p>
+            </div>
+          </div>
+        </div>
 
-        <div className="bookmarklet-row">
+        <div className="bookmarklet-action-row">
           <a
             ref={bookmarkletRef}
             href="#bookmarklet-argon"
@@ -258,10 +367,12 @@ export default function ArgonGateway() {
               e.preventDefault();
             }}
           >
-            ⚡ Sync Argon a Auto Switcher
+            <span>⚡</span>
+            <span>Sync Argon a Auto Switcher</span>
           </a>
-          <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
-            ← Arrastra este botón a tus favoritos
+          <span className="drag-instruction">
+            <span>←</span>
+            <span>Arrastra este botón azul a tu barra de marcadores</span>
           </span>
         </div>
 
@@ -270,26 +381,26 @@ export default function ArgonGateway() {
           <form className="manual-input-panel" onSubmit={handleManualSync}>
             <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
               <div style={{ flex: '1', minWidth: '150px' }}>
-                <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.25rem' }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94a3b8', display: 'block', marginBottom: '0.35rem' }}>
                   Índice AuthUser (/u/0, /u/1, etc.)
                 </label>
                 <input
                   type="text"
                   className="cookie-textarea"
-                  style={{ minHeight: 'unset', height: '36px' }}
+                  style={{ minHeight: 'unset', height: '38px' }}
                   value={manualAuthUser}
                   onChange={(e) => setManualAuthUser(e.target.value)}
                   placeholder="0"
                 />
               </div>
-              <div style={{ flex: '2', minWidth: '200px' }}>
-                <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.25rem' }}>
+              <div style={{ flex: '2', minWidth: '220px' }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94a3b8', display: 'block', marginBottom: '0.35rem' }}>
                   Email de la Cuenta (Opcional)
                 </label>
                 <input
                   type="text"
                   className="cookie-textarea"
-                  style={{ minHeight: 'unset', height: '36px' }}
+                  style={{ minHeight: 'unset', height: '38px' }}
                   value={manualEmail}
                   onChange={(e) => setManualEmail(e.target.value)}
                   placeholder="usuario@gmail.com"
@@ -298,7 +409,7 @@ export default function ArgonGateway() {
             </div>
 
             <div>
-              <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.25rem' }}>
+              <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#94a3b8', display: 'block', marginBottom: '0.35rem' }}>
                 Cadena de Cookies o Cookie __Secure-1PSID
               </label>
               <textarea
@@ -310,7 +421,7 @@ export default function ArgonGateway() {
               />
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
               <button
                 type="button"
                 className="argon-btn argon-btn-outline"
@@ -331,12 +442,18 @@ export default function ArgonGateway() {
       </div>
 
       {/* Accounts List Grid */}
-      <h2 style={{ fontSize: '1.25rem', fontWeight: 600, color: '#e2e8f0', marginBottom: '1rem' }}>
-        Sesiones de Cuenta en Memoria RAM
-      </h2>
+      <div className="argon-accounts-header">
+        <h2 className="argon-accounts-title">
+          <span>🗂️</span>
+          <span>Sesiones de Cuenta en Memoria RAM</span>
+        </h2>
+        <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
+          {accounts.length} {accounts.length === 1 ? 'cuenta gestionada' : 'cuentas gestionadas'}
+        </span>
+      </div>
 
       {accounts.length === 0 ? (
-        <div style={{ padding: '2rem', textAlign: 'center', background: 'rgba(30, 41, 59, 0.4)', borderRadius: '12px', color: '#94a3b8' }}>
+        <div style={{ padding: '2.5rem', textAlign: 'center', background: 'rgba(20, 28, 48, 0.4)', borderRadius: '16px', border: '1px solid rgba(255, 255, 255, 0.08)', color: '#94a3b8' }}>
           No hay cuentas de Gemini Argon vinculadas actualmente. Usa el botón del Bookmarklet o el pegado manual de cookies para agregar una.
         </div>
       ) : (
@@ -344,7 +461,10 @@ export default function ArgonGateway() {
           {accounts.map((acc) => (
             <div key={acc.account_id} className="argon-account-card">
               <div className="acc-card-header">
-                <span className="acc-authuser-badge">u/{acc.authuser}</span>
+                <span className="acc-authuser-badge">
+                  <span>Google</span>
+                  <strong>u/{acc.authuser}</strong>
+                </span>
                 <span className={`acc-status-badge ${acc.status}`}>
                   {acc.status === 'ready'
                     ? '● Lista / Activa'
@@ -358,8 +478,10 @@ export default function ArgonGateway() {
                 </span>
               </div>
 
-              <div className="acc-email" title={acc.email}>
-                {acc.email}
+              <div className="acc-email-block">
+                <span className="acc-email" title={acc.email}>
+                  {formatEmail(acc.email)}
+                </span>
               </div>
 
               <div className="quota-bar-wrapper">
@@ -376,14 +498,14 @@ export default function ArgonGateway() {
               </div>
 
               {acc.status === 'cooldown' && acc.reset_at && (
-                <div style={{ fontSize: '0.75rem', color: '#f59e0b', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                <div className="acc-cooldown-chip">
                   <span>⏰ Restablece a las:</span>
                   <strong>{acc.reset_at}</strong>
                 </div>
               )}
 
               {acc.error_message && (
-                <div style={{ fontSize: '0.75rem', color: '#f87171' }}>
+                <div style={{ fontSize: '0.78rem', color: '#f87171', background: 'rgba(239, 68, 68, 0.1)', padding: '0.4rem 0.6rem', borderRadius: '6px' }}>
                   {acc.error_message}
                 </div>
               )}
@@ -397,25 +519,46 @@ export default function ArgonGateway() {
         </div>
       )}
 
-      {/* Synthetic Tool Calling Feature Badge */}
-      <div style={{ marginTop: '2.5rem', padding: '1rem 1.25rem', background: 'rgba(15, 23, 42, 0.6)', border: '1px solid rgba(148, 163, 184, 0.15)', borderRadius: '10px', fontSize: '0.8rem', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-        <span style={{ fontSize: '1.25rem' }}>🔧</span>
-        <div>
-          <strong style={{ color: '#cbd5e1' }}>Normalización Sintética de Herramientas Activa:</strong>{' '}
-          Los bloques de código ReAct (<code>```tool_call```</code>) producidos por Gemini Web son interceptados dentro del pipeline SSE y transformados al vuelo en eventos nativos de OpenAI (<code>tool_calls</code>).
+      {/* Synthetic Tool Calling Feature Architecture Banner */}
+      <div className="argon-tool-pipeline-card">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+          <span style={{ fontSize: '1.5rem' }}>🔧</span>
+          <div>
+            <strong style={{ color: '#ffffff', fontSize: '0.92rem', display: 'block', marginBottom: '0.2rem' }}>
+              Normalización Sintética de Herramientas Activa:
+            </strong>
+            <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
+              Los bloques de código ReAct generados por Gemini Web son interceptados dentro del pipeline SSE y transformados al vuelo en eventos nativos de OpenAI (<code>tool_calls</code>).
+            </span>
+          </div>
+        </div>
+
+        <div className="pipeline-diagram">
+          <span className="pipeline-node">🌐 Gemini Web DOM</span>
+          <span className="pipeline-arrow">➔</span>
+          <span className="pipeline-node">⚡ SSE Heartbeat</span>
+          <span className="pipeline-arrow">➔</span>
+          <span className="pipeline-node" style={{ borderColor: 'rgba(56, 189, 248, 0.5)', color: '#38bdf8' }}>
+            🔧 ReAct Parser
+          </span>
+          <span className="pipeline-arrow">➔</span>
+          <span className="pipeline-node" style={{ borderColor: 'rgba(16, 185, 129, 0.5)', color: '#34d399' }}>
+            📦 OpenAI Delta
+          </span>
         </div>
       </div>
 
       {/* FAQ & Clarity Section: «Afina esto.» */}
       <section className="argon-faq-section" data-testid="argon-faq-section">
         <h2 className="argon-faq-title">
-          <span>💡</span> Conceptos Clave & Preguntas Frecuentes
+          <span>💡</span>
+          <span>Conceptos Clave & Preguntas Frecuentes</span>
         </h2>
 
         <div className="argon-faq-grid">
           <div className="argon-faq-card">
             <div className="faq-card-header">
-              <span>🌐</span>
+              <span className="faq-icon-pill">🌐</span>
               <span>Gemini Web vs Flota Antigravity</span>
             </div>
             <p className="faq-card-body">
@@ -425,7 +568,7 @@ export default function ArgonGateway() {
 
           <div className="argon-faq-card">
             <div className="faq-card-header">
-              <span>⏱️</span>
+              <span className="faq-icon-pill">⏱️</span>
               <span>Latencia Honesta (15s – 60s)</span>
             </div>
             <p className="faq-card-body">
@@ -435,7 +578,7 @@ export default function ArgonGateway() {
 
           <div className="argon-faq-card">
             <div className="faq-card-header">
-              <span>🔄</span>
+              <span className="faq-icon-pill">🔄</span>
               <span>Ciclo de Vida de Cookies (__Secure-1PSIDTS)</span>
             </div>
             <p className="faq-card-body">
