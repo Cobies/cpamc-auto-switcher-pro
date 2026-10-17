@@ -53,6 +53,37 @@ describe('App Host Component Integration', () => {
     expect(await screen.findByText('agy')).toBeTruthy();
   });
 
+  it('automatically authenticates via hardware license handshake when key is not cached', async () => {
+    vi.spyOn(managementClient, 'getManagementKey').mockReturnValue('');
+    const origFetch = global.fetch;
+    global.fetch = vi.fn().mockImplementation(async (url) => {
+      if (typeof url === 'string' && url.includes('/license/session')) {
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true,
+            authorized: true,
+            status: 'trial',
+            management_key: 'handshake-key-789',
+          }),
+        };
+      }
+      return origFetch ? origFetch(url) : { ok: false };
+    });
+
+    vi.spyOn(managementClient, 'loadAuthFilesWithPrefixes').mockResolvedValue([
+      { name: 'auto-account.json', prefix: 'agy_auto' },
+    ]);
+
+    render(<App />);
+
+    // Verifica que entra directo sin pedir clave gracias al handshake de hardware
+    expect(await screen.findByText('agy_auto')).toBeTruthy();
+    expect(screen.queryByTestId('status-unauthenticated')).toBeNull();
+
+    global.fetch = origFetch;
+  });
+
   it('switches to offline demo graph when user clicks View Offline Demo', async () => {
     vi.spyOn(managementClient, 'getManagementKey').mockReturnValue('');
 

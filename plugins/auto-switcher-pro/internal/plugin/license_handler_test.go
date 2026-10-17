@@ -58,4 +58,34 @@ func TestLicenseHTTP_StatusAndValidation(t *testing.T) {
 			t.Errorf("expected 400 for bad key, got %d", resp.StatusCode)
 		}
 	})
+
+	t.Run("GET /auto-switcher-pro/license/session provides hardware authorized handshake", func(t *testing.T) {
+		req := ManagementRequestPayload{
+			Method: http.MethodGet,
+			Path:   "/auto-switcher-pro/license/session",
+		}
+		rawReq, _ := json.Marshal(req)
+		out, err := HandleManagementHTTP(rawReq)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		var env Envelope
+		_ = json.Unmarshal(out, &env)
+		var resp ManagementResponsePayload
+		_ = json.Unmarshal(env.Result, &resp)
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("expected 200, got %d", resp.StatusCode)
+		}
+
+		bodyBytes, _ := base64.StdEncoding.DecodeString(resp.Body)
+		var res map[string]interface{}
+		_ = json.Unmarshal(bodyBytes, &res)
+		if res["authorized"] != true {
+			t.Errorf("expected authorized=true for active/trial machine")
+		}
+		if res["machine_id"] == nil || res["machine_id"] == "" {
+			t.Errorf("expected machine_id in session payload")
+		}
+	})
 }

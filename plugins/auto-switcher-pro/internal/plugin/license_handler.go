@@ -3,6 +3,9 @@ package plugin
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"os/user"
+	"path/filepath"
 	"strings"
 
 	"auto-switcher-pro/internal/license"
@@ -10,6 +13,38 @@ import (
 
 func isLicensePath(path string) bool {
 	return strings.Contains(path, "/auto-switcher-pro/license/")
+}
+
+// getLocalManagementKey resolves the local management key from env or disk storage.
+func getLocalManagementKey() string {
+	// 1. Environment variables
+	if k := os.Getenv("CLIPROXY_MANAGEMENT_KEY"); strings.TrimSpace(k) != "" {
+		return strings.TrimSpace(k)
+	}
+	if k := os.Getenv("CPAMC_MANAGEMENT_KEY"); strings.TrimSpace(k) != "" {
+		return strings.TrimSpace(k)
+	}
+
+	// 2. ~/.cliproxy_management_key
+	if u, err := user.Current(); err == nil && u.HomeDir != "" {
+		p := filepath.Join(u.HomeDir, ".cliproxy_management_key")
+		if data, err := os.ReadFile(p); err == nil && len(strings.TrimSpace(string(data))) > 0 {
+			return strings.TrimSpace(string(data))
+		}
+	}
+
+	// 3. Common fallback locations
+	for _, p := range []string{
+		"/root/.cliproxy_management_key",
+		".cliproxy_management_key",
+		"/tmp/.cliproxy_management_key",
+	} {
+		if data, err := os.ReadFile(p); err == nil && len(strings.TrimSpace(string(data))) > 0 {
+			return strings.TrimSpace(string(data))
+		}
+	}
+
+	return ""
 }
 
 func handleLicenseHTTP(req ManagementRequestPayload) ([]byte, error) {
@@ -21,6 +56,37 @@ func handleLicenseHTTP(req ManagementRequestPayload) ([]byte, error) {
 	cleanPath := strings.Split(req.Path, "?")[0]
 
 	switch {
+	case strings.HasSuffix(cleanPath, "/session") || strings.HasSuffix(cleanPath, "/handshake"):
+		if method != http.MethodGet {
+			return jsonManagementResponse(http.StatusMethodNotAllowed, map[string]string{
+				"error":   "method_not_allowed",
+				"message": "GET required",
+			})
+		}
+
+		status := license.GetLicenseStatus()
+		if status.Status != "trial" && status.Status != "active" {
+			return jsonManagementResponse(http.StatusOK, map[string]interface{}{
+				"ok":          false,
+				"authorized":  false,
+				"status":      status.Status,
+				"machine_id":  status.MachineID,
+				"mac_address": status.MACAddress,
+				"message":     "La licencia de esta máquina ha expirado o no es válida.",
+			})
+		}
+
+		key := getLocalManagementKey()
+		return jsonManagementResponse(http.StatusOK, map[string]interface{}{
+			"ok":             true,
+			"authorized":     true,
+			"status":         status.Status,
+			"machine_id":     status.MachineID,
+			"mac_address":    status.MACAddress,
+			"days_remaining": status.DaysRemaining,
+			"management_key": key,
+		})
+
 	case strings.HasSuffix(cleanPath, "/status"):
 		if method != http.MethodGet {
 			return jsonManagementResponse(http.StatusMethodNotAllowed, map[string]string{

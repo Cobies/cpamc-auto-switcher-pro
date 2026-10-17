@@ -151,7 +151,34 @@ export default function App() {
   }, []);
 
   const loadProfiles = useCallback(async () => {
-    const key = getManagementKey();
+    let key = getManagementKey();
+    if (!key) {
+      // Auto-Handshake transparente por Licencia y Hardware (Trial o Activa)
+      try {
+        let sessionRes = await fetch('/v0/management/auto-switcher-pro/license/session', {
+          signal: AbortSignal.timeout(3000),
+        }).catch(() => null);
+
+        if (!sessionRes || !sessionRes.ok) {
+          sessionRes = await fetch('/auto-switcher-pro/license/session', {
+            signal: AbortSignal.timeout(3000),
+          }).catch(() => null);
+        }
+
+        if (sessionRes && sessionRes.ok) {
+          const sessionData = await sessionRes.json();
+          if (sessionData?.authorized && sessionData?.management_key) {
+            key = sessionData.management_key;
+            try {
+              localStorage.setItem('management_key', key);
+            } catch {}
+          }
+        }
+      } catch {
+        // Fall through
+      }
+    }
+
     if (!key) {
       setStatus('unauthenticated');
       return;

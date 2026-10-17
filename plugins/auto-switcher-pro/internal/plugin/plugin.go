@@ -129,6 +129,11 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 				},
 				{
 					"Method":      http.MethodGet,
+					"Path":        "/auto-switcher-pro/license/session",
+					"Description": "Proporciona sesión autorizada por hardware e identidad de máquina licenciada",
+				},
+				{
+					"Method":      http.MethodGet,
 					"Path":        "/auto-switcher-pro/report",
 					"Description": "Genera un paquete de diagnóstico y telemetría para soporte técnico",
 				},
