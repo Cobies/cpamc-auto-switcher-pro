@@ -204,7 +204,7 @@ let globalQueue: Promise<void> = Promise.resolve();
 let lastForcedRunTime = 0;
 const FORCED_DEBOUNCE_MS = 3_000;
 
-function notify(ctx: any, message: string, level: "info" | "warning" = "info"): void {
+function notify(ctx: any, message: string, level: "info" | "warning" | "error" = "info"): void {
 	try {
 		ctx?.ui?.notify?.(message, level);
 	} catch {

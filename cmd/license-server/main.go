@@ -33,6 +33,7 @@ type LicenseClaims struct {
 
 type MachineRecord struct {
 	MachineID      string   `json:"machine_id"`
+	MACAddress     string   `json:"mac_address,omitempty"`
 	ClientName     string   `json:"client_name"`
 	Email          string   `json:"email,omitempty"`
 	FirstSeenAt    int64    `json:"first_seen_at"`
@@ -71,15 +72,33 @@ type ResetPIN struct {
 	ExpiresAt int64
 }
 
+type SupportReportRecord struct {
+	ID          string                   `json:"id"`
+	Timestamp   int64                    `json:"timestamp"`
+	MachineID   string                   `json:"machine_id"`
+	MACAddress  string                   `json:"mac_address,omitempty"`
+	ClientName  string                   `json:"client_name"`
+	Version     string                   `json:"version"`
+	OS          string                   `json:"os"`
+	Summary     string                   `json:"summary,omitempty"`
+	RecentLogs  []map[string]interface{} `json:"recent_logs,omitempty"`
+	SystemState map[string]interface{}   `json:"system_state,omitempty"`
+	IP          string                   `json:"ip,omitempty"`
+	CountryCode string                   `json:"country_code,omitempty"`
+	CountryName string                   `json:"country_name,omitempty"`
+}
+
 type StoreData struct {
-	Machines []*MachineRecord  `json:"machines"`
-	Accounts []*LicenseAccount `json:"accounts,omitempty"`
+	Machines []*MachineRecord        `json:"machines"`
+	Accounts []*LicenseAccount       `json:"accounts,omitempty"`
+	Reports  []*SupportReportRecord  `json:"reports,omitempty"`
 }
 
 type Store struct {
 	filePath string
 	machines map[string]*MachineRecord
 	accounts map[string]*LicenseAccount // email -> Account
+	reports  []*SupportReportRecord     // Support Diagnostic Reports
 	pins     map[string]*ResetPIN       // email -> pending PIN
 	mu       sync.Mutex
 }
@@ -92,18 +111,20 @@ func initStore(filePath string) (*Store, error) {
 		filePath: filePath,
 		machines: make(map[string]*MachineRecord),
 		accounts: make(map[string]*LicenseAccount),
+		reports:  make([]*SupportReportRecord, 0),
 		pins:     make(map[string]*ResetPIN),
 	}
 	data, err := os.ReadFile(filePath)
 	if err == nil && len(data) > 0 {
 		var sd StoreData
-		if err := json.Unmarshal(data, &sd); err == nil && (len(sd.Machines) > 0 || len(sd.Accounts) > 0) {
+		if err := json.Unmarshal(data, &sd); err == nil && (len(sd.Machines) > 0 || len(sd.Accounts) > 0 || len(sd.Reports) > 0) {
 			for _, m := range sd.Machines {
 				s.machines[m.MachineID] = m
 			}
 			for _, a := range sd.Accounts {
 				s.accounts[strings.ToLower(a.Email)] = a
 			}
+			s.reports = sd.Reports
 		} else {
 			// Backward compatibility: list of []*MachineRecord
 			var list []*MachineRecord
@@ -113,14 +134,93 @@ func initStore(filePath string) (*Store, error) {
 				}
 			}
 		}
+		s.cleanDuplicates()
 	}
 	return s, nil
 }
 
+// cleanDuplicates identifies and merges duplicate records by MAC address or ClientName + IP.
+func (s *Store) cleanDuplicates() {
+	// 1. Unificar por MACAddress física si está disponible
+	macMap := make(map[string]*MachineRecord)
+	for _, m := range s.machines {
+		mac := strings.ToLower(strings.TrimSpace(m.MACAddress))
+		if mac == "" {
+			continue
+		}
+		if existing, exists := macMap[mac]; exists {
+			var winner, loser *MachineRecord
+			if existing.Status == "active" && m.Status != "active" {
+				winner, loser = existing, m
+			} else if m.Status == "active" && existing.Status != "active" {
+				winner, loser = m, existing
+			} else if m.LastSeenAt >= existing.LastSeenAt {
+				winner, loser = m, existing
+			} else {
+				winner, loser = existing, m
+			}
+			if loser.Rotations > winner.Rotations {
+				winner.Rotations = loser.Rotations
+			}
+			if loser.TotalFailovers > winner.TotalFailovers {
+				winner.TotalFailovers = loser.TotalFailovers
+			}
+			if len(winner.ActivePools) == 0 {
+				winner.ActivePools = loser.ActivePools
+			}
+			delete(s.machines, loser.MachineID)
+			macMap[mac] = winner
+		} else {
+			macMap[mac] = m
+		}
+	}
+
+	// 2. Unificar por (ClientName + IP) para instalaciones en Docker o recreadas
+	clientIPMap := make(map[string]*MachineRecord)
+	for _, m := range s.machines {
+		cn := strings.TrimSpace(m.ClientName)
+		ip := strings.TrimSpace(m.IP)
+		if cn == "" || cn == "Nuevo Usuario" || ip == "" || ip == "127.0.0.1" {
+			continue
+		}
+		key := cn + "|" + ip
+		if existing, exists := clientIPMap[key]; exists {
+			var winner, loser *MachineRecord
+			if existing.Status == "active" && m.Status != "active" {
+				winner, loser = existing, m
+			} else if m.Status == "active" && existing.Status != "active" {
+				winner, loser = m, existing
+			} else if m.LastSeenAt >= existing.LastSeenAt {
+				winner, loser = m, existing
+			} else {
+				winner, loser = existing, m
+			}
+			if loser.Rotations > winner.Rotations {
+				winner.Rotations = loser.Rotations
+			}
+			if loser.TotalFailovers > winner.TotalFailovers {
+				winner.TotalFailovers = loser.TotalFailovers
+			}
+			if winner.MACAddress == "" && loser.MACAddress != "" {
+				winner.MACAddress = loser.MACAddress
+			}
+			if len(winner.ActivePools) == 0 {
+				winner.ActivePools = loser.ActivePools
+			}
+			delete(s.machines, loser.MachineID)
+			clientIPMap[key] = winner
+		} else {
+			clientIPMap[key] = m
+		}
+	}
+}
+
 func (s *Store) save() error {
+	s.cleanDuplicates()
 	sd := StoreData{
 		Machines: make([]*MachineRecord, 0, len(s.machines)),
 		Accounts: make([]*LicenseAccount, 0, len(s.accounts)),
+		Reports:  s.reports,
 	}
 	for _, m := range s.machines {
 		sd.Machines = append(sd.Machines, m)
@@ -216,6 +316,7 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		MachineID      string   `json:"machine_id"`
+		MACAddress     string   `json:"mac_address"`
 		ClientName     string   `json:"client_name"`
 		Version        string   `json:"version"`
 		OS             string   `json:"os"`
@@ -229,16 +330,50 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mID := strings.TrimSpace(req.MachineID)
+	mac := strings.ToLower(strings.TrimSpace(req.MACAddress))
 	now := time.Now().Unix()
 	clientIP := getClientIP(r)
+	clientName := strings.TrimSpace(req.ClientName)
+	if clientName == "" {
+		clientName = "Nuevo Usuario"
+	}
 
 	s.store.mu.Lock()
 	defer s.store.mu.Unlock()
 
 	rec, exists := s.store.machines[mID]
-	clientName := strings.TrimSpace(req.ClientName)
-	if clientName == "" {
-		clientName = "Nuevo Usuario"
+
+	// Deduplicación proactiva: buscar si ya existe la misma máquina con otro MachineID
+	if !exists {
+		// 1. Coincidencia por MACAddress física
+		if mac != "" {
+			for oldID, oldRec := range s.store.machines {
+				if strings.ToLower(strings.TrimSpace(oldRec.MACAddress)) == mac {
+					rec = oldRec
+					exists = true
+					delete(s.store.machines, oldID)
+					rec.MachineID = mID
+					s.store.machines[mID] = rec
+					log.Printf("⚡ [DEDUP] Máquina unificada por MAC %s: %s -> %s", mac, oldID, mID)
+					break
+				}
+			}
+		}
+
+		// 2. Coincidencia por ClientName + IP (para entornos Docker / WSL con MAC virtual)
+		if !exists && clientName != "Nuevo Usuario" && clientIP != "" && clientIP != "127.0.0.1" {
+			for oldID, oldRec := range s.store.machines {
+				if oldRec.ClientName == clientName && oldRec.IP == clientIP {
+					rec = oldRec
+					exists = true
+					delete(s.store.machines, oldID)
+					rec.MachineID = mID
+					s.store.machines[mID] = rec
+					log.Printf("⚡ [DEDUP] Máquina unificada por Client/IP (%s @ %s): %s -> %s", clientName, clientIP, oldID, mID)
+					break
+				}
+			}
+		}
 	}
 
 	if !exists {
@@ -246,6 +381,7 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 		cc, cn := resolveGeo(clientIP)
 		rec = &MachineRecord{
 			MachineID:      mID,
+			MACAddress:     mac,
 			ClientName:     clientName,
 			FirstSeenAt:    now,
 			LastSeenAt:     now,
@@ -266,6 +402,9 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 		_ = s.store.save()
 	} else {
 		rec.LastSeenAt = now
+		if mac != "" {
+			rec.MACAddress = mac
+		}
 		if (rec.ClientName == "" || rec.ClientName == "Nuevo Usuario") && clientName != "Nuevo Usuario" {
 			rec.ClientName = clientName
 		}
@@ -483,6 +622,70 @@ func (s *Server) handleAdminRevoke(w http.ResponseWriter, r *http.Request) {
 		"ok":         true,
 		"message":    "Licencia revocada inmediatamente",
 		"machine_id": req.MachineID,
+	})
+}
+
+// Client: Subir reporte de diagnóstico y telemetría de soporte (One-Click Telemetry Share)
+func (s *Server) handleUploadReport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req SupportReportRecord
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid report payload", http.StatusBadRequest)
+		return
+	}
+
+	clientIP := getClientIP(r)
+	cc, cn := resolveGeo(clientIP)
+	req.IP = clientIP
+	req.CountryCode = cc
+	req.CountryName = cn
+	if req.Timestamp == 0 {
+		req.Timestamp = time.Now().Unix()
+	}
+	if req.ID == "" {
+		req.ID = fmt.Sprintf("REP-%d", time.Now().UnixNano()%1000000)
+	}
+
+	s.store.mu.Lock()
+	defer s.store.mu.Unlock()
+
+	if req.MACAddress == "" {
+		if m, ok := s.store.machines[req.MachineID]; ok && m.MACAddress != "" {
+			req.MACAddress = m.MACAddress
+		}
+	}
+
+	// Mantener los últimos 50 reportes de soporte
+	s.store.reports = append([]*SupportReportRecord{&req}, s.store.reports...)
+	if len(s.store.reports) > 50 {
+		s.store.reports = s.store.reports[:50]
+	}
+	_ = s.store.save()
+
+	log.Printf("📩 [Soporte] Nuevo reporte recibido: ID=%s de %s (%s)", req.ID, req.ClientName, req.MachineID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":        true,
+		"report_id": req.ID,
+		"message":   "Reporte recibido por el equipo de soporte de Wilox con éxito.",
+	})
+}
+
+// Admin: Listar reportes de diagnóstico
+func (s *Server) handleAdminListReports(w http.ResponseWriter, r *http.Request) {
+	s.store.mu.Lock()
+	defer s.store.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":      true,
+		"reports": s.store.reports,
+		"count":   len(s.store.reports),
 	})
 }
 
@@ -738,11 +941,13 @@ func main() {
 
 	// Client endpoints
 	mux.HandleFunc("/api/v1/license/ping", srv.handlePing)
+	mux.HandleFunc("/api/v1/license/report", srv.handleUploadReport)
 	mux.HandleFunc("/api/v1/license/request-reset", srv.handleRequestReset)
 	mux.HandleFunc("/api/v1/license/verify-reset", srv.handleVerifyReset)
 
 	// Admin API
 	mux.HandleFunc("/api/v1/admin/licenses", srv.requireAdmin(srv.handleAdminList))
+	mux.HandleFunc("/api/v1/admin/reports", srv.requireAdmin(srv.handleAdminListReports))
 	mux.HandleFunc("/api/v1/admin/approve", srv.requireAdmin(srv.handleAdminApprove))
 	mux.HandleFunc("/api/v1/admin/revoke", srv.requireAdmin(srv.handleAdminRevoke))
 	mux.HandleFunc("/api/v1/admin/delete", srv.requireAdmin(srv.handleAdminDelete))

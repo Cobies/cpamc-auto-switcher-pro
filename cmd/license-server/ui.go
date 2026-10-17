@@ -595,11 +595,27 @@ func (s *Server) handleDashboardUI(w http.ResponseWriter, r *http.Request) {
         <button class="tab-btn" onclick="setFilter('active', this)">Pro (<span id="count-pro">0</span>)</button>
         <button class="tab-btn" onclick="setFilter('trial', this)">Trial (<span id="count-trial">0</span>)</button>
         <button class="tab-btn" onclick="setFilter('revoked', this)">Revocados (<span id="count-revoked">0</span>)</button>
+        <button class="tab-btn" style="border-color:#38bdf8; color:#38bdf8;" onclick="toggleReportsView(this)">📩 Tickets & Diagnósticos (<span id="count-reports">0</span>)</button>
       </div>
 
       <div class="search-box">
         <span class="search-icon">🔍</span>
         <input type="text" id="searchInput" class="search-input" placeholder="Buscar Machine ID, cliente, país..." oninput="renderTable()">
+      </div>
+    </div>
+
+    <!-- Sección Tickets / Reportes de Soporte -->
+    <div id="reportsContainer" style="display:none; margin-bottom:28px;">
+      <div style="background:var(--card-bg); border:1px solid rgba(56,189,248,0.3); border-radius:14px; padding:20px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+          <h3 style="margin:0; font-size:16px; color:#38bdf8; display:flex; align-items:center; gap:8px;">
+            <span>📩</span> Bandeja de Diagnósticos y Soporte en Vivo
+          </h3>
+          <span style="font-size:12px; color:var(--text-muted);">Eventos anonimizados recibidos desde /switcher report</span>
+        </div>
+        <div id="reportsList" style="display:flex; flex-direction:column; gap:12px;">
+          <div style="text-align:center; padding:20px; color:var(--text-muted);">No hay reportes de soporte recibidos aún.</div>
+        </div>
       </div>
     </div>
 
@@ -609,6 +625,7 @@ func (s *Server) handleDashboardUI(w http.ResponseWriter, r *http.Request) {
         <thead>
           <tr>
             <th>Machine ID</th>
+            <th>MAC Address</th>
             <th>Cliente</th>
             <th>País</th>
             <th>Estado</th>
@@ -621,7 +638,7 @@ func (s *Server) handleDashboardUI(w http.ResponseWriter, r *http.Request) {
           </tr>
         </thead>
         <tbody id="tableBody">
-          <tr><td colspan="10" style="text-align:center; padding:30px; color:var(--text-muted);">Cargando telemetría...</td></tr>
+          <tr><td colspan="11" style="text-align:center; padding:30px; color:var(--text-muted);">Cargando telemetría...</td></tr>
         </tbody>
       </table>
     </div>
@@ -675,7 +692,9 @@ func (s *Server) handleDashboardUI(w http.ResponseWriter, r *http.Request) {
   <script>
     let currentToken = '';
     let allMachines = [];
+    let allReports = [];
     let currentFilter = 'all';
+    let showingReports = false;
 
     // Recuperar token recordado al cargar la página
     function initAuth() {
@@ -765,6 +784,7 @@ func (s *Server) handleDashboardUI(w http.ResponseWriter, r *http.Request) {
         allMachines = data.machines || [];
         updateKPIs();
         renderTable();
+        fetchReports();
       } catch (e) {
         if (isLoginAttempt) {
           const errBox = document.getElementById('loginError');
@@ -829,15 +849,16 @@ func (s *Server) handleDashboardUI(w http.ResponseWriter, r *http.Request) {
         if (currentFilter !== 'all' && m.status !== currentFilter) return false;
         if (query) {
           const matchId = (m.machine_id || '').toLowerCase().includes(query);
+          const matchMac = (m.mac_address || '').toLowerCase().includes(query);
           const matchClient = (m.client_name || '').toLowerCase().includes(query);
           const matchCountry = (m.country_name || '').toLowerCase().includes(query) || (m.country_code || '').toLowerCase().includes(query);
-          return matchId || matchClient || matchCountry;
+          return matchId || matchMac || matchClient || matchCountry;
         }
         return true;
       });
 
       if (filtered.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding:30px; color:var(--text-muted);">No se encontraron máquinas con este filtro.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11" style="text-align:center; padding:30px; color:var(--text-muted);">No se encontraron máquinas con este filtro.</td></tr>';
         return;
       }
 
@@ -877,6 +898,7 @@ func (s *Server) handleDashboardUI(w http.ResponseWriter, r *http.Request) {
 
         tr.innerHTML = 
           '<td><code style="font-family:var(--font-mono); color:var(--accent); font-weight:700;">' + m.machine_id + '</code></td>' +
+          '<td>' + (m.mac_address ? '<code style="font-family:var(--font-mono); color:#38bdf8; font-size:11.5px; background:rgba(56,189,248,0.1); padding:2px 6px; border-radius:4px; border:1px solid rgba(56,189,248,0.2);">' + m.mac_address + '</code>' : '<span style="color:var(--text-muted); font-size:11px;">-</span>') + '</td>' +
           '<td><strong>' + (m.client_name || 'Nuevo Usuario') + '</strong></td>' +
           '<td><span class="country-flag"><span>' + flag + '</span> ' + countryLabel + '</span></td>' +
           '<td><span class="badge badge-' + m.status + '">' + m.status.toUpperCase() + '</span></td>' +
@@ -956,6 +978,66 @@ func (s *Server) handleDashboardUI(w http.ResponseWriter, r *http.Request) {
         body: JSON.stringify({ machine_id: mID })
       });
       fetchMachines();
+    }
+
+    async function fetchReports() {
+      if (!currentToken) return;
+      try {
+        const res = await fetch('/api/v1/admin/reports', {
+          headers: { 'X-Admin-Token': currentToken }
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        allReports = data.reports || [];
+        document.getElementById('count-reports').innerText = allReports.length;
+        renderReports();
+      } catch (e) {}
+    }
+
+    function toggleReportsView(el) {
+      showingReports = !showingReports;
+      const container = document.getElementById('reportsContainer');
+      container.style.display = showingReports ? 'block' : 'none';
+      el.style.background = showingReports ? 'rgba(56, 189, 248, 0.2)' : 'transparent';
+      if (showingReports) fetchReports();
+    }
+
+    function renderReports() {
+      const list = document.getElementById('reportsList');
+      if (allReports.length === 0) {
+        list.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-muted);">No hay reportes de soporte recibidos aún.</div>';
+        return;
+      }
+      let html = '';
+      for (let i = 0; i < allReports.length; i++) {
+        const r = allReports[i];
+        const dateStr = new Date(r.timestamp * 1000).toLocaleString();
+        const logs = r.recent_logs || [];
+        let logsHtml = '';
+        for (let j = 0; j < logs.length; j++) {
+          const l = logs[j];
+          const badge = l.is_failover ? '<span style="color:#f87171; font-weight:700;">[FAILOVER]</span>' : '<span style="color:#34d399;">[OK]</span>';
+          logsHtml += '<div style="font-family:monospace; font-size:11px; padding:3px 0; border-bottom:1px solid rgba(255,255,255,0.05); color:#94a3b8;">' +
+            badge + ' Pool: <strong style="color:#f1f5f9;">' + (l.pool_id || l.pool_prefix) + '</strong> | Cuenta: ' + l.account_email + ' | Modelo: ' + l.target_model + ' (HTTP ' + (l.status_code || 200) + ')</div>';
+        }
+
+        html += '<div style="background:rgba(15, 23, 42, 0.6); border:1px solid rgba(56, 189, 248, 0.2); border-radius:10px; padding:14px; margin-bottom:10px;">' +
+          '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">' +
+            '<div><span style="font-family:monospace; font-weight:800; color:#38bdf8; background:rgba(56, 189, 248, 0.15); padding:2px 8px; border-radius:4px;">' + r.id + '</span>' +
+            '<strong style="margin-left:8px; color:#fff;">' + r.client_name + '</strong>' +
+            '<span style="color:var(--text-muted); font-size:12px; margin-left:6px;">(' + r.machine_id + (r.mac_address ? ' · <code style="color:#38bdf8;">' + r.mac_address + '</code>' : '') + ')</span></div>' +
+            '<span style="font-size:11px; color:var(--text-muted);">' + dateStr + '</span>' +
+          '</div>' +
+          (r.summary ? '<div style="font-size:13px; color:#facc15; margin-bottom:8px;">💬 <em>"' + r.summary + '"</em></div>' : '') +
+          '<div style="font-size:11px; color:var(--text-muted); margin-bottom:6px;">' +
+            'Versión: ' + r.version + ' | SO: ' + r.os + ' | Ubicación: ' + (r.country_name || 'Desconocido') + ' (' + (r.ip || '-') + ') | Últimos eventos: ' + logs.length +
+          '</div>' +
+          '<div style="background:#090d16; border-radius:6px; padding:8px; max-height:140px; overflow-y:auto;">' +
+            (logsHtml || '<div style="color:#64748b; font-size:11px;">Sin eventos de rotación registrados</div>') +
+          '</div>' +
+        '</div>';
+      }
+      list.innerHTML = html;
     }
 
     initAuth();

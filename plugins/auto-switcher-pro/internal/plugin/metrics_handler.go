@@ -5,18 +5,24 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"auto-switcher-pro/internal/analytics"
+	"auto-switcher-pro/internal/license"
 )
 
 const metricsRoutePath = "/auto-switcher-pro/metrics"
 
 func isMetricsPath(path string) bool {
-	return strings.Contains(path, "/auto-switcher-pro/metrics")
+	return strings.Contains(path, "/auto-switcher-pro/metrics") || strings.Contains(path, "/auto-switcher-pro/report")
 }
 
 func handleMetricsHTTP(req ManagementRequestPayload) ([]byte, error) {
 	method := strings.ToUpper(strings.TrimSpace(req.Method))
+	if strings.Contains(req.Path, "/auto-switcher-pro/report") {
+		return handleGenerateSupportReportHTTP(req)
+	}
+
 	if method != http.MethodGet && method != http.MethodHead {
 		return jsonManagementResponse(http.StatusMethodNotAllowed, map[string]string{
 			"error":   "method_not_allowed",
@@ -134,4 +140,45 @@ func enrichMetricsWithRegistry(snapshot *analytics.MetricsSnapshot, reg *PoolReg
 			}
 		}
 	}
+}
+
+// handleGenerateSupportReportHTTP builds a diagnostic package and dispatches it to the VPS License Hub.
+func handleGenerateSupportReportHTTP(req ManagementRequestPayload) ([]byte, error) {
+	events, _ := analytics.QueryRecentEvents(15)
+
+	// Anonimizar correos en los logs antes de enviar
+	anonymizedLogs := make([]analytics.RotationEvent, 0, len(events))
+	for _, e := range events {
+		masked := e.AccountEmail
+		if atIdx := strings.Index(masked, "@"); atIdx > 0 {
+			user := masked[:atIdx]
+			domain := masked[atIdx:]
+			if len(user) > 3 {
+				masked = user[:3] + "***" + domain
+			} else {
+				masked = "***" + domain
+			}
+		}
+		e.AccountEmail = masked
+		anonymizedLogs = append(anonymizedLogs, e)
+	}
+
+	report := analytics.SupportReport{
+		ID:         fmt.Sprintf("REP-%d", time.Now().UnixNano()%1000000),
+		Timestamp:  time.Now().Unix(),
+		MachineID:  license.GetMachineID(),
+		MACAddress: license.GetMACAddress(),
+		ClientName: license.GetSystemIdentity(),
+		Version:    "1.1.0",
+		OS:         "linux",
+		RecentLogs: anonymizedLogs,
+		SystemState: map[string]interface{}{
+			"pools_count": len(activeRegistry().ListPools()),
+		},
+	}
+
+	return jsonManagementResponse(http.StatusOK, map[string]interface{}{
+		"ok":     true,
+		"report": report,
+	})
 }

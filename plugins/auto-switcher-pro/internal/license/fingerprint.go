@@ -25,31 +25,27 @@ func GetMachineID() string {
 
 	var parts []string
 
-	// 1. /etc/machine-id or /var/lib/dbus/machine-id
+	// 1. Hardware MAC addresses (filtrando interfaces virtuales como veth, docker, br-, dummy)
+	mac := GetMACAddress()
+	if mac != "" {
+		parts = append(parts, "mac:"+mac)
+	}
+
+	// 2. /etc/machine-id or /var/lib/dbus/machine-id (identificador único de instalación de OS)
 	for _, p := range []string{"/etc/machine-id", "/var/lib/dbus/machine-id"} {
 		if data, err := os.ReadFile(p); err == nil {
 			trimmed := strings.TrimSpace(string(data))
 			if len(trimmed) > 0 {
-				parts = append(parts, trimmed)
+				parts = append(parts, "os:"+trimmed)
 				break
 			}
 		}
 	}
 
-	// 2. Hardware MAC addresses
-	if ifaces, err := net.Interfaces(); err == nil {
-		for _, ifa := range ifaces {
-			if len(ifa.HardwareAddr) > 0 && (ifa.Flags&net.FlagLoopback == 0) {
-				parts = append(parts, ifa.HardwareAddr.String())
-				break
-			}
-		}
-	}
-
-	// 3. Fallback to Hostname if machine-id is not readable
+	// 3. Fallback to Hostname if machine-id and mac are not available
 	if len(parts) == 0 {
 		if h, err := os.Hostname(); err == nil && len(h) > 0 {
-			parts = append(parts, h)
+			parts = append(parts, "host:"+h)
 		} else {
 			parts = append(parts, "default-cpamc-host")
 		}
@@ -61,6 +57,53 @@ func GetMachineID() string {
 
 	// Format: CPA-XXXX-XXXX-XXXX
 	return fmt.Sprintf("CPA-%s-%s-%s", hexStr[0:4], hexStr[4:8], hexStr[8:12])
+}
+
+// GetMACAddress returns the physical hardware MAC address.
+// If already saved in the persistent license file on disk, it returns the stable saved MAC.
+func GetMACAddress() string {
+	// 0. Revisar si ya existe en el archivo de licencia persistente
+	path := getLicenseStoragePath()
+	if data, err := os.ReadFile(path); err == nil {
+		var lf struct {
+			MACAddress string `json:"mac_address"`
+		}
+		if err := json.Unmarshal(data, &lf); err == nil && len(strings.TrimSpace(lf.MACAddress)) > 0 {
+			return strings.TrimSpace(lf.MACAddress)
+		}
+	}
+
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+
+	var fallbackMAC string
+	for _, ifa := range ifaces {
+		mac := strings.ToLower(strings.TrimSpace(ifa.HardwareAddr.String()))
+		if len(mac) == 0 || (ifa.Flags&net.FlagLoopback != 0) {
+			continue
+		}
+		name := strings.ToLower(ifa.Name)
+		// Omitir puentes y adaptadores virtuales de Docker / Podman / VMs
+		if strings.HasPrefix(name, "veth") ||
+			strings.HasPrefix(name, "br-") ||
+			strings.HasPrefix(name, "docker") ||
+			strings.HasPrefix(name, "flannel") ||
+			strings.HasPrefix(name, "cni") ||
+			strings.HasPrefix(name, "dummy") {
+			continue
+		}
+		if fallbackMAC == "" {
+			fallbackMAC = mac
+		}
+		// Priorizar interfaces físicas ethernet o wifi estándar
+		if strings.HasPrefix(name, "en") || strings.HasPrefix(name, "wl") || strings.HasPrefix(name, "et") {
+			return mac
+		}
+	}
+
+	return fallbackMAC
 }
 
 // GetSystemIdentity returns "username@hostname" (e.g. wilox@soytec or Wilson@MacBook-Pro).

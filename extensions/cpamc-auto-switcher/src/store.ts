@@ -488,6 +488,28 @@ export function checkProactivePoolRebalance(modelId: string, provider: string): 
 }
 
 /**
+ * Decrementa de forma optimista en memoria RAM el porcentaje disponible de una cuenta tras un streaming exitoso.
+ */
+export function applyOptimisticQuotaDecrement(prefixOrEmail: string, pctDelta = 1.0): void {
+	if (!prefixOrEmail || cachedAccounts.length === 0) return;
+	const target = prefixOrEmail.toLowerCase().trim();
+
+	for (const acc of cachedAccounts) {
+		const accPrefix = (acc.prefix || "").toLowerCase();
+		const accId = (acc.accountId || "").toLowerCase();
+		if (accPrefix === target || accId.includes(target) || target.includes(accPrefix)) {
+			const current = parseFloat(acc.minAvailable.replace("%", "")) || 100;
+			const next = Math.max(0, +(current - pctDelta).toFixed(1));
+			acc.minAvailable = `${next}%`;
+			// Incrementar consumo de 5h en consonancia
+			const current5h = parseFloat(acc.consumed5h.replace("%", "")) || 0;
+			acc.consumed5h = `${Math.min(100, +(current5h + pctDelta).toFixed(1))}%`;
+			break;
+		}
+	}
+}
+
+/**
  * Consulta las cuentas más recientes si es necesario y calcula la pareja de rotación.
  */
 export async function getRotationPairForModel(modelId: string, provider: string): Promise<PoolRotationPair | null> {

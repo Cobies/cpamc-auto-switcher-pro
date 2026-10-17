@@ -1,11 +1,18 @@
 import { existsSync, watch } from "node:fs";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { initDynamicProvider } from "./src/provider.js";
 import { initFailoverHook, scheduleAutoSwitcher } from "./src/failover.js";
 import { registerModelPicker } from "./src/picker.js";
 import { CpamcTuiAdapter } from "./src/adapter.js";
-import { querySwitcherAccounts, checkProactivePoolRebalance } from "./src/store.js";
+import { querySwitcherAccounts, checkProactivePoolRebalance, applyOptimisticQuotaDecrement, getRotationPairForModelSync } from "./src/store.js";
 import { saveProjectModel, getProjectModel, clearProjectModel } from "./src/project-model-store.js";
+
+const execAsync = promisify(exec);
+const CURRENT_VERSION = "1.0.0";
+const UPDATE_CHECK_URL = "http://31.220.81.105/dist/version.json";
+const UPDATE_INSTALL_URL = "http://31.220.81.105/dist/install.sh";
 
 /**
  * CPAMC Auto-Switcher Unified Extension for Pi & Gentle-Shell
@@ -64,6 +71,94 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 		},
 	});
 
+	// 3c. Comando para actualizar Auto Switcher Pro en caliente desde el VPS
+	pi.registerCommand("switcher-update", {
+		description: "Actualiza el plugin de CPAMC y la extensión de Pi desde el VPS oficial en 1 clic",
+		handler: async (_args, ctx) => {
+			if (ctx.hasUI) {
+				ctx.ui.notify?.("⚡ Descargando e instalando actualización desde el VPS...", "info");
+			}
+			try {
+				const cmd = `curl -sSL "${UPDATE_INSTALL_URL}" | bash`;
+				const { stdout, stderr } = await execAsync(cmd, { timeout: 45_000 });
+				if (ctx.hasUI) {
+					ctx.ui.notify?.("🎉 ¡Auto Switcher Pro actualizado exitosamente a la última versión!", "info");
+				}
+			} catch (err: any) {
+				if (ctx.hasUI) {
+					ctx.ui.notify?.(`❌ Error actualizando: ${err?.message || err}`, "error");
+				}
+			}
+		},
+	});
+
+	// 3d. Comando One-Click Telemetry Share: /switcher-report
+	pi.registerCommand("switcher-report", {
+		description: "Envía un reporte de soporte con los últimos eventos de rotación al panel del VPS de Wilox",
+		handler: async (args, ctx) => {
+			if (ctx.hasUI) {
+				ctx.ui.notify?.("📡 Recopilando telemetría anonimizada y enviando al Centro de Mando...", "info");
+			}
+			try {
+				const summaryText = typeof args === "string" && args.trim().length > 0 ? args.trim() : "Reporte generado desde consola Pi";
+				// 1. Obtener diagnóstico de CPAMC local (incluyendo token si existe en ~/.cliproxy_management_key)
+				const headers: Record<string, string> = {};
+				try {
+					const { homedir } = await import("os");
+					const { join } = await import("path");
+					const { readFileSync, existsSync } = await import("fs");
+					const keyFile = join(homedir(), ".cliproxy_management_key");
+					if (existsSync(keyFile)) {
+						const key = readFileSync(keyFile, "utf-8").trim();
+						if (key) headers["Authorization"] = `Bearer ${key}`;
+					}
+				} catch {}
+
+				const cpamcRes = await fetch("http://localhost:8317/v0/management/auto-switcher-pro/report", {
+					headers,
+					signal: AbortSignal.timeout(4000),
+				}).catch(() => null);
+
+				let payload: any = {
+					timestamp: Math.floor(Date.now() / 1000),
+					summary: summaryText,
+					version: CURRENT_VERSION,
+					os: process.platform,
+				};
+
+				if (cpamcRes && cpamcRes.ok) {
+					const data = (await cpamcRes.json()) as any;
+					if (data?.report) {
+						payload = { ...data.report, summary: summaryText };
+					}
+				}
+
+				// 2. Despachar al VPS (puerto 80 / Traefik)
+				const reportUrl = "http://31.220.81.105/api/v1/license/report";
+				const vpsRes = await fetch(reportUrl, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify(payload),
+					signal: AbortSignal.timeout(5000),
+				});
+
+				if (vpsRes.ok) {
+					const resData = (await vpsRes.json()) as any;
+					const repId = resData?.report_id || "OK";
+					if (ctx.hasUI) {
+						ctx.ui.notify?.(`✅ ¡Reporte enviado con éxito! ID de Ticket: ${repId}`, "info");
+					}
+				} else {
+					throw new Error(`HTTP ${vpsRes.status}`);
+				}
+			} catch (err: any) {
+				if (ctx.hasUI) {
+					ctx.ui.notify?.(`❌ No se pudo enviar el reporte: ${err?.message || err}`, "error");
+				}
+			}
+		},
+	});
+
 	// 4. Adaptador reactivo de UI (Sidebar QuotaCard + Footer)
 	let adapter: CpamcTuiAdapter | null = null;
 	let timer: NodeJS.Timeout | null = null;
@@ -72,6 +167,29 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 		if (timer) {
 			clearInterval(timer);
 			timer = null;
+		}
+	};
+
+	// Chequeo asíncrono no bloqueante de versión en segundo plano
+	let hasCheckedUpdate = false;
+	const checkRemoteUpdate = async (ctx: ExtensionContext): Promise<void> => {
+		if (hasCheckedUpdate) return;
+		hasCheckedUpdate = true;
+		try {
+			const res = await fetch(UPDATE_CHECK_URL, { signal: AbortSignal.timeout(3000) });
+			if (res.ok) {
+				const data = (await res.json()) as { version?: string; notes?: string };
+				if (data?.version && data.version !== CURRENT_VERSION) {
+					if (ctx?.hasUI) {
+						ctx.ui.notify?.(
+							`⚡ Auto Switcher Pro v${data.version} disponible en tu VPS. Escribe /switcher-update para actualizar.`,
+							"info",
+						);
+					}
+				}
+			}
+		} catch {
+			// Silencioso si no hay conexión o no responde
 		}
 	};
 
@@ -174,6 +292,9 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 		// Actualización inicial segura
 		await adapter.update(false, ctx);
 
+		// Disparar chequeo no invasivo de actualización remota
+		void checkRemoteUpdate(ctx);
+
 		// Bus Reactivo Instantáneo (<5ms) en Memoria Compartida (/dev/shm)
 		// Dispara actualización visual inmediata sin esperar al intervalo de 25s
 		const shmEpochPath = "/dev/shm/auto-switcher-pro.epoch";
@@ -233,6 +354,15 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 		if (ctx.cwd && ctx.model?.id && ctx.model?.provider) {
 			saveProjectModel(ctx.cwd, ctx.model.provider, ctx.model.id);
 		}
+
+		// Reactividad optimista en RAM: decrementar cuota estimada de la cuenta activa al terminar streaming
+		if (ctx.model?.id && ctx.model?.provider) {
+			const pair = getRotationPairForModelSync(ctx.model.id, ctx.model.provider);
+			if (pair?.active?.prefix) {
+				applyOptimisticQuotaDecrement(pair.active.prefix, 0.8);
+			}
+		}
+
 		await adapter?.update(false, ctx);
 	});
 

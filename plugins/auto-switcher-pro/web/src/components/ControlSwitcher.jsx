@@ -86,6 +86,7 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
   const [predictiveConfig, setPredictiveConfig] = useState({ enabled: true, max_reqs_per_hour: 80, threshold_pct: 80 });
   const [predictiveAccounts, setPredictiveAccounts] = useState([]);
   const [savingPredictive, setSavingPredictive] = useState(false);
+  const [sendingReport, setSendingReport] = useState(false);
 
   // Controles dinámicos de Paginación, Filtrado y Búsqueda
   const [searchQuery, setSearchQuery] = useState('');
@@ -865,6 +866,38 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
     }
   };
 
+  const handleSendSupportReport = async () => {
+    setSendingReport(true);
+    setCheckOutput('');
+    setActionError('');
+    try {
+      const key = localStorage.getItem('management_key') || '';
+      const headers = key ? { Authorization: `Bearer ${key}` } : {};
+      const res = await fetch('/v0/management/auto-switcher-pro/report', { headers });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const report = data.report || {};
+
+      // Enviar al VPS (puerto 80)
+      const vpsRes = await fetch('http://31.220.81.105/api/v1/license/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...report,
+          summary: 'Reporte generado con 1-Click desde Auto Switcher Web',
+        }),
+      });
+
+      if (!vpsRes.ok) throw new Error(`Fallo en VPS (HTTP ${vpsRes.status})`);
+      const vpsData = await vpsRes.json();
+      setCheckOutput(`🚀 ¡Reporte enviado con éxito a Wilox! ID de Ticket: ${vpsData.report_id || 'OK'}`);
+    } catch (err) {
+      setActionError(`Error enviando reporte a soporte: ${err.message}`);
+    } finally {
+      setSendingReport(false);
+    }
+  };
+
   return (
     <div className="control-switcher-view">
       {/* 1. Header & Hero Bar Idéntico a tres.jpg */}
@@ -925,6 +958,33 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
             <span className="cs-bolt-icon">⚡</span>
             <span>{checking ? 'Evaluando...' : 'Chequeo Forzado (-force)'}</span>
           </button>
+
+          {/* Botón One-Click Telemetry Share */}
+          <button
+            type="button"
+            onClick={handleSendSupportReport}
+            disabled={sendingReport}
+            className="cs-btn-report"
+            title="Envía un reporte de soporte técnico y eventos recientes de rotación a Wilox"
+            style={{
+              padding: '8px 14px',
+              borderRadius: '8px',
+              fontSize: '12px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              border: '1px solid #38bdf8',
+              background: sendingReport ? 'rgba(56, 189, 248, 0.3)' : 'rgba(56, 189, 248, 0.15)',
+              color: '#38bdf8',
+              transition: 'all 0.2s',
+            }}
+          >
+            <span>🚀</span>
+            <span>{sendingReport ? 'Enviando...' : 'Soporte 1-Click'}</span>
+          </button>
+
           <button
             type="button"
             onClick={loadData}

@@ -42,6 +42,7 @@ type LicenseFile struct {
 	FirstBootAt    int64          `json:"first_boot_at"`
 	LastSeenAt     int64          `json:"last_seen_at"`
 	MachineID      string         `json:"machine_id,omitempty"`
+	MACAddress     string         `json:"mac_address,omitempty"`
 	TotalRequests  int64          `json:"total_requests,omitempty"`  // Total de peticiones balanceadas
 	TotalFailovers int64          `json:"total_failovers,omitempty"` // Rotaciones reales por rescate de reserva
 	LicenseKey     string         `json:"license_key,omitempty"`
@@ -51,6 +52,7 @@ type LicenseFile struct {
 // StatusReport is returned to the web UI and management API.
 type StatusReport struct {
 	MachineID      string `json:"machine_id"`
+	MACAddress     string `json:"mac_address,omitempty"`
 	Status         string `json:"status"` // "trial" | "active" | "expired"
 	DaysRemaining  int    `json:"days_remaining"`
 	TrialTotalDays int    `json:"trial_total_days"`
@@ -77,8 +79,13 @@ func getLicenseStoragePath() string {
 	return "./auto-switcher-pro-license.json"
 }
 
+var licenseFileMu sync.Mutex
+
 // LoadOrInitLicense loads the license file or creates initial 30-day trial record.
 func LoadOrInitLicense() (*LicenseFile, error) {
+	licenseFileMu.Lock()
+	defer licenseFileMu.Unlock()
+
 	path := getLicenseStoragePath()
 	now := time.Now().Unix()
 
@@ -93,11 +100,19 @@ func LoadOrInitLicense() (*LicenseFile, error) {
 				lf.LastSeenAt = now
 			}
 
-			// Asegurar que el MachineID quede guardado en el archivo persistente
+			updated := false
+			// Asegurar que el MachineID y MACAddress queden guardados en el archivo persistente
 			if lf.MachineID == "" {
 				lf.MachineID = GetMachineID()
+				updated = true
 			}
-			_ = saveLicenseFile(path, &lf)
+			if lf.MACAddress == "" {
+				lf.MACAddress = GetMACAddress()
+				updated = true
+			}
+			if updated {
+				_ = saveLicenseFileLocked(path, &lf)
+			}
 			return &lf, nil
 		}
 	}
@@ -107,19 +122,30 @@ func LoadOrInitLicense() (*LicenseFile, error) {
 		FirstBootAt: now,
 		LastSeenAt:  now,
 		MachineID:   GetMachineID(),
+		MACAddress:  GetMACAddress(),
 	}
-	_ = saveLicenseFile(path, lf)
+	_ = saveLicenseFileLocked(path, lf)
 	return lf, nil
 }
 
 func saveLicenseFile(path string, lf *LicenseFile) error {
+	licenseFileMu.Lock()
+	defer licenseFileMu.Unlock()
+	return saveLicenseFileLocked(path, lf)
+}
+
+func saveLicenseFileLocked(path string, lf *LicenseFile) error {
 	dir := filepath.Dir(path)
 	_ = os.MkdirAll(dir, 0755)
 	data, err := json.MarshalIndent(lf, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // VerifyActivationKey validates an Ed25519 signature against current machine ID.
@@ -247,6 +273,7 @@ func SyncWithCloudHub(machineID string) {
 		client := &http.Client{Timeout: 4 * time.Second}
 		type pingPayload struct {
 			MachineID      string   `json:"machine_id"`
+			MACAddress     string   `json:"mac_address,omitempty"`
 			ClientName     string   `json:"client_name,omitempty"`
 			Version        string   `json:"version,omitempty"`
 			OS             string   `json:"os,omitempty"`
@@ -257,6 +284,7 @@ func SyncWithCloudHub(machineID string) {
 
 		payload := pingPayload{
 			MachineID:  machineID,
+			MACAddress: GetMACAddress(),
 			ClientName: GetSystemIdentity(),
 			OS:         runtime.GOOS,
 		}

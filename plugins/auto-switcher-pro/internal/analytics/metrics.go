@@ -52,6 +52,20 @@ type AccountStat struct {
 	Status     string  `json:"status"`
 }
 
+// SupportReport represents a diagnostic snapshot sent by a client.
+type SupportReport struct {
+	ID          string                 `json:"id"`
+	Timestamp   int64                  `json:"timestamp"`
+	MachineID   string                 `json:"machine_id"`
+	MACAddress  string                 `json:"mac_address,omitempty"`
+	ClientName  string                 `json:"client_name"`
+	Version     string                 `json:"version"`
+	OS          string                 `json:"os"`
+	Summary     string                 `json:"summary,omitempty"`
+	RecentLogs  []RotationEvent        `json:"recent_logs,omitempty"`
+	SystemState map[string]interface{} `json:"system_state,omitempty"`
+}
+
 // MetricsSnapshot is returned to the frontend or local management endpoint.
 type MetricsSnapshot struct {
 	OK             bool           `json:"ok"`
@@ -61,6 +75,49 @@ type MetricsSnapshot struct {
 	TimelineHourly []HourlyBucket `json:"timeline_hourly"`
 	Pools          []PoolStat     `json:"pools"`
 	Accounts       []AccountStat  `json:"accounts"`
+}
+
+// QueryRecentEvents returns the last N rotation events from SQLite for diagnostic reports.
+func QueryRecentEvents(limit int) ([]RotationEvent, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	db, err := InitDB()
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := db.Query(`
+		SELECT timestamp, pool_id, pool_prefix, selected_account, account_email, is_failover, cascade_index, target_model, status_code
+		FROM pool_rotations
+		ORDER BY timestamp DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []RotationEvent
+	for rows.Next() {
+		var evt RotationEvent
+		var failoverInt int
+		if err := rows.Scan(
+			&evt.Timestamp,
+			&evt.PoolID,
+			&evt.PoolPrefix,
+			&evt.SelectedAccount,
+			&evt.AccountEmail,
+			&failoverInt,
+			&evt.CascadeIndex,
+			&evt.TargetModel,
+			&evt.StatusCode,
+		); err == nil {
+			evt.IsFailover = (failoverInt == 1)
+			events = append(events, evt)
+		}
+	}
+	return events, nil
 }
 
 // QueryMetrics computes an aggregated MetricsSnapshot for the given time range ("1h", "24h", "7d", "30d", "all").

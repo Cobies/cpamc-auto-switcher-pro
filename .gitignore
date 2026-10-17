@@ -9,7 +9,7 @@
 node_modules/
 .vite/
 bin/
-node_modules/
+dist/
 *.h
 pnpm-lock.yaml
 pnpm-workspace.yaml
