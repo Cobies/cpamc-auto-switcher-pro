@@ -212,7 +212,7 @@ function notify(ctx: any, message: string, level: "info" | "warning" = "info"): 
 	}
 }
 
-async function attemptVirtualRotation(ctx: any): Promise<boolean> {
+async function attemptVirtualRotation(ctx: any, source?: string, force = false): Promise<boolean> {
 	try {
 		const rawUrl = (process.env.CLIPROXYAPI_BASE_URL || process.env.CPAMC_URL || "http://127.0.0.1:8317").trim().replace(/\/+$/, "").replace(/\/v1$/, "");
 		const baseUrl = rawUrl || "http://127.0.0.1:8317";
@@ -230,7 +230,7 @@ async function attemptVirtualRotation(ctx: any): Promise<boolean> {
 		const res = await fetch(`${baseUrl}/v0/management/auto-switcher-pro/pools/rotate`, {
 			method: "POST",
 			headers,
-			body: JSON.stringify({}),
+			body: JSON.stringify({ reason: source || (force ? "failover" : "preventive") }),
 			signal: ctx?.signal,
 		});
 		if (res.ok) {
@@ -238,7 +238,11 @@ async function attemptVirtualRotation(ctx: any): Promise<boolean> {
 			if (data?.ok) {
 				const poolName = data.prefix || data.pool_id || "Pool";
 				const newLeader = data.new_leader ? ` hacia ${data.new_leader.replace(/^antigravity-/, "").replace(/\.json$/, "")}` : "";
-				notify(ctx, `🔄 [Failover Virtual] ${poolName} rotó exitosamente${newLeader}`, "info");
+				if (force) {
+					notify(ctx, `⚡ [Rescate Reactivo] ${poolName} rotó exitosamente${newLeader} para restaurar conexión`, "warning");
+				} else {
+					notify(ctx, `🛡️ [Protección Preventiva] ${poolName} rotó exitosamente${newLeader} para evitar bloqueo de 12h`, "info");
+				}
 				return true;
 			}
 		}
@@ -260,7 +264,7 @@ function schedule(ctx: any, source: string, force = false): Promise<void> {
 	const check = async (): Promise<void> => {
 		try {
 			// Prioridad 1: Rotación Virtual Pura en Auto Switcher Pro (sin mutar credenciales físicas en disco)
-			const virtualRotated = await attemptVirtualRotation(ctx);
+			const virtualRotated = await attemptVirtualRotation(ctx, source, force);
 			if (virtualRotated) {
 				return;
 			}
@@ -369,7 +373,7 @@ export function initFailoverHook(pi: ExtensionAPI): void {
 					{
 						type: "custom_message",
 						customType: "auto-recovery-prompt",
-						content: `Se detectó una interrupción de conexión o fin inesperado de flujo. Continúa directamente desde la última acción planificada.${compactHint}`,
+						content: `[Auto Switcher Pro · Auto-Recuperación] Se detectó una interrupción de conexión o fin inesperado de flujo. Continúa directamente desde la última acción planificada.${compactHint}`,
 						display: false,
 					},
 				],
@@ -391,7 +395,7 @@ export function initFailoverHook(pi: ExtensionAPI): void {
 					{
 						type: "custom_message",
 						customType: "auto-recovery-prompt",
-						content: "Continúa directamente con la acción planificada.",
+						content: "[Auto Switcher Pro · Continuación] Continúa directamente con la acción planificada.",
 						display: false,
 					},
 				],

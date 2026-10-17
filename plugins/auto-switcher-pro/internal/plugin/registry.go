@@ -774,6 +774,7 @@ func handlePoolsHTTP(req ManagementRequestPayload) ([]byte, error) {
 				Prefix     string `json:"prefix"`
 				BasePrefix string `json:"base_prefix"`
 				PoolID     string `json:"pool_id"`
+				Reason     string `json:"reason"`
 			}
 			if len(req.Body) > 0 {
 				_ = json.Unmarshal(req.Body, &rotPayload)
@@ -811,13 +812,19 @@ func handlePoolsHTTP(req ManagementRequestPayload) ([]byte, error) {
 				})
 			}
 
+			reason := strings.TrimSpace(rotPayload.Reason)
+			if reason == "" {
+				reason = "manual_request"
+			}
+
 			return jsonManagementResponse(http.StatusOK, map[string]any{
 				"ok":         true,
 				"pool_id":    p.ID,
 				"prefix":     p.BasePrefix,
 				"old_leader": oldLeader,
 				"new_leader": newLeader,
-				"message":    fmt.Sprintf("Pool %s rotated to %s", p.BasePrefix, newLeader),
+				"reason":     reason,
+				"message":    fmt.Sprintf("Pool %s rotated to %s (reason: %s)", p.BasePrefix, newLeader, reason),
 			})
 		}
 

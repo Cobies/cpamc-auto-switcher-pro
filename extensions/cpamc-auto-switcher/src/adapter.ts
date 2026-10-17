@@ -292,6 +292,7 @@ export function formatSidebarQuotaCardLines(
 		top,
 		renderLine(s.muted("Familia"), `${pair.familyIcon}${s.text(pair.familyName)}`),
 		renderLine(s.muted("Cuentas en Pool"), s.text(String(pair.totalAccounts))),
+		renderLine(s.muted("Modo"), s.accent("Sticky Session (Cache Shielding)")),
 		divider,
 		renderLine(s.accent("[LÍDER ACTIVA]"), `${s.text(activeAccountLabel)} ${s.muted(`(${pair.active.minAvailable})`)}`),
 		renderLine(s.muted(`5h: ${pair.active.consumed5h}`), bar5h),
