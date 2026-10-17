@@ -45,6 +45,32 @@ function hasAnyToolCalls(message: any, toolResults?: unknown[]): boolean {
 const DANGLING_CONNECTOR_PATTERN =
 	/^(?:now|let'?s|let us|and|then|so|next|continuing|continuemos|a continuación|ahora|por lo tanto|procedo|procedemos|okay|ok|well)[.:,;…]?$/i;
 
+/**
+ * Compacta resultados masivos de herramientas para reducir drásticamente el consumo
+ * de tokens en turnos de reanudación y auto-recovery.
+ */
+export function compactToolResultsForRecovery(toolResults?: unknown[]): string {
+	if (!Array.isArray(toolResults) || toolResults.length === 0) {
+		return "";
+	}
+	const chunks: string[] = [];
+	for (const tr of toolResults) {
+		if (!tr || typeof tr !== "object") continue;
+		const r = tr as Record<string, any>;
+		const content = typeof r.content === "string" ? r.content : (typeof r.text === "string" ? r.text : "");
+		if (!content) continue;
+
+		// Si el contenido supera 600 caracteres (aprox. 150 tokens), compactarlo
+		if (content.length > 600) {
+			const head = content.slice(0, 150).trim();
+			const tail = content.slice(-250).trim();
+			const omitted = content.length - 400;
+			chunks.push(`[Herramienta previo: ${head}\n... [${omitted} caracteres omitidos para ahorro de tokens] ...\n${tail}]`);
+		}
+	}
+	return chunks.length > 0 ? `\nContexto compactado previo:\n${chunks.join("\n")}` : "";
+}
+
 function isPrematureStop(message: any, toolResults?: unknown[]): boolean {
 	if (!message || message.role !== "assistant") return false;
 	if (message.stopReason !== "stop") return false;
@@ -334,12 +360,16 @@ export function initFailoverHook(pi: ExtensionAPI): void {
 				`⚡ Microcorte de streaming detectado (intento ${consecutiveAutoRecoveries}/2). Rotando cuenta y auto-reanudando agente...`,
 				"warning",
 			);
+
+			// Compactar posibles outputs voluminosos de herramientas para ahorrar hasta 90% de tokens de entrada
+			const compactHint = compactToolResultsForRecovery(toolResults);
+
 			return {
 				entries: [
 					{
 						type: "custom_message",
 						customType: "auto-recovery-prompt",
-						content: "Se detectó una interrupción de conexión o fin inesperado de flujo. Continúa directamente desde la última acción planificada.",
+						content: `Se detectó una interrupción de conexión o fin inesperado de flujo. Continúa directamente desde la última acción planificada.${compactHint}`,
 						display: false,
 					},
 				],

@@ -50,11 +50,12 @@ func normalizeAccountKey(k string) string {
 
 // PredictiveEngine gestiona la fatiga y enfriamiento preventivo de cuentas
 type PredictiveEngine struct {
-	mu       sync.RWMutex
-	config   PredictiveConfig
-	activity map[string][]RequestRecord         // accountKey -> lista de timestamps
-	cooling  map[string]time.Time               // accountKey -> hasta cuándo descansa
-	quotas   map[string]AccountQuotaTelemetry   // accountKey -> telemetría de cuota viva
+	mu           sync.RWMutex
+	config       PredictiveConfig
+	activity     map[string][]RequestRecord         // accountKey -> lista de timestamps
+	cooling      map[string]time.Time               // accountKey -> hasta cuándo descansa
+	quotas       map[string]AccountQuotaTelemetry   // accountKey -> telemetría de cuota viva
+	lastActivity map[string]time.Time               // accountKey -> última interacción para seguimiento de Cache TTL
 }
 
 var globalPredictiveEngine *PredictiveEngine
@@ -64,10 +65,11 @@ var predictiveOnce sync.Once
 func GetPredictiveEngine() *PredictiveEngine {
 	predictiveOnce.Do(func() {
 		globalPredictiveEngine = &PredictiveEngine{
-			config:   DefaultPredictiveConfig(),
-			activity: make(map[string][]RequestRecord),
-			cooling:  make(map[string]time.Time),
-			quotas:   make(map[string]AccountQuotaTelemetry),
+			config:       DefaultPredictiveConfig(),
+			activity:     make(map[string][]RequestRecord),
+			cooling:      make(map[string]time.Time),
+			quotas:       make(map[string]AccountQuotaTelemetry),
+			lastActivity: make(map[string]time.Time),
 		}
 	})
 	return globalPredictiveEngine
@@ -107,6 +109,10 @@ func (pe *PredictiveEngine) RecordActivity(accountEmail string) {
 
 	now := time.Now()
 	pe.activity[key] = append(pe.activity[key], RequestRecord{Timestamp: now})
+	if pe.lastActivity == nil {
+		pe.lastActivity = make(map[string]time.Time)
+	}
+	pe.lastActivity[key] = now
 
 	// Limpiar registros mayores a 1 hora
 	cutoff := now.Add(-1 * time.Hour)
@@ -292,3 +298,30 @@ func (pe *PredictiveEngine) GetAccountStatus(accountEmail string) (fatiguePct fl
 
 	return fatiguePct, isCooling, minutesLeft
 }
+
+// GetCacheTTLSeconds calcula los segundos restantes de vida útil del Prompt Caching
+// en Google Antigravity (TTL estándar de 5 minutos = 300 segundos desde la última interacción).
+// Devuelve segundos restantes (0 si expiró) y si la cuenta está actualmente "caliente".
+func (pe *PredictiveEngine) GetCacheTTLSeconds(accountEmail string) (remainingSeconds int, isHot bool) {
+	pe.mu.RLock()
+	defer pe.mu.RUnlock()
+
+	key := normalizeAccountKey(accountEmail)
+	if pe.lastActivity == nil {
+		return 0, false
+	}
+	last, ok := pe.lastActivity[key]
+	if !ok || last.IsZero() {
+		return 0, false
+	}
+
+	const cacheTTL = 300 * time.Second
+	elapsed := time.Since(last)
+	if elapsed >= cacheTTL {
+		return 0, false
+	}
+
+	rem := int((cacheTTL - elapsed).Seconds())
+	return rem, rem > 0
+}
+

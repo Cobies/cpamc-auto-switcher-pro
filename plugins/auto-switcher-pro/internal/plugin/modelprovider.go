@@ -769,7 +769,37 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 		}
 	}
 
-	for i, authFile := range cascade {
+	// Predictive Token-Budget Routing:
+	// Si se debe recurrir a las reservas (failover o rotación preventiva), ordenar las reservas
+	// disponibles por mayor cuota combinada (Window5hPct + WeeklyPct) para asignar la tarea
+	// al miembro con mayor capacidad restante y evitar caídas prematuras.
+	orderedCascade := make([]string, 0, len(cascade))
+	if len(cascade) > 0 {
+		orderedCascade = append(orderedCascade, cascade[0]) // Mantener el líder en el índice 0
+		if len(cascade) > 1 {
+			reserves := append([]string(nil), cascade[1:]...)
+			sort.SliceStable(reserves, func(a, b int) bool {
+				emailA := strings.TrimSuffix(strings.TrimPrefix(reserves[a], "antigravity-"), ".json")
+				emailB := strings.TrimSuffix(strings.TrimPrefix(reserves[b], "antigravity-"), ".json")
+				qA, hasA := predEngine.GetLiveQuota(emailA)
+				qB, hasB := predEngine.GetLiveQuota(emailB)
+				if hasA && hasB {
+					scoreA := qA.Window5hPct + qA.WeeklyPct
+					scoreB := qB.Window5hPct + qB.WeeklyPct
+					return scoreA > scoreB
+				}
+				if hasA {
+					return true
+				}
+				return false
+			})
+			orderedCascade = append(orderedCascade, reserves...)
+		}
+	} else {
+		orderedCascade = cascade
+	}
+
+	for i, authFile := range orderedCascade {
 		// Si el motor predictivo decidió enfriar al líder actual y estamos en i == 0, rotar al siguiente miembro
 		if i == 0 && skipLeaderPredictive {
 			continue
