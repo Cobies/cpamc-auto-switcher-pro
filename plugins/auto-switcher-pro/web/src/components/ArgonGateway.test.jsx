@@ -42,6 +42,10 @@ describe('ArgonGateway Component', () => {
 
     expect(screen.getByText(/Sincronizador 1-Click/i)).toBeTruthy();
     expect(screen.getByText(/Normalización Sintética de Herramientas Activa/i)).toBeTruthy();
+    expect(screen.getByTestId('argon-faq-section')).toBeTruthy();
+    expect(screen.getByText(/Gemini Web vs Flota Antigravity/i)).toBeTruthy();
+    expect(screen.getByText(/Latencia Honesta \(15s – 60s\)/i)).toBeTruthy();
+    expect(screen.getByText(/Ciclo de Vida de Cookies/i)).toBeTruthy();
     expect(screen.getByText('gemini-argon-default@google.com')).toBeTruthy();
   });
 

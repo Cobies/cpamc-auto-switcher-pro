@@ -352,6 +352,8 @@ export default function ArgonGateway() {
                     ? '⏳ En Cooldown'
                     : acc.status === 'captcha'
                     ? '⚠️ Captcha Requerido'
+                    : acc.status === 'expired'
+                    ? '⚠️ Cookie TS Vencida · Usa Bookmarklet'
                     : acc.status}
                 </span>
               </div>
@@ -403,6 +405,45 @@ export default function ArgonGateway() {
           Los bloques de código ReAct (<code>```tool_call```</code>) producidos por Gemini Web son interceptados dentro del pipeline SSE y transformados al vuelo en eventos nativos de OpenAI (<code>tool_calls</code>).
         </div>
       </div>
+
+      {/* FAQ & Clarity Section: «Afina esto.» */}
+      <section className="argon-faq-section" data-testid="argon-faq-section">
+        <h2 className="argon-faq-title">
+          <span>💡</span> Conceptos Clave & Preguntas Frecuentes
+        </h2>
+
+        <div className="argon-faq-grid">
+          <div className="argon-faq-card">
+            <div className="faq-card-header">
+              <span>🌐</span>
+              <span>Gemini Web vs Flota Antigravity</span>
+            </div>
+            <p className="faq-card-body">
+              <strong>Gemini 4 Argon</strong> opera directamente sobre la web de consumidor (<code>gemini.google.com</code>) con capacidades experimentales de razonamiento ("Thinking"). No utiliza tokens OAuth de Google Cloud Code ni reemplaza a tu flota Antigravity (<code>agy_*</code>), sino que conviven como fuentes complementarias con respaldo automático.
+            </p>
+          </div>
+
+          <div className="argon-faq-card">
+            <div className="faq-card-header">
+              <span>⏱️</span>
+              <span>Latencia Honesta (15s – 60s)</span>
+            </div>
+            <p className="faq-card-body">
+              A diferencia de las APIs directas en microsegundos, el navegador Chromium headless debe renderizar la interfaz web y esperar el stream del DOM. Auto Switcher Pro emite <strong>Heartbeats SSE cada 5s</strong> para que Pi y tus editores mantengan la conexión permanentemente viva sin errores de socket hang up.
+            </p>
+          </div>
+
+          <div className="argon-faq-card">
+            <div className="faq-card-header">
+              <span>🔄</span>
+              <span>Ciclo de Vida de Cookies (__Secure-1PSIDTS)</span>
+            </div>
+            <p className="faq-card-body">
+              Google renueva periódicamente por seguridad la cookie temporal (24h a 72h). Si una cuenta marca "Sesión Expirada", no es un error de Auto Switcher: simplemente abre <code>gemini.google.com</code> en tu navegador y vuelve a pulsar el <strong>Bookmarklet 1-Click</strong> para sincronizarla al instante.
+            </p>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
