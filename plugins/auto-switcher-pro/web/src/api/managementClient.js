@@ -1892,6 +1892,13 @@ export function resolveInheritedCardModels(card, catalogModels = [], globalDisab
     if (!baseId) continue;
     const lower = baseId.toLowerCase();
 
+    // Invariante de Arquitectura Sagrada:
+    // Las fachadas virtuales de pools (Pool-XX-*) son identificadores soberanos de balanceo,
+    // NUNCA modelos físicos elegibles para especialización en una credencial individual.
+    if (lower.startsWith('pool-') || lower.includes('pool-')) {
+      continue;
+    }
+
     if (disabledSet.has(lower) || disabledSet.has(rawId.toLowerCase())) {
       continue;
     }

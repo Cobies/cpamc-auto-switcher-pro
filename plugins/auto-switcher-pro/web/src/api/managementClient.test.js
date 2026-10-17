@@ -1577,6 +1577,21 @@ describe('Specialist Engine - computeSpecialistExclusions, resolveInheritedCardM
       const resolved = resolveInheritedCardModels(card, catalog, globalDisabled);
       expect(resolved).toEqual(['gemini-2.5-flash']);
     });
+
+    it('strictly filters out virtual pool facades (Pool-XX-*) from inherited card models', () => {
+      const card = { familyRole: 'gemini' };
+      const catalogWithPools = [
+        'gemini-3.8-flash-high',
+        'gemini-3-flash',
+        'Pool-01-gemini',
+        'Pool-02-gemini',
+        'Pool-03-claude',
+      ];
+      const resolved = resolveInheritedCardModels(card, catalogWithPools);
+      expect(resolved).toEqual(['gemini-3-flash', 'gemini-3.8-flash-high']);
+      expect(resolved).not.toContain('Pool-01-gemini');
+      expect(resolved).not.toContain('Pool-02-gemini');
+    });
   });
 
   describe('patchAuthFileExclusions', () => {
