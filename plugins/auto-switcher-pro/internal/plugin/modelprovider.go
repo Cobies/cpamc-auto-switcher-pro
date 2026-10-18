@@ -1,6 +1,8 @@
 package plugin
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -645,6 +647,9 @@ func handleModelRoute(req modelRouteRequest) modelRouteResponse {
 }
 
 // extractSessionID extracts an active session identifier from request headers or metadata.
+// When no explicit session headers exist (e.g. external scripts, curl, Aider, Python),
+// it generates a deterministic synthetic affinity ID from Client IP and Authorization token
+// to preserve Google Prompt Caching for all external clients.
 func extractSessionID(req schedulerPickRequest) string {
 	if req.Options.Headers != nil {
 		for k, vals := range req.Options.Headers {
@@ -660,6 +665,33 @@ func extractSessionID(req schedulerPickRequest) string {
 			return strings.TrimSpace(s)
 		}
 	}
+
+	// Universal Fallback: derive synthetic affinity from Client IP and/or Authorization token
+	if req.Options.Headers != nil {
+		var clientIP, authToken string
+		for k, vals := range req.Options.Headers {
+			if len(vals) == 0 || strings.TrimSpace(vals[0]) == "" {
+				continue
+			}
+			val := strings.TrimSpace(vals[0])
+			if strings.EqualFold(k, "x-forwarded-for") || strings.EqualFold(k, "x-real-ip") || strings.EqualFold(k, "remote-addr") || strings.EqualFold(k, "cf-connecting-ip") {
+				if clientIP == "" {
+					if comma := strings.Index(val, ","); comma > 0 {
+						clientIP = strings.TrimSpace(val[:comma])
+					} else {
+						clientIP = val
+					}
+				}
+			} else if strings.EqualFold(k, "authorization") {
+				authToken = val
+			}
+		}
+		if clientIP != "" || authToken != "" {
+			h := sha256.Sum256([]byte(clientIP + "|" + authToken))
+			return "client-" + hex.EncodeToString(h[:8])
+		}
+	}
+
 	return ""
 }
 

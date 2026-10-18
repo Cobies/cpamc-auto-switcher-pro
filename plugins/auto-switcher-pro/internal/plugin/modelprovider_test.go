@@ -670,4 +670,53 @@ func TestDeprecatedModelAutoFallback(t *testing.T) {
 	_ = migrated
 }
 
+func TestExtractSessionID_UniversalFallback(t *testing.T) {
+	// 1. Explicit session header has top priority
+	reqExplicit := schedulerPickRequest{
+		Options: schedulerOptions{
+			Headers: map[string][]string{
+				"X-Session-ID":  {"session-exact-123"},
+				"Authorization": {"Bearer sk-secret-token"},
+			},
+		},
+	}
+	if sID := extractSessionID(reqExplicit); sID != "session-exact-123" {
+		t.Errorf("expected explicit session-id to take precedence, got %q", sID)
+	}
+
+	// 2. Fallback to client IP and token hash when session header is missing
+	reqFallback := schedulerPickRequest{
+		Options: schedulerOptions{
+			Headers: map[string][]string{
+				"X-Forwarded-For": {"192.168.1.105, 10.0.0.1"},
+				"Authorization":   {"Bearer sk-curl-client"},
+			},
+		},
+	}
+	sIDFallback1 := extractSessionID(reqFallback)
+	if !strings.HasPrefix(sIDFallback1, "client-") {
+		t.Errorf("expected synthetic client- session ID, got %q", sIDFallback1)
+	}
+
+	// 3. Deterministic repeatability for the same client
+	sIDFallback2 := extractSessionID(reqFallback)
+	if sIDFallback1 != sIDFallback2 {
+		t.Errorf("expected identical synthetic session IDs for repeated client requests: %q vs %q", sIDFallback1, sIDFallback2)
+	}
+
+	// 4. Different client gets different synthetic session ID
+	reqOtherClient := schedulerPickRequest{
+		Options: schedulerOptions{
+			Headers: map[string][]string{
+				"X-Forwarded-For": {"10.200.0.4"},
+				"Authorization":   {"Bearer sk-other-user"},
+			},
+		},
+	}
+	sIDOther := extractSessionID(reqOtherClient)
+	if sIDFallback1 == sIDOther {
+		t.Errorf("expected different session IDs for distinct clients, got collision: %q", sIDOther)
+	}
+}
+
 
