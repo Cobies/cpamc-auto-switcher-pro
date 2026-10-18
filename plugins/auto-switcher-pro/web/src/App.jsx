@@ -7,6 +7,7 @@ import PrefixManager from './components/PrefixManager';
 import GroupManager from './components/GroupManager';
 import AutoAuthFiles from './components/AutoAuthFiles';
 import Maintenance from './components/Maintenance';
+import AuditLog from './components/AuditLog';
 import QuickGuideModal from './components/QuickGuideModal';
 import LicenseModal from './components/LicenseModal';
 import logoImg from './assets/auto-switcher-pro-logo.png';
@@ -49,6 +50,7 @@ export default function App() {
         case 5: return 'create-prefixes';
         case 6: return 'maintenance';
         case 7: return 'quick-guide';
+        case 8: return 'audit-log';
         default: break;
       }
     }
@@ -76,6 +78,9 @@ export default function App() {
     }
     if (hash.includes('tab-quick-guide') || hash.includes('quick-guide') || hash.includes('guide')) {
       return 'quick-guide';
+    }
+    if (hash.includes('tab-audit-log') || hash.includes('audit-log') || hash.includes('bitacora') || hash.includes('caja-negra')) {
+      return 'audit-log';
     }
     if (hash.includes('tab-profiles')) {
       return 'profiles';
@@ -105,6 +110,9 @@ export default function App() {
     }
     if (pathname.includes('quick-guide') || pathname.includes('guide')) {
       return 'quick-guide';
+    }
+    if (pathname.includes('audit-log')) {
+      return 'audit-log';
     }
     if (pathname.includes('profiles')) {
       return 'profiles';
@@ -562,6 +570,29 @@ export default function App() {
               <span>❓</span>
               <span>Guía Rápida</span>
             </button>
+
+            {/* 9. Bitácora & Caja Negra */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('audit-log')}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                border: activeTab === 'audit-log' ? '1px solid rgba(245, 158, 11, 0.5)' : '1px solid transparent',
+                background: activeTab === 'audit-log' ? 'rgba(245, 158, 11, 0.25)' : 'transparent',
+                color: activeTab === 'audit-log' ? '#fde68a' : '#94a3b8',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+              data-testid="tab-audit-log"
+            >
+              <span>📜</span>
+              <span>Bitácora & Caja Negra</span>
+            </button>
           </div>
 
           <div className="header-divider" />
@@ -684,6 +715,8 @@ export default function App() {
                 ? '/maintenance'
                 : activeTab === 'quick-guide'
                 ? '/quick-guide'
+                : activeTab === 'audit-log'
+                ? '/audit-log'
                 : '/profiles'}
             </span>
           </div>
@@ -766,6 +799,12 @@ export default function App() {
         {activeTab === 'quick-guide' && (
           <div style={{ width: '100%', height: '100%', overflowY: 'auto' }}>
             <QuickGuideModal isOpen={true} onClose={() => setActiveTab('create-groups')} embedded={true} />
+          </div>
+        )}
+
+        {activeTab === 'audit-log' && (
+          <div style={{ width: '100%', height: '100%', overflowY: 'auto' }}>
+            <AuditLog />
           </div>
         )}
 

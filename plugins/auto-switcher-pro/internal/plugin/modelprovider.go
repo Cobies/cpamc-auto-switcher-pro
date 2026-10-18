@@ -45,6 +45,7 @@ func init() {
 			ActivePools:    prefixes,
 		}
 	})
+	StartGhostWarmupDaemon()
 }
 
 // Plugin-side RPC methods exposed by the CLIProxyAPI plugin host for the

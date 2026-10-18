@@ -95,7 +95,7 @@ func (pe *PredictiveEngine) hydrateFromSQLite() {
 				pe.cooling[key] = coolUntil
 			}
 		}
-		if h.Window5hPct > 0 || h.WeeklyPct > 0 {
+		if h.Window5hPct > 0 && h.WeeklyPct > 0 {
 			pe.quotas[key] = AccountQuotaTelemetry{
 				AccountKey:  key,
 				Window5hPct: h.Window5hPct,
@@ -175,7 +175,7 @@ func (pe *PredictiveEngine) RecordActivity(accountEmail string) {
 	} else if c, ok := pe.cooling[key]; ok && c.After(now) {
 		coolUntilMs = c.UnixMilli()
 	}
-	var w5h, weekly float64
+	w5h, weekly := 100.0, 100.0
 	if q, ok := pe.quotas[key]; ok {
 		w5h = q.Window5hPct
 		weekly = q.WeeklyPct
@@ -273,7 +273,7 @@ func (pe *PredictiveEngine) ShouldPreventiveCool(accountEmail string) bool {
 		if q, ok := pe.quotas[key]; ok {
 			// Si la cuota restante de 5 horas o la semanal está por debajo del 15% (incluyendo agotamiento total al 0.0%)
 			if !q.UpdatedAt.IsZero() {
-				if q.Window5hPct < 15.0 || q.WeeklyPct < 15.0 {
+				if q.Window5hPct < 15.0 || (q.WeeklyPct > 0 && q.WeeklyPct < 15.0) {
 					return true
 				}
 			}
@@ -316,7 +316,7 @@ func (pe *PredictiveEngine) IsCriticalQuotaOrCooldown(accountEmail string) bool 
 	if pe.quotas != nil {
 		if q, ok := pe.quotas[key]; ok {
 			if !q.UpdatedAt.IsZero() {
-				if q.Window5hPct < 15.0 || q.WeeklyPct < 15.0 {
+				if q.Window5hPct < 15.0 || (q.WeeklyPct > 0 && q.WeeklyPct < 15.0) {
 					return true
 				}
 			}

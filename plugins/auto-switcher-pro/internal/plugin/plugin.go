@@ -172,6 +172,11 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 					"Path":        sseProxyRoutePath,
 					"Description": "SSE Proxy con keep-alive para streaming sin cortes (terminated)",
 				},
+				{
+					"Method":      http.MethodGet,
+					"Path":        auditLogRoutePath,
+					"Description": "Obtiene la bitácora histórica de rotaciones y eventos de caja negra forense",
+				},
 			},
 			"resources": []map[string]any{
 				{
@@ -213,6 +218,11 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 					"Path":        "/quick-guide",
 					"Menu":        "❓ Guía Rápida",
 					"Description": "Manual de usuario, arquitectura de pools y guía operativa de Auto Switcher Pro",
+				},
+				{
+					"Path":        "/audit-log",
+					"Menu":        "📜 Bitácora & Caja Negra",
+					"Description": "Historial forense de rotaciones, rescates 429 e incidentes en disco (SQLite WAL)",
 				},
 			},
 		}
@@ -306,7 +316,7 @@ func MatchProfilesRoute(rawPath string) (subpath string, matched bool) {
 
 	matchedIdx := -1
 	for i, seg := range segments {
-		if seg == "home" || seg == "profiles" || seg == "center" || seg == "control-switcher" || seg == "pulse-tokens" || seg == "pulso-tokens" || seg == "create-prefixes" || seg == "create-groups" || seg == "auto-auth-files" || seg == "maintenance" || seg == "quick-guide" {
+		if seg == "home" || seg == "profiles" || seg == "center" || seg == "control-switcher" || seg == "pulse-tokens" || seg == "pulso-tokens" || seg == "create-prefixes" || seg == "create-groups" || seg == "auto-auth-files" || seg == "maintenance" || seg == "quick-guide" || seg == "audit-log" {
 			matchedIdx = i
 			break
 		}
@@ -396,6 +406,11 @@ func HandleManagementHTTP(request []byte) ([]byte, error) {
 	// SSE Proxy routes
 	if isSSEProxyPath(req.Path) {
 		return handleSSEProxyHTTP(req)
+	}
+
+	// Audit log & flight recorder routes
+	if isAuditLogPath(req.Path) {
+		return handleAuditLogHTTP(req)
 	}
 
 	// Virtualize route: POST for cloning, DELETE for removing virtual credential.

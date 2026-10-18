@@ -2660,6 +2660,17 @@ export async function rotatePool(idOrPrefix = '', options = {}) {
   return data;
 }
 
+/**
+ * Consulta la bitácora de auditoría histórica y eventos de caja negra desde SQLite WAL.
+ */
+export async function fetchAuditLog(options = {}) {
+  const res = await apiFetch('/v0/management/auto-switcher-pro/audit-log', {
+    ...options,
+    method: 'GET',
+  });
+  return res.json();
+}
+
 
 
 

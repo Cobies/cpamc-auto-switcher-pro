@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"auto-switcher-pro/internal/analytics"
 	"auto-switcher-pro/internal/version"
 	"auto-switcher-pro/internal/web"
 )
@@ -94,6 +95,7 @@ func TestHandlePluginMethod_ManagementRegister(t *testing.T) {
 	foundCreateRoute := false
 	foundGroupRoute := false
 	foundAutoAuthFilesRoute := false
+	foundAuditLogRoute := false
 	for _, res := range payload.Resources {
 		if res.Path == "/profiles" {
 			foundProfilesRoute = true
@@ -125,6 +127,12 @@ func TestHandlePluginMethod_ManagementRegister(t *testing.T) {
 				t.Errorf("expected Menu '🗂️ Auto Auth Files', got %q", res.Menu)
 			}
 		}
+		if res.Path == "/audit-log" {
+			foundAuditLogRoute = true
+			if res.Menu != "📜 Bitácora & Caja Negra" {
+				t.Errorf("expected Menu '📜 Bitácora & Caja Negra', got %q", res.Menu)
+			}
+		}
 	}
 	if !foundProfilesRoute {
 		t.Errorf("expected route '/profiles' in registered resources, got %+v", payload.Resources)
@@ -140,6 +148,9 @@ func TestHandlePluginMethod_ManagementRegister(t *testing.T) {
 	}
 	if !foundAutoAuthFilesRoute {
 		t.Errorf("expected route '/auto-auth-files' in registered resources, got %+v", payload.Resources)
+	}
+	if !foundAuditLogRoute {
+		t.Errorf("expected route '/audit-log' in registered resources, got %+v", payload.Resources)
 	}
 }
 
@@ -163,6 +174,8 @@ func TestMatchProfilesRoute_ExactSegmentScoped(t *testing.T) {
 		{"/create-groups/", "index.html"},
 		{"/auto-auth-files", "index.html"},
 		{"/auto-auth-files/", "index.html"},
+		{"/audit-log", "index.html"},
+		{"/audit-log/", "index.html"},
 		{"/v0/management/auto-auth-files", "index.html"},
 		{"/v0/resource/plugins/auto-switcher-pro/profiles", "index.html"},
 		{"/v0/resource/plugins/auto-switcher-pro/profiles/", "index.html"},
@@ -641,5 +654,41 @@ func TestWebAssetsFS_SingleFileEmbed(t *testing.T) {
 	}
 	if fileCount != 1 {
 		t.Errorf("expected exactly 1 embedded asset file (index.html), got %d", fileCount)
+	}
+}
+
+func TestHandleAuditLogHTTP(t *testing.T) {
+	reqJSON := []byte(`{"Method":"GET","Path":"/v0/management/auto-switcher-pro/audit-log"}`)
+	raw, err := HandlePluginMethod("management.handle", reqJSON)
+	if err != nil {
+		t.Fatalf("HandlePluginMethod failed: %v", err)
+	}
+
+	var env Envelope
+	if err := json.Unmarshal(raw, &env); err != nil || !env.OK {
+		t.Fatalf("expected OK envelope, got: %s", string(raw))
+	}
+
+	var resp ManagementResponsePayload
+	if err := json.Unmarshal(env.Result, &resp); err != nil {
+		t.Fatalf("failed to decode management response: %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	bodyBytes, err := base64.StdEncoding.DecodeString(resp.Body)
+	if err != nil {
+		t.Fatalf("failed to decode base64 body: %v", err)
+	}
+
+	var data struct {
+		OK             bool                           `json:"ok"`
+		AuditEvents    []analytics.AuditEvent         `json:"audit_events"`
+		FlightRecorder []analytics.FlightRecorderEvent `json:"flight_recorder"`
+	}
+	if err := json.Unmarshal(bodyBytes, &data); err != nil || !data.OK {
+		t.Fatalf("failed to parse audit log body: %s", string(bodyBytes))
 	}
 }
