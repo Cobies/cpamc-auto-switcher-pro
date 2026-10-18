@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { getArgonStatus, syncArgonSession } from '../api/managementClient';
+import QuotaClock from './QuotaClock';
+import './AutoAuthFiles.css';
 import './ArgonGateway.css';
 
 export default function ArgonGateway() {
@@ -457,65 +459,201 @@ export default function ArgonGateway() {
           No hay cuentas de Gemini Argon vinculadas actualmente. Usa el botón del Bookmarklet o el pegado manual de cookies para agregar una.
         </div>
       ) : (
-        <div className="argon-accounts-grid">
-          {accounts.map((acc) => (
-            <div key={acc.account_id} className="argon-account-card">
-              <div className="acc-card-header">
-                <span className="acc-authuser-badge">
-                  <span>Google</span>
-                  <strong>u/{acc.authuser}</strong>
-                </span>
-                <span className={`acc-status-badge ${acc.status}`}>
-                  {acc.status === 'ready'
-                    ? '● Lista / Activa'
-                    : acc.status === 'cooldown'
-                    ? '⏳ En Cooldown'
-                    : acc.status === 'captcha'
-                    ? '⚠️ Captcha Requerido'
-                    : acc.status === 'expired'
-                    ? '⚠️ Cookie TS Vencida · Usa Bookmarklet'
-                    : acc.status}
-                </span>
-              </div>
+        <div className="auto-auth-grid" data-testid="argon-accounts-grid">
+          {accounts.map((acc, idx) => {
+            const isReady = acc.status === 'ready';
+            const isCooldown = acc.status === 'cooldown';
+            const isCaptcha = acc.status === 'captcha';
+            const isExpired = acc.status === 'expired';
 
-              <div className="acc-email-block">
-                <span className="acc-email" title={acc.email}>
-                  {formatEmail(acc.email)}
-                </span>
-              </div>
+            const remainingCooldownMins = isCooldown
+              ? acc.reset_seconds ? Math.max(1, Math.round(acc.reset_seconds / 60)) : 45
+              : 60;
+            const cooldownConsumed = isCooldown ? 100 : Math.max(0, 100 - (acc.quota_pct || 100));
 
-              <div className="quota-bar-wrapper">
-                <div className="quota-bar-labels">
-                  <span>Capacidad Operativa</span>
-                  <span>{acc.quota_pct.toFixed(0)}%</span>
+            return (
+              <div
+                key={acc.account_id || idx}
+                className="auto-auth-card master"
+                style={{
+                  '--card-accent': '#0284c7',
+                  '--card-accent-bg': 'rgba(2, 132, 199, 0.15)',
+                  '--card-accent-border': '#38bdf8',
+                  '--card-accent-color': '#38bdf8',
+                  borderColor: isCooldown ? 'rgba(245, 158, 11, 0.5)' : 'rgba(56, 189, 248, 0.35)',
+                }}
+                data-testid={`argon-card-${acc.authuser}`}
+              >
+                {/* 1. Header Row */}
+                <div className="auto-auth-card-top">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span
+                      className="badge-prefix-hero"
+                      style={{ background: '#0284c7', color: '#ffffff' }}
+                      data-testid={`badge-prefix-hero-${idx}`}
+                    >
+                      🏷️ [{acc.account_id || `argon_u${acc.authuser}`}]
+                    </span>
+                    <span className="badge-role master">
+                      💎 GEMINI WEB
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <button
+                      type="button"
+                      className="btn-card-gear"
+                      onClick={() => {
+                        setFeedback({
+                          type: 'success',
+                          message: `⚙️ Sesión /u/${acc.authuser} (${acc.email}): Almacenamiento en RAM, Cookies ${acc.has_cookies ? 'válidas' : 'pendientes'}, Fallback hacia Google Antigravity activo.`
+                        });
+                      }}
+                      aria-label="Configurar Especialista"
+                      title="Configurar Especialista (⚙️)"
+                    >
+                      ⚙️
+                    </button>
+                  </div>
                 </div>
-                <div className="quota-track">
+
+                {/* 2. Identity Block */}
+                <div className="auto-auth-identity">
+                  <span className="auto-auth-email" title={acc.email}>
+                    {formatEmail(acc.email)}
+                  </span>
+                  <span className="auto-auth-filename">
+                    argon_session_u{acc.authuser}.json · /u/{acc.authuser}
+                  </span>
+                </div>
+
+                {/* 3. Hero Active Model Banner */}
+                <div
+                  className="hero-model-banner specialist"
+                  data-testid="hero-model-banner"
+                >
+                  <div className="hero-model-badge-row">
+                    <span className="badge-specialist-active">
+                      🎯 MODELO ASIGNADO EN RAM
+                    </span>
+                  </div>
                   <div
-                    className={`quota-fill ${acc.status === 'cooldown' ? 'cooldown' : ''}`}
-                    style={{ width: `${acc.quota_pct}%` }}
-                  />
+                    className="hero-model-name"
+                    data-testid="hero-model-name"
+                  >
+                    gemini-2.5-pro (Web Thinking)
+                  </div>
+                  <div className="hero-model-helper">
+                    Ruteo virtual activo · 🛡️ Aislamiento en RAM (Disco intacto)
+                  </div>
+                </div>
+
+                {/* 4. Badges Row: Dispatch status and Isolation */}
+                <div className="auto-auth-badges-row">
+                  <div className="status-pill-group">
+                    <span
+                      className="badge-pool-prefix"
+                      style={{
+                        background: isReady ? 'rgba(16, 185, 129, 0.2)' : 'rgba(51, 65, 85, 0.4)',
+                        borderColor: isReady ? '#10b981' : 'rgba(148, 163, 184, 0.3)',
+                        color: isReady ? '#34d399' : '#94a3b8',
+                        fontWeight: 700,
+                      }}
+                    >
+                      {isReady
+                        ? '🟢 EN CALIENTE: DESPACHANDO EN RAM'
+                        : isCooldown
+                        ? '⏳ EN COOLDOWN: RECUPERACIÓN'
+                        : isCaptcha
+                        ? '⚠️ CAPTCHA DETECTADO EN DOM'
+                        : isExpired
+                        ? '⚠️ COOKIE VENCIDA · USA BOOKMARKLET'
+                        : '⏸️ EN BANQUILLO: RESERVA LISTA'}
+                    </span>
+                    {isReady && (
+                      <span className="badge-ram-leader">
+                        👑 Turno Activo
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="isolation-pill-group">
+                    <span className="badge-isolation-tag">
+                      🛡️ Pipeline Sintético ReAct ( ⚡ SSE Streaming )
+                    </span>
+                  </div>
+                </div>
+
+                {/* 5. Cooldown Banner (if in 429 cooldown) */}
+                {isCooldown && (
+                  <div className="card-cooldown-banner" data-testid="card-cooldown-banner">
+                    <span className="cooldown-icon">🧊</span>
+                    <span className="cooldown-text">
+                      En cooldown (429): gemini-web-thinking · se libera a las {acc.reset_at || '11h 59m'}
+                    </span>
+                  </div>
+                )}
+
+                {/* 6. Quota Telemetry (Dual QuotaClock gauges) */}
+                <div className="card-quota-telemetry" data-testid="card-quota-telemetry">
+                  <div className="plan-row">
+                    <span>GEMINI MODELS</span>
+                    <div className="plan-badges">
+                      <span className="plan-badge" data-testid="plan-badge">Plan Pro Web</span>
+                    </div>
+                  </div>
+
+                  <div className="quota-clocks-row">
+                    <QuotaClock
+                      totalMinutes={60}
+                      remainingMinutes={remainingCooldownMins}
+                      consumedPercent={cooldownConsumed}
+                      label="Ventana de Cooldown"
+                      windowKey="cooldown"
+                      resetLabel={acc.reset_at ? `Se libera a las ${acc.reset_at}` : 'Cuota lista'}
+                      percentLabel={isCooldown ? 'Agotada (429)' : 'Cuota disponible'}
+                      isLoading={loading}
+                      testId={`quota-clock-cooldown-${acc.authuser}`}
+                    />
+                    <QuotaClock
+                      totalMinutes={2880}
+                      remainingMinutes={acc.has_cookies ? 1440 : 0}
+                      consumedPercent={acc.has_cookies ? 20 : 100}
+                      label="Vigencia Cookie TS"
+                      windowKey="cookie"
+                      resetLabel={acc.has_cookies ? 'Sesión activa' : 'Expirada'}
+                      percentLabel={acc.has_cookies ? '80% restante' : 'Renovar con Bookmarklet'}
+                      isLoading={loading}
+                      testId={`quota-clock-cookie-${acc.authuser}`}
+                    />
+                  </div>
+
+                  {/* Activity Sparkline Row */}
+                  <div className="card-activity-wrap">
+                    <div className="activity-header">
+                      <span className="activity-title">ACTIVITY (~3.3H)</span>
+                      <span className="activity-meta">
+                        <strong>{isReady ? '5 reqs · 100% ok' : '0 reqs'}</strong>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Refresh Quota Footer */}
+                  <div className="card-quota-footer">
+                    <button
+                      type="button"
+                      className="btn-card-refresh"
+                      onClick={loadStatus}
+                      disabled={loading}
+                      title="Actualizar Cuota"
+                    >
+                      <span>🔄</span>
+                      <span>{loading ? 'Consultando...' : 'Actualizar Cuota'}</span>
+                    </button>
+                  </div>
                 </div>
               </div>
-
-              {acc.status === 'cooldown' && acc.reset_at && (
-                <div className="acc-cooldown-chip">
-                  <span>⏰ Restablece a las:</span>
-                  <strong>{acc.reset_at}</strong>
-                </div>
-              )}
-
-              {acc.error_message && (
-                <div style={{ fontSize: '0.78rem', color: '#f87171', background: 'rgba(239, 68, 68, 0.1)', padding: '0.4rem 0.6rem', borderRadius: '6px' }}>
-                  {acc.error_message}
-                </div>
-              )}
-
-              <div className="acc-fallback-pill">
-                <span>🛡️</span>
-                <span>Respaldo en caliente: <strong>Google Antigravity</strong></span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

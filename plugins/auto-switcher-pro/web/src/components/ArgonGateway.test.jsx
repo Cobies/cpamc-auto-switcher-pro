@@ -86,8 +86,14 @@ describe('ArgonGateway Component', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Playwright Daemon Activo')).toBeTruthy();
-      expect(screen.getByText('19:45:00')).toBeTruthy();
+      expect(screen.getByText(/19:45:00/)).toBeTruthy();
       expect(screen.getByText('user2@google.com')).toBeTruthy();
+      expect(screen.getAllByText('🎯 MODELO ASIGNADO EN RAM').length).toBe(2);
+      expect(screen.getAllByText('gemini-2.5-pro (Web Thinking)').length).toBe(2);
+      expect(screen.getByText('👑 Turno Activo')).toBeTruthy();
+      expect(screen.getAllByText('Plan Pro Web').length).toBe(2);
+      expect(screen.getByTestId('quota-clock-cooldown-0')).toBeTruthy();
+      expect(screen.getByTestId('quota-clock-cookie-0')).toBeTruthy();
     });
   });
 
