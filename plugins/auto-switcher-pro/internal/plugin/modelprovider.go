@@ -764,6 +764,43 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 		cascade = append(cascade, allMembers...)
 	}
 
+	// Ghost Warmup Shadow Targeting: Si la petición viene etiquetada con un objetivo de calentamiento explícito
+	// (por ejemplo, desde la extensión con x-warmup-target o x-target-auth),
+	// enrutar directamente a esa reserva para calentar el Prompt Cache de Google sin alterar el ActiveLeader en RAM.
+	var warmupTarget string
+	if req.Options.Headers != nil {
+		for k, vals := range req.Options.Headers {
+			if (strings.EqualFold(k, "x-warmup-target") || strings.EqualFold(k, "x-target-auth")) && len(vals) > 0 {
+				warmupTarget = strings.TrimSpace(vals[0])
+				break
+			}
+		}
+	}
+	if warmupTarget != "" {
+		for _, cand := range req.Candidates {
+			candEmail := strings.TrimSuffix(strings.TrimPrefix(cand.ID, "antigravity-"), ".json")
+			wEmail := strings.TrimSuffix(strings.TrimPrefix(warmupTarget, "antigravity-"), ".json")
+			if strings.EqualFold(cand.ID, warmupTarget) || strings.EqualFold(candEmail, wEmail) {
+				if cand.Status == "active" || cand.Status == "" {
+					analytics.RecordAuditEvent(analytics.AuditEvent{
+						PoolID:         pool.ID,
+						EventType:      "GHOST_WARMUP",
+						TriggerReason:  "shadow_inference_prompt_cache",
+						PreviousLeader: currentActive,
+						NewLeader:      cand.ID,
+						LatencyMs:      1,
+						StatusCode:     200,
+						DetailsJSON:    `{"status":"prompt_cache_warmed","mode":"shadow_inference"}`,
+					})
+					return schedulerPickResponse{
+						Handled: true,
+						AuthID:  cand.ID,
+					}
+				}
+			}
+		}
+	}
+
 	// 3) Pick the first cascade member present among the available candidates.
 	// REGLA PREDICTIVA (CTO): Si el líder dinámico actual está cerca de su límite seguro (>80%)
 	// y hay otros miembros del pool sanos, rotar preventivamente el liderazgo antes del 429.

@@ -204,6 +204,59 @@ let globalQueue: Promise<void> = Promise.resolve();
 let lastForcedRunTime = 0;
 const FORCED_DEBOUNCE_MS = 3_000;
 
+let latestSystemPrompt = "";
+const lastWarmupTimestamps = new Map<string, number>();
+
+function triggerShadowWarmup(
+	baseUrl: string,
+	apiKey: string,
+	reserveAccount: string,
+	targetModel?: string,
+	poolPrefix?: string,
+): void {
+	const now = Date.now();
+	const lastWarmup = lastWarmupTimestamps.get(reserveAccount) || 0;
+	// No emitir más de 1 warmup cada 4 minutos por cuenta (alineado al TTL de 5m de Google KV Cache)
+	if (now - lastWarmup < 240_000) {
+		return;
+	}
+	lastWarmupTimestamps.set(reserveAccount, now);
+
+	// Disparar en segundo plano completamente asíncrono y desacoplado (fire-and-forget)
+	setTimeout(async () => {
+		try {
+			const model = targetModel || "gemini-3.8-flash-high";
+			const requestModel = poolPrefix ? `${poolPrefix}/${model}` : model;
+			const promptContent = latestSystemPrompt || "Standby assistant ready.";
+
+			const headers: Record<string, string> = {
+				"Content-Type": "application/json",
+				"X-Warmup-Target": reserveAccount,
+			};
+			if (apiKey) {
+				headers["Authorization"] = `Bearer ${apiKey}`;
+			}
+
+			await fetch(`${baseUrl}/v1/chat/completions`, {
+				method: "POST",
+				headers,
+				body: JSON.stringify({
+					model: requestModel,
+					messages: [
+						{ role: "system", content: promptContent },
+						{ role: "user", content: "ping" },
+					],
+					max_tokens: 1,
+					temperature: 0,
+				}),
+				signal: AbortSignal.timeout(10_000),
+			});
+		} catch {
+			// El shadow warmup es silencioso y defensivo
+		}
+	}, 150);
+}
+
 function notify(ctx: any, message: string, level: "info" | "warning" | "error" = "info"): void {
 	try {
 		ctx?.ui?.notify?.(message, level);
@@ -241,6 +294,9 @@ async function attemptVirtualRotation(ctx: any, source?: string, force = false):
 			if (data?.ok) {
 				// Si el backend indicó que el líder está sano y no fue necesario rotar (ahorro de caché)
 				if (data.rotated === false) {
+					if (data.warmup_needed && data.warmup_reserve) {
+						triggerShadowWarmup(baseUrl, key, data.warmup_reserve, data.target_model, data.prefix);
+					}
 					return true;
 				}
 
@@ -309,6 +365,13 @@ export function scheduleAutoSwitcher(ctx: any, reason: string, force = false): v
 }
 
 export function initFailoverHook(pi: ExtensionAPI): void {
+
+	// Capturar system prompt de la sesión para Ghost Warmup con inferencia real
+	pi.on("before_agent_start", (event: any) => {
+		if (typeof event?.systemPrompt === "string" && event.systemPrompt.trim()) {
+			latestSystemPrompt = event.systemPrompt;
+		}
+	});
 
 	// 1. Immediate detection of HTTP 429 response from provider before stream consumption
 	pi.on("after_provider_response", (event: any, ctx: any) => {

@@ -719,4 +719,52 @@ func TestExtractSessionID_UniversalFallback(t *testing.T) {
 	}
 }
 
+func TestSchedulerPickGhostWarmupShadowTarget(t *testing.T) {
+	registry := testModelProviderRegistry(t)
+	previous := activeRegistry
+	activeRegistry = func() *PoolRegistry { return registry }
+	t.Cleanup(func() { activeRegistry = previous })
+
+	// Normal request without warmup header picks Leader A
+	reqNormal := schedulerPickRequest{
+		Provider: "antigravity",
+		Model:    "claude-sonnet-4-6",
+		Options:  schedulerOptions{Metadata: map[string]any{"requested_model": "clau/claude-sonnet-4-6"}},
+		Candidates: []schedulerCandidate{
+			{ID: "antigravity-a@gmail.com.json", Provider: "antigravity", Status: "active"},
+			{ID: "antigravity-b@gmail.com.json", Provider: "antigravity", Status: "active"},
+		},
+	}
+	respNormal := handleSchedulerPick(reqNormal)
+	if !respNormal.Handled || respNormal.AuthID != "antigravity-a@gmail.com.json" {
+		t.Fatalf("expected leader A picked for normal request: %+v", respNormal)
+	}
+
+	// Shadow request with X-Warmup-Target header must target reserve B directly without mutating leader
+	reqWarmup := schedulerPickRequest{
+		Provider: "antigravity",
+		Model:    "claude-sonnet-4-6",
+		Options: schedulerOptions{
+			Metadata: map[string]any{"requested_model": "clau/claude-sonnet-4-6"},
+			Headers: map[string][]string{
+				"X-Warmup-Target": {"antigravity-b@gmail.com.json"},
+			},
+		},
+		Candidates: []schedulerCandidate{
+			{ID: "antigravity-a@gmail.com.json", Provider: "antigravity", Status: "active"},
+			{ID: "antigravity-b@gmail.com.json", Provider: "antigravity", Status: "active"},
+		},
+	}
+	respWarmup := handleSchedulerPick(reqWarmup)
+	if !respWarmup.Handled || respWarmup.AuthID != "antigravity-b@gmail.com.json" {
+		t.Fatalf("expected warmup target B picked: %+v", respWarmup)
+	}
+
+	// Verify ActiveLeader in RAM was NOT mutated by shadow warmup
+	pool, _ := registry.GetPool("clau")
+	if pool.ActiveLeader != "" && pool.ActiveLeader != "antigravity-a@gmail.com.json" {
+		t.Fatalf("active leader should remain unchanged after shadow warmup, got: %q", pool.ActiveLeader)
+	}
+}
+
 

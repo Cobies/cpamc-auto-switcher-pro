@@ -830,7 +830,7 @@ func handlePoolsHTTP(req ManagementRequestPayload) ([]byte, error) {
 			if !isForced && (reason == "agent turn" || reason == "preventive" || (rotPayload.Force != nil && !*rotPayload.Force)) {
 				predEngine := GetPredictiveEngine()
 				if !predEngine.ShouldPreventiveCool(currentLeader) {
-					return jsonManagementResponse(http.StatusOK, map[string]any{
+					resp := map[string]any{
 						"ok":             true,
 						"rotated":        false,
 						"pool_id":        pool.ID,
@@ -838,7 +838,46 @@ func handlePoolsHTTP(req ManagementRequestPayload) ([]byte, error) {
 						"current_leader": currentLeader,
 						"reason":         "leader_healthy",
 						"message":        fmt.Sprintf("Pool %s leader %s is healthy; rotation skipped to preserve prompt cache", pool.BasePrefix, currentLeader),
-					})
+					}
+
+					// Ghost Warmup Recommendation: si el líder está en fatiga >= 75% o enfriamiento,
+					// sugerir a la extensión de Pi la mejor reserva para pre-calentar el Prompt Cache con inferencia real
+					cEmail := strings.TrimSuffix(strings.TrimPrefix(currentLeader, "antigravity-"), ".json")
+					fatiguePct, isCooling, _ := predEngine.GetAccountStatus(cEmail)
+					if fatiguePct >= 75.0 || isCooling {
+						members := pool.AllMembers()
+						var bestReserve string
+						var bestScore float64 = -1
+						for _, m := range members {
+							if strings.EqualFold(m, currentLeader) {
+								continue
+							}
+							resEmail := strings.TrimSuffix(strings.TrimPrefix(m, "antigravity-"), ".json")
+							if predEngine.ShouldPreventiveCool(resEmail) {
+								continue
+							}
+							q, hasQ := predEngine.GetLiveQuota(resEmail)
+							score := 50.0
+							if hasQ {
+								score = q.Window5hPct + q.WeeklyPct
+							}
+							if score > bestScore {
+								bestScore = score
+								bestReserve = m
+							}
+						}
+						if bestReserve != "" {
+							targetModel := "gemini-3.8-flash-high"
+							if len(pool.Policy.TargetModels) > 0 {
+								targetModel = pool.Policy.TargetModels[0]
+							}
+							resp["warmup_needed"] = true
+							resp["warmup_reserve"] = bestReserve
+							resp["target_model"] = targetModel
+						}
+					}
+
+					return jsonManagementResponse(http.StatusOK, resp)
 				}
 			}
 
