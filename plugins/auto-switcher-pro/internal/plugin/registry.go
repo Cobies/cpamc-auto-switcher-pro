@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"auto-switcher-pro/internal/analytics"
 )
 
 const (
@@ -72,8 +74,6 @@ func familyCanonicalShortName(family, basePrefix string) string {
 	f := strings.ToLower(strings.TrimSpace(family))
 	b := strings.ToLower(strings.TrimSpace(basePrefix))
 	switch {
-	case strings.Contains(f, "argon") || strings.HasPrefix(b, "argon"):
-		return "argon"
 	case strings.Contains(f, "codex") || strings.HasPrefix(b, "codex"):
 		return "codex"
 	case strings.Contains(f, "claude") || strings.Contains(f, "sonnet") || strings.Contains(f, "opus") ||
@@ -103,8 +103,6 @@ func (p PoolDefinition) ActiveModelForAccount(authFile string) string {
 	}
 	fam := familyCanonicalShortName(p.Family, p.BasePrefix)
 	switch fam {
-	case "argon":
-		return "web-gemini/gemini-4-argon"
 	case "codex":
 		return "gpt-4o"
 	case "claude":
@@ -779,6 +777,7 @@ func handlePoolsHTTP(req ManagementRequestPayload) ([]byte, error) {
 				BasePrefix string `json:"base_prefix"`
 				PoolID     string `json:"pool_id"`
 				Reason     string `json:"reason"`
+				Force      *bool  `json:"force"`
 			}
 			if len(req.Body) > 0 {
 				_ = json.Unmarshal(req.Body, &rotPayload)
@@ -808,6 +807,41 @@ func handlePoolsHTTP(req ManagementRequestPayload) ([]byte, error) {
 				})
 			}
 
+			pool, ok := registry.GetPool(target)
+			if !ok {
+				return jsonManagementResponse(http.StatusBadRequest, map[string]string{
+					"error":   "pool_not_found",
+					"message": fmt.Sprintf("pool %q not found", target),
+				})
+			}
+
+			currentLeader := pool.ActiveLeader
+			if currentLeader == "" {
+				currentLeader = pool.LeaderAuth
+			}
+
+			reason := strings.TrimSpace(rotPayload.Reason)
+			if reason == "" {
+				reason = "manual_request"
+			}
+
+			isForced := rotPayload.Force != nil && *rotPayload.Force
+			// Si no es una rotación forzada (por error 429 o red), comprobar si el líder realmente necesita descanso
+			if !isForced && (reason == "agent turn" || reason == "preventive" || (rotPayload.Force != nil && !*rotPayload.Force)) {
+				predEngine := GetPredictiveEngine()
+				if !predEngine.ShouldPreventiveCool(currentLeader) {
+					return jsonManagementResponse(http.StatusOK, map[string]any{
+						"ok":             true,
+						"rotated":        false,
+						"pool_id":        pool.ID,
+						"prefix":         pool.BasePrefix,
+						"current_leader": currentLeader,
+						"reason":         "leader_healthy",
+						"message":        fmt.Sprintf("Pool %s leader %s is healthy; rotation skipped to preserve prompt cache", pool.BasePrefix, currentLeader),
+					})
+				}
+			}
+
 			p, oldLeader, newLeader, err := registry.RotatePoolLeader(target)
 			if err != nil {
 				return jsonManagementResponse(http.StatusBadRequest, map[string]string{
@@ -816,13 +850,18 @@ func handlePoolsHTTP(req ManagementRequestPayload) ([]byte, error) {
 				})
 			}
 
-			reason := strings.TrimSpace(rotPayload.Reason)
-			if reason == "" {
-				reason = "manual_request"
-			}
+			analytics.RecordAuditEvent(analytics.AuditEvent{
+				PoolID:         p.ID,
+				EventType:      "MANUAL_OR_HOOK",
+				TriggerReason:  reason,
+				PreviousLeader: oldLeader,
+				NewLeader:      newLeader,
+				StatusCode:     200,
+			})
 
 			return jsonManagementResponse(http.StatusOK, map[string]any{
 				"ok":         true,
+				"rotated":    true,
 				"pool_id":    p.ID,
 				"prefix":     p.BasePrefix,
 				"old_leader": oldLeader,

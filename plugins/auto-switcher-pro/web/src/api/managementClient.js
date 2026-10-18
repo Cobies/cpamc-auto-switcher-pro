@@ -1482,7 +1482,6 @@ export function buildManagedPoolCards(nodes = [], registeredPools = null) {
     const cards = [];
     registeredPools.forEach((pool) => {
       const familyKey = String(pool.family || '');
-      // gemini_pure → Gemini puro; gemini_sonnet/opus/claude (Claude del Paquete agy_*) y claude → Claude; codex/gpt → Codex
       const familyRole = familyKey.startsWith('gemini_pure')
         ? 'gemini'
         : (familyKey === 'codex' || familyKey.includes('codex') || familyKey.includes('openai') || familyKey.includes('gpt'))
@@ -1651,11 +1650,10 @@ export function buildManagedPoolCards(nodes = [], registeredPools = null) {
       ''
     ).toLowerCase();
 
-    // Only Antigravity accounts and Gemini Argon accounts form the cards
+    // Only Antigravity accounts form the cards
     const isAntigravity = provider === 'antigravity' || classification.fileName.startsWith('antigravity-');
-    const isArgon = provider === 'gemini_argon' || provider === 'gemini-argon' || classification.fileName.startsWith('gemini-argon');
 
-    if (!isAntigravity && !isArgon) {
+    if (!isAntigravity) {
       return;
     }
 
@@ -1718,27 +1716,6 @@ export function buildManagedPoolCards(nodes = [], registeredPools = null) {
       failed: masterData.failed || 0,
       nextRetryAfter: masterData.next_retry_after || '',
     };
-
-    // Dedicated card for Gemini Argon web sessions
-    if (masterFileName.startsWith('gemini-argon') || masterFileName.includes('argon')) {
-      const argonPrefix = masterPrefix || 'argon';
-      const match = argonPrefix.match(/^(.*)_(\d+)$/);
-      cards.push({
-        cardId: `${masterFileName}::argon`,
-        masterFileName,
-        maskedEmail,
-        familyRole: 'argon',
-        assignedPrefix: argonPrefix,
-        poolRole: match ? 'reserve' : 'leader',
-        activePoolBase: match ? match[1] : argonPrefix,
-        exclusionBadges: masterInfo.classification?.exclusionBadges || [],
-        excludedModels: masterInfo.classification?.excludedModels || [],
-        excluded_models: masterInfo.classification?.excludedModels || [],
-        virtualFileName: '',
-        ...accountTelemetry,
-      });
-      return;
-    }
 
     // Virtual files derived from this master
     const relatedVirtuals = virtualEntries.filter(
@@ -2681,43 +2658,6 @@ export async function rotatePool(idOrPrefix = '', options = {}) {
     throw new Error(data?.message || 'Error al ejecutar rotación de pool');
   }
   return data;
-}
-
-/**
- * Obtiene el estado del daemon companion y las sesiones de Gemini 4 Argon.
- */
-export async function getArgonStatus(options = {}) {
-  const res = await apiFetch('/v0/management/auto-switcher-pro/argon/status', {
-    ...options,
-    method: 'GET',
-  });
-  return res.json();
-}
-
-/**
- * Sincroniza e ingesta sesiones/cookies de Gemini Argon.
- */
-export async function syncArgonSession(payload, options = {}) {
-  const res = await apiFetch('/v0/management/auto-switcher-pro/argon/sync-session', {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  return res.json();
-}
-
-/**
- * Elimina una sesión de Gemini Argon en RAM y disco.
- */
-export async function deleteArgonSession(authuser, options = {}) {
-  const res = await apiFetch('/v0/management/auto-switcher-pro/argon/delete-session', {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ authuser: String(authuser || '0') }),
-  });
-  return res.json();
 }
 
 

@@ -308,9 +308,7 @@ func scanOrphanConfigProviders(configPath, authDir string) []OrphanProviderInfo 
 
 		// Check if any auth file references this provider or prefix
 		hasAuth := false
-		if provName == "gemini-argon" || provName == "gemini_argon" || provPrefix == "argon" {
-			hasAuth = true
-		} else if _, ok := authProviders[provName]; ok {
+		if _, ok := authProviders[provName]; ok {
 			hasAuth = true
 		}
 		if provPrefix != "" {

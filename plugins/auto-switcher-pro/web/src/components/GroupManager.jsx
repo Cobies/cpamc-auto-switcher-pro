@@ -22,7 +22,6 @@ const poolFamilyRole = (family) => {
   if (f === 'gemini_pure' || f.startsWith('gemini_pure')) return 'gemini';
   if (f === 'codex' || f.startsWith('codex')) return 'codex';
   if (f === 'gemini_sonnet' || f === 'gemini_opus' || f === 'gemini_claude' || f === 'claude') return 'claude';
-  if (f === 'gemini_argon' || f.startsWith('gemini_argon') || f === 'argon') return 'argon';
   return f;
 };
 
@@ -88,15 +87,6 @@ const MODEL_FAMILIES = {
     quota: 'Codex',
     note: 'Cuentas individuales Codex / OpenAI (prefijo codex*). Convención: codex, codex2...',
   },
-  argon: {
-    label: 'Gemini 4 Argon Web',
-    icon: '⚡',
-    hintPrefix: 'argon',
-    provider: 'gemini-argon',
-    quota: 'Gemini Web Reasoning',
-    targetPatterns: ['argon', 'gemini-4-argon'],
-    note: 'Pool de sesiones Web Google Gemini Pro con Thinking Reasoning nativo. Convención: argon, argon2...',
-  },
 };
 
 // Patrones de nombre por familia objetivo: se usan para liberar modelos del
@@ -108,8 +98,6 @@ const FAMILY_TARGET_PATTERNS = {
   gemini_claude: ['claude', 'gpt'],
   claude: ['claude', 'gpt'],
   codex: ['codex'],
-  argon: ['gemini-4-argon', 'gemini-2.5-pro'],
-  gemini_argon: ['gemini-4-argon', 'gemini-2.5-pro'],
 };
 
 // Determina si un prefijo es descendiente estricto de un pool base:
@@ -148,9 +136,6 @@ function matchesFamilyModel(base, modelId, exclude55 = false) {
   }
   if (b.startsWith('codex')) {
     return id.includes('codex');
-  }
-  if (b.startsWith('argon')) {
-    return id.includes('argon') || id.includes('gemini');
   }
   return true;
 }
@@ -481,7 +466,14 @@ export default function GroupManager({
       return nodes
         .filter((n) => {
           const prov = (n.data?.provider || n.data?.accountType || '').toLowerCase();
-          if (prov !== famProvider) return false;
+          const fileName = n.data?.fileName || n.name || n.id || '';
+          const matchesProv = prov === famProvider;
+          if (!matchesProv) return false;
+
+          // Si ya está asignada a un pool registrado de esta misma familia/rol, no es libre
+          const sameRoleMembers = registryMembersByRole.get(targetFamilyRole || famProvider);
+          if (sameRoleMembers && sameRoleMembers.has(fileName)) return false;
+
           const pref = (n.data?.prefix || '').trim();
           return !pref || pref.startsWith('unlinked_');
         })
@@ -910,8 +902,7 @@ export default function GroupManager({
           }
           return cur;
         };
-        // [Homologación Antigravity] Filtrar únicamente modelos que pertenezcan a Antigravity (gemini, claude, etc.)
-        // para NUNCA inyectar modelos ajenos (NVIDIA, OpenCode, GLM, Grok, etc.) ni facadas virtuales de pool (Pool-XX-*)
+        // Filtrar modelos válidos para la familia
         const isAntigravityModel = (id) => {
           const lower = (id || '').toLowerCase();
           if (lower.startsWith('pool-') || lower.includes('pool-')) return false;

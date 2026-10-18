@@ -4,6 +4,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"auto-switcher-pro/internal/analytics"
 )
 
 // PredictiveConfig define la configuración del motor predictivo
@@ -71,8 +73,40 @@ func GetPredictiveEngine() *PredictiveEngine {
 			quotas:       make(map[string]AccountQuotaTelemetry),
 			lastActivity: make(map[string]time.Time),
 		}
+		globalPredictiveEngine.hydrateFromSQLite()
 	})
 	return globalPredictiveEngine
+}
+
+// hydrateFromSQLite restores cooling, activity timestamps, and quotas from persistent SQLite storage.
+func (pe *PredictiveEngine) hydrateFromSQLite() {
+	healthMap, err := analytics.GetAllAccountHealth()
+	if err != nil || len(healthMap) == 0 {
+		return
+	}
+	pe.mu.Lock()
+	defer pe.mu.Unlock()
+
+	now := time.Now()
+	for key, h := range healthMap {
+		if h.CoolUntilMs > 0 {
+			coolUntil := time.UnixMilli(h.CoolUntilMs)
+			if coolUntil.After(now) {
+				pe.cooling[key] = coolUntil
+			}
+		}
+		if h.Window5hPct > 0 || h.WeeklyPct > 0 {
+			pe.quotas[key] = AccountQuotaTelemetry{
+				AccountKey:  key,
+				Window5hPct: h.Window5hPct,
+				WeeklyPct:   h.WeeklyPct,
+				UpdatedAt:   time.UnixMilli(h.UpdatedAtMs),
+			}
+		}
+		if h.LastUsedMs > 0 {
+			pe.lastActivity[key] = time.UnixMilli(h.LastUsedMs)
+		}
+	}
 }
 
 // GetConfig devuelve la configuración actual de forma thread-safe
@@ -126,9 +160,37 @@ func (pe *PredictiveEngine) RecordActivity(accountEmail string) {
 
 	// Si superó el umbral, marcar enfriamiento preventivo
 	limit := float64(pe.config.MaxReqsPerHour) * (pe.config.ThresholdPct / 100.0)
+	isCooling := false
+	var coolUntil time.Time
 	if float64(len(valid)) >= limit {
-		pe.cooling[key] = now.Add(time.Duration(pe.config.CoolingMinutes) * time.Minute)
+		coolUntil = now.Add(time.Duration(pe.config.CoolingMinutes) * time.Minute)
+		pe.cooling[key] = coolUntil
+		isCooling = true
 	}
+
+	// Persistir salud y enfriamiento en SQLite
+	var coolUntilMs int64
+	if isCooling {
+		coolUntilMs = coolUntil.UnixMilli()
+	} else if c, ok := pe.cooling[key]; ok && c.After(now) {
+		coolUntilMs = c.UnixMilli()
+	}
+	var w5h, weekly float64
+	if q, ok := pe.quotas[key]; ok {
+		w5h = q.Window5hPct
+		weekly = q.WeeklyPct
+	}
+	analytics.SaveAccountHealth(analytics.AccountHealth{
+		AccountKey:     key,
+		Email:          accountEmail,
+		CoolUntilMs:    coolUntilMs,
+		HourlyReqCount: len(valid),
+		HealthScore:    100.0,
+		Window5hPct:    w5h,
+		WeeklyPct:      weekly,
+		LastUsedMs:     now.UnixMilli(),
+		UpdatedAtMs:    now.UnixMilli(),
+	})
 }
 
 // RecordLiveQuota actualiza la telemetría viva de cuotas obtenida de Antigravity
@@ -148,6 +210,19 @@ func (pe *PredictiveEngine) RecordLiveQuota(telemetry AccountQuotaTelemetry) {
 	}
 	telemetry.AccountKey = key
 	pe.quotas[key] = telemetry
+
+	var coolUntilMs int64
+	if c, ok := pe.cooling[key]; ok && c.After(time.Now()) {
+		coolUntilMs = c.UnixMilli()
+	}
+	analytics.SaveAccountHealth(analytics.AccountHealth{
+		AccountKey:  key,
+		Email:       telemetry.AccountKey,
+		CoolUntilMs: coolUntilMs,
+		Window5hPct: telemetry.Window5hPct,
+		WeeklyPct:   telemetry.WeeklyPct,
+		UpdatedAtMs: telemetry.UpdatedAt.UnixMilli(),
+	})
 }
 
 // GetLiveQuota obtiene la telemetría viva de cuotas para una cuenta

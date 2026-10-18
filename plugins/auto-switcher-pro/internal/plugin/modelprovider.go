@@ -467,12 +467,6 @@ func modelCatalogForAuth(diskPrefix string, memberPools []PoolDefinition) []plug
 		}
 	}
 
-	// If this auth is an Argon credential, add Argon models
-	if diskPrefix == "argon" || strings.Contains(strings.ToLower(diskPrefix), "argon") {
-		add("gemini-4-argon")
-		add("argon/gemini-4-argon")
-	}
-
 	sortModelsByID(models)
 	return models
 }
@@ -485,7 +479,7 @@ func poolPrefixedCatalog(registry *PoolRegistry) []pluginModelInfo {
 	pools := registry.ListPools()
 	models := make([]pluginModelInfo, 0, 16)
 	seen := make(map[string]struct{})
-	addModelCustom := func(id, display, ownedBy string) {
+	addModel := func(id, display string) {
 		id = strings.TrimSpace(id)
 		if id == "" {
 			return
@@ -497,21 +491,14 @@ func poolPrefixedCatalog(registry *PoolRegistry) []pluginModelInfo {
 		models = append(models, pluginModelInfo{
 			ID:          id,
 			Object:      "model",
-			OwnedBy:     ownedBy,
+			OwnedBy:     antigravityProviderKey,
 			DisplayName: display,
 		})
 	}
-	addModel := func(id, display string) {
-		addModelCustom(id, display, antigravityProviderKey)
-	}
 
-	hasArgonPool := false
 	for _, pool := range pools {
 		if !pool.IsEnabled() {
 			continue
-		}
-		if familyCanonicalShortName(pool.Family, pool.BasePrefix) == "argon" {
-			hasArgonPool = true
 		}
 		cleanPoolName := strings.TrimSpace(pool.DisplayName)
 		if cleanPoolName == "" {
@@ -519,16 +506,6 @@ func poolPrefixedCatalog(registry *PoolRegistry) []pluginModelInfo {
 		}
 		if cleanPoolName != "" {
 			addModel(cleanPoolName, cleanPoolName)
-		}
-	}
-
-	// Modalidad A (Solo): Si NO hay un pool activo de Argon y existen cuentas sincronizadas en disco/RAM,
-	// publicar directamente gemini-4-argon y las variantes con prefijo argon/
-	if !hasArgonPool {
-		argonAccounts := GetArgonStore().ListAccounts()
-		if len(argonAccounts) > 0 {
-			addModelCustom("gemini-4-argon", "Gemini 4 Argon (Web Thinking)", "gemini-argon")
-			addModelCustom("argon/gemini-4-argon", "Gemini 4 Argon (Web Thinking)", "gemini-argon")
 		}
 	}
 
@@ -564,18 +541,6 @@ func routeDecisionFor(registry *PoolRegistry, requestedModel string) modelRouteR
 		}
 	}
 
-	// 0.5 Direct Argon model routes (Modalidad A - Solo)
-	if trimmed == "gemini-4-argon" || strings.HasPrefix(trimmed, "argon/") {
-		targetM := "gemini-4-argon"
-		return modelRouteResponse{
-			Handled:     true,
-			TargetKind:  "provider",
-			Target:      "gemini-argon",
-			TargetModel: targetM,
-			Reason:      fmt.Sprintf("auto-switcher-pro argon direct route (%s -> %s)", trimmed, targetM),
-		}
-	}
-
 	slash := strings.Index(trimmed, "/")
 	if slash <= 0 {
 		// Direct Clean Pool Identifier invocation (e.g. "Pool-01-gemini")
@@ -603,16 +568,10 @@ func routeDecisionFor(registry *PoolRegistry, requestedModel string) modelRouteR
 			canonicalTarget = pool.ActiveModelForAccount(activeAuth)
 		}
 		resolvedModel := ResolveActiveModelFallback(canonicalTarget)
-		targetKind := "provider"
-		targetProvider := antigravityProviderKey
-		if familyCanonicalShortName(pool.Family, pool.BasePrefix) == "argon" {
-			targetProvider = "gemini-argon"
-			resolvedModel = "gemini-4-argon"
-		}
 		return modelRouteResponse{
 			Handled:     true,
-			TargetKind:  targetKind,
-			Target:      targetProvider,
+			TargetKind:  "provider",
+			Target:      antigravityProviderKey,
 			TargetModel: resolvedModel,
 			Reason:      fmt.Sprintf("auto-switcher-pro sovereign pool route (%s -> %s)", trimmed, resolvedModel),
 		}
@@ -632,15 +591,10 @@ func routeDecisionFor(registry *PoolRegistry, requestedModel string) modelRouteR
 	resolvedRest := ResolveActiveModelFallback(rest)
 	for _, target := range poolTargets(pool) {
 		if strings.EqualFold(target, rest) || strings.EqualFold(target, resolvedRest) {
-			targetProvider := antigravityProviderKey
-			if familyCanonicalShortName(pool.Family, pool.BasePrefix) == "argon" {
-				targetProvider = "gemini-argon"
-				resolvedRest = "gemini-4-argon"
-			}
 			return modelRouteResponse{
 				Handled:     true,
 				TargetKind:  "provider",
-				Target:      targetProvider,
+				Target:      antigravityProviderKey,
 				TargetModel: resolvedRest,
 				Reason:      fmt.Sprintf("auto-switcher-pro 2N pool route (%s)", pool.BasePrefix),
 			}
@@ -686,6 +640,25 @@ func handleModelForAuth(req modelForAuthRequest) modelResponse {
 // handleModelRoute serves model.route.
 func handleModelRoute(req modelRouteRequest) modelRouteResponse {
 	return routeDecisionFor(activeRegistry(), req.RequestedModel)
+}
+
+// extractSessionID extracts an active session identifier from request headers or metadata.
+func extractSessionID(req schedulerPickRequest) string {
+	if req.Options.Headers != nil {
+		for k, vals := range req.Options.Headers {
+			if strings.EqualFold(k, "x-session-id") || strings.EqualFold(k, "pi-session-id") || strings.EqualFold(k, "session-id") {
+				if len(vals) > 0 && strings.TrimSpace(vals[0]) != "" {
+					return strings.TrimSpace(vals[0])
+				}
+			}
+		}
+	}
+	if req.Options.Metadata != nil {
+		if s, ok := req.Options.Metadata["session_id"].(string); ok && strings.TrimSpace(s) != "" {
+			return strings.TrimSpace(s)
+		}
+	}
+	return ""
 }
 
 // schedulerPickCascade resolves auth selection for pool requests with the
@@ -817,6 +790,8 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 		}
 	}
 
+	sessionID := extractSessionID(req)
+
 	// Predictive Token-Budget Routing:
 	// Si se debe recurrir a las reservas (failover o rotación preventiva), ordenar las reservas
 	// disponibles por mayor cuota combinada (Window5hPct + WeeklyPct) para asignar la tarea
@@ -847,6 +822,27 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 		orderedCascade = cascade
 	}
 
+	// Session Affinity Caching: si la sesión tiene una cuenta asignada válida y sana,
+	// darle prioridad absoluta al frente de la cascada para no perder la memoria caché (TTL 5 min)
+	if sessionID != "" && !skipLeaderPredictive {
+		if aff, ok := analytics.GetSessionAffinity(sessionID, pool.ID); ok {
+			affEmail := strings.ToLower(aff.AccountEmail)
+			for idx, authFile := range orderedCascade {
+				mEmail := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(authFile, "antigravity-"), ".json"))
+				if mEmail == affEmail {
+					if _, isAvail := available[strings.ToLower(authFile)]; isAvail && !predEngine.ShouldPreventiveCool(mEmail) {
+						if idx > 0 {
+							matched := orderedCascade[idx]
+							orderedCascade = append(orderedCascade[:idx], orderedCascade[idx+1:]...)
+							orderedCascade = append([]string{matched}, orderedCascade...)
+						}
+						break
+					}
+				}
+			}
+		}
+	}
+
 	for i, authFile := range orderedCascade {
 		// Si el motor predictivo decidió enfriar al líder actual y estamos en i == 0, rotar al siguiente miembro
 		if i == 0 && skipLeaderPredictive {
@@ -870,6 +866,33 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 
 			// Registrar actividad en el motor predictivo para control de fatiga
 			predEngine.RecordActivity(email)
+
+			// Preservar afinidad de sesión para no invalidar el caché en turnos subsiguientes
+			if sessionID != "" {
+				analytics.SetSessionAffinity(analytics.SessionAffinity{
+					SessionID:    sessionID,
+					PoolID:       pool.ID,
+					AccountEmail: email,
+				})
+			}
+
+			// Registrar evento de auditoría persistente ante failovers o rotaciones preventivas
+			if isFailover {
+				eventType := "FAILOVER"
+				triggerReason := "reserve_activation"
+				if skipLeaderPredictive {
+					eventType = "PREVENTIVE"
+					triggerReason = "leader_fatigue_or_critical_quota"
+				}
+				analytics.RecordAuditEvent(analytics.AuditEvent{
+					PoolID:         pool.ID,
+					EventType:      eventType,
+					TriggerReason:  triggerReason,
+					PreviousLeader: leaderEmail,
+					NewLeader:      email,
+					StatusCode:     200,
+				})
+			}
 
 			// Resolver el modelo especialista específico de esta cuenta (member_models o fallback del pool)
 			resolvedTargetModel := ResolveActiveModelFallback(pool.ActiveModelForAccount(exactID))
@@ -895,39 +918,7 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 		}
 	}
 
-	// 4) Failover Híbrido "Web Argon -> Flota Antigravity" sin Caída de Stream:
-	// Si el pool es de tipo Argon y ninguna cuenta web está disponible (cuota agotada, captcha o daemon offline),
-	// realizar failover híbrido transparente hacia la primera cuenta sana de la flota Google Antigravity.
-	if familyCanonicalShortName(pool.Family, pool.BasePrefix) == "argon" {
-		for _, cand := range req.Candidates {
-			candID := strings.TrimSpace(cand.ID)
-			lowerCand := strings.ToLower(candID)
-			if strings.HasPrefix(lowerCand, "antigravity-") || strings.Contains(lowerCand, "agy") || strings.Contains(lowerCand, "google") {
-				reqs, fail := license.RecordRotation(true)
-				atomic.StoreInt64(&totalRotations, reqs)
-				atomic.StoreInt64(&totalFailovers, fail)
-
-				email := strings.TrimSuffix(strings.TrimPrefix(candID, "antigravity-"), ".json")
-				analytics.RecordEvent(analytics.RotationEvent{
-					PoolID:          pool.ID,
-					PoolPrefix:      pool.BasePrefix,
-					SelectedAccount: candID,
-					AccountEmail:    email,
-					IsFailover:      true,
-					CascadeIndex:    len(cascade) + 1,
-					TargetModel:     "gemini-3.8-flash-high",
-					StatusCode:      200,
-				})
-
-				return schedulerPickResponse{
-					Handled: true,
-					AuthID:  candID,
-				}
-			}
-		}
-	}
-
-	// 5) No cascade member available: delegate to the builtin scheduler.
+	// 4) No cascade member available: delegate to the builtin scheduler.
 	return schedulerPickResponse{Handled: false}
 }
 

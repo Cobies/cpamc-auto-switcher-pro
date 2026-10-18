@@ -395,9 +395,57 @@ func TestPoolRegistry_RotatePoolLeader(t *testing.T) {
 
 	var httpResp struct {
 		OK        bool   `json:"ok"`
+		Rotated   bool   `json:"rotated"`
 		NewLeader string `json:"new_leader"`
 	}
 	if err := json.Unmarshal(bodyBytes, &httpResp); err != nil || !httpResp.OK || httpResp.NewLeader != "antigravity-res1.json" {
 		t.Fatalf("unexpected HTTP rotate response: %s (raw: %s)", string(bodyBytes), string(rawResp))
+	}
+
+	// 5. Test routine agent turn with healthy leader (should NOT rotate to preserve prompt cache)
+	rawRespRoutine, err := handlePoolsHTTP(ManagementRequestPayload{
+		Method: http.MethodPost,
+		Path:   "/v0/management/auto-switcher-pro/pools/rotate",
+		Body:   []byte(`{"prefix":"agy","reason":"agent turn"}`),
+	})
+	if err != nil {
+		t.Fatalf("handlePoolsHTTP /rotate (routine) failed: %v", err)
+	}
+	_ = json.Unmarshal(rawRespRoutine, &envelope)
+	bodyBytesRoutine := rawRespRoutine
+	if envelope.Result.Body != "" {
+		bodyBytesRoutine, _ = base64.StdEncoding.DecodeString(envelope.Result.Body)
+	}
+	var httpRespRoutine struct {
+		OK            bool   `json:"ok"`
+		Rotated       bool   `json:"rotated"`
+		CurrentLeader string `json:"current_leader"`
+		Reason        string `json:"reason"`
+	}
+	if err := json.Unmarshal(bodyBytesRoutine, &httpRespRoutine); err != nil || !httpRespRoutine.OK || httpRespRoutine.Rotated || httpRespRoutine.Reason != "leader_healthy" {
+		t.Fatalf("expected healthy leader skip, got: %s", string(bodyBytesRoutine))
+	}
+
+	// 6. Test forced rotation (force: true)
+	rawRespForced, err := handlePoolsHTTP(ManagementRequestPayload{
+		Method: http.MethodPost,
+		Path:   "/v0/management/auto-switcher-pro/pools/rotate",
+		Body:   []byte(`{"prefix":"agy","reason":"failover","force":true}`),
+	})
+	if err != nil {
+		t.Fatalf("handlePoolsHTTP /rotate (forced) failed: %v", err)
+	}
+	_ = json.Unmarshal(rawRespForced, &envelope)
+	bodyBytesForced := rawRespForced
+	if envelope.Result.Body != "" {
+		bodyBytesForced, _ = base64.StdEncoding.DecodeString(envelope.Result.Body)
+	}
+	var httpRespForced struct {
+		OK        bool   `json:"ok"`
+		Rotated   bool   `json:"rotated"`
+		NewLeader string `json:"new_leader"`
+	}
+	if err := json.Unmarshal(bodyBytesForced, &httpRespForced); err != nil || !httpRespForced.OK || !httpRespForced.Rotated || httpRespForced.NewLeader != "antigravity-res2.json" {
+		t.Fatalf("expected forced rotation to res2, got: %s", string(bodyBytesForced))
 	}
 }

@@ -7,7 +7,6 @@ import PrefixManager from './components/PrefixManager';
 import GroupManager from './components/GroupManager';
 import AutoAuthFiles from './components/AutoAuthFiles';
 import Maintenance from './components/Maintenance';
-import ArgonGateway from './components/ArgonGateway';
 import QuickGuideModal from './components/QuickGuideModal';
 import LicenseModal from './components/LicenseModal';
 import logoImg from './assets/auto-switcher-pro-logo.png';
@@ -48,9 +47,8 @@ export default function App() {
         case 3: return 'profiles';
         case 4: return 'tokens';
         case 5: return 'create-prefixes';
-        case 6: return 'argon';
-        case 7: return 'maintenance';
-        case 8: return 'quick-guide';
+        case 6: return 'maintenance';
+        case 7: return 'quick-guide';
         default: break;
       }
     }
@@ -75,9 +73,6 @@ export default function App() {
     }
     if (hash.includes('tab-maintenance') || hash.includes('maintenance')) {
       return 'maintenance';
-    }
-    if (hash.includes('tab-argon') || hash.includes('argon')) {
-      return 'argon';
     }
     if (hash.includes('tab-quick-guide') || hash.includes('quick-guide') || hash.includes('guide')) {
       return 'quick-guide';
@@ -107,9 +102,6 @@ export default function App() {
     }
     if (pathname.includes('maintenance')) {
       return 'maintenance';
-    }
-    if (pathname.includes('argon')) {
-      return 'argon';
     }
     if (pathname.includes('quick-guide') || pathname.includes('guide')) {
       return 'quick-guide';
@@ -525,30 +517,7 @@ export default function App() {
               <span>Directorio Cuentas</span>
             </button>
 
-            {/* 7. Gemini 4 Argon Gateway */}
-            <button
-              type="button"
-              onClick={() => setActiveTab('argon')}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '6px',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                border: activeTab === 'argon' ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid transparent',
-                background: activeTab === 'argon' ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
-                color: activeTab === 'argon' ? '#7dd3fc' : '#94a3b8',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-              data-testid="tab-argon"
-            >
-              <span>⚡</span>
-              <span>Gemini 4 Argon</span>
-            </button>
-
-            {/* 8. CPAMC Salud & Mantenimiento */}
+            {/* 7. CPAMC Salud & Mantenimiento */}
             <button
               type="button"
               onClick={() => setActiveTab('maintenance')}
@@ -711,8 +680,6 @@ export default function App() {
                 ? '/pulse-tokens'
                 : activeTab === 'auto-auth-files'
                 ? '/auto-auth-files'
-                : activeTab === 'argon'
-                ? '/argon'
                 : activeTab === 'maintenance'
                 ? '/maintenance'
                 : activeTab === 'quick-guide'
@@ -793,12 +760,6 @@ export default function App() {
         {activeTab === 'maintenance' && (
           <div style={{ width: '100%', height: '100%', overflowY: 'auto' }}>
             <Maintenance onReloadRequested={loadProfiles} />
-          </div>
-        )}
-
-        {activeTab === 'argon' && (
-          <div style={{ width: '100%', height: '100%', overflowY: 'auto' }}>
-            <ArgonGateway />
           </div>
         )}
 

@@ -230,19 +230,26 @@ async function attemptVirtualRotation(ctx: any, source?: string, force = false):
 		const res = await fetch(`${baseUrl}/v0/management/auto-switcher-pro/pools/rotate`, {
 			method: "POST",
 			headers,
-			body: JSON.stringify({ reason: source || (force ? "failover" : "preventive") }),
+			body: JSON.stringify({
+				reason: source || (force ? "failover" : "preventive"),
+				force,
+			}),
 			signal: ctx?.signal,
 		});
 		if (res.ok) {
 			const data = (await res.json()) as any;
 			if (data?.ok) {
+				// Si el backend indicó que el líder está sano y no fue necesario rotar (ahorro de caché)
+				if (data.rotated === false) {
+					return true;
+				}
+
 				const poolName = data.prefix || data.pool_id || "Pool";
 				const newLeader = data.new_leader ? ` hacia ${data.new_leader.replace(/^antigravity-/, "").replace(/\.json$/, "")}` : "";
 				if (force) {
 					notify(ctx, `⚡ [Rescate Reactivo] ${poolName} rotó exitosamente${newLeader} para restaurar conexión`, "warning");
-				} else {
-					notify(ctx, `🛡️ [Protección Preventiva] ${poolName} rotó exitosamente${newLeader} para evitar bloqueo de 12h`, "info");
 				}
+				// Las rotaciones preventivas rutinarias ocurren silenciosamente en background sin interrumpir al usuario
 				return true;
 			}
 		}

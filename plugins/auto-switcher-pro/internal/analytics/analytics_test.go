@@ -14,11 +14,9 @@ func TestSQLiteAnalyticsLifecycle(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	dbPath = filepath.Join(tempDir, "test_rotations.db")
-
-	db, err := InitDB()
+	db, err := ResetDBForTest(filepath.Join(tempDir, "test_rotations.db"))
 	if err != nil {
-		t.Fatalf("InitDB failed: %v", err)
+		t.Fatalf("ResetDBForTest failed: %v", err)
 	}
 	if db == nil {
 		t.Fatal("expected non-nil db instance")
@@ -48,8 +46,8 @@ func TestSQLiteAnalyticsLifecycle(t *testing.T) {
 		TargetModel:     "gemini-3.8-flash-high",
 	})
 
-	// Wait for goroutines to flush to SQLite
-	time.Sleep(100 * time.Millisecond)
+	// Wait for worker queue to flush to SQLite
+	time.Sleep(150 * time.Millisecond)
 
 	// 2. Query metrics
 	snap, err := QueryMetrics("24h")
@@ -74,5 +72,82 @@ func TestSQLiteAnalyticsLifecycle(t *testing.T) {
 	}
 	if len(snap.Accounts) != 2 {
 		t.Errorf("expected 2 accounts in aggregates, got %d", len(snap.Accounts))
+	}
+
+	// 3. Test Account Health persistence
+	coolUntil := now + (15 * 60 * 1000)
+	SaveAccountHealth(AccountHealth{
+		AccountKey:  "leader@gmail.com",
+		Email:       "leader@gmail.com",
+		CoolUntilMs: coolUntil,
+		HealthScore: 95.5,
+		Window5hPct: 82.0,
+		WeeklyPct:   90.0,
+	})
+
+	// 4. Test Session Affinity (Prompt Cache stickiness)
+	SetSessionAffinity(SessionAffinity{
+		SessionID:    "session-xyz-123",
+		PoolID:       "Pool-01-gemini",
+		AccountEmail: "leader@gmail.com",
+		LastTurnMs:   now,
+	})
+
+	// 5. Test Audit Event logging
+	RecordAuditEvent(AuditEvent{
+		PoolID:         "Pool-01-gemini",
+		EventType:      "PREVENTIVE",
+		TriggerReason:  "hourly_threshold_exceeded",
+		PreviousLeader: "leader@gmail.com",
+		NewLeader:      "reserve@gmail.com",
+		LatencyMs:      12,
+		StatusCode:     200,
+	})
+
+	// 6. Test Flight Recorder incident capture
+	RecordFlightEvent(FlightRecorderEvent{
+		AccountEmail: "reserve@gmail.com",
+		PoolID:       "Pool-01-gemini",
+		ErrorKind:    "RATE_LIMIT_429",
+		StatusCode:   429,
+		ErrorMessage: "Resource has been exhausted",
+		LatencyMs:    450,
+	})
+
+	// Wait for worker queue to flush
+	time.Sleep(150 * time.Millisecond)
+
+	// Validate Account Health
+	healthMap, err := GetAllAccountHealth()
+	if err != nil {
+		t.Fatalf("GetAllAccountHealth failed: %v", err)
+	}
+	h, ok := healthMap["leader@gmail.com"]
+	if !ok || h.CoolUntilMs != coolUntil || h.HealthScore != 95.5 {
+		t.Errorf("expected saved health with coolUntil=%d score=95.5, got %+v", coolUntil, h)
+	}
+
+	// Validate Session Affinity
+	aff, ok := GetSessionAffinity("session-xyz-123", "Pool-01-gemini")
+	if !ok || aff.AccountEmail != "leader@gmail.com" {
+		t.Errorf("expected valid session affinity for leader@gmail.com, got %+v (ok=%v)", aff, ok)
+	}
+
+	// Validate Audit Events
+	audits, err := QueryAuditEvents(10)
+	if err != nil || len(audits) == 0 {
+		t.Fatalf("QueryAuditEvents failed or empty: %v", err)
+	}
+	if audits[0].EventType != "PREVENTIVE" || audits[0].NewLeader != "reserve@gmail.com" {
+		t.Errorf("unexpected audit event: %+v", audits[0])
+	}
+
+	// Validate Flight Recorder
+	flights, err := QueryFlightEvents(10)
+	if err != nil || len(flights) == 0 {
+		t.Fatalf("QueryFlightEvents failed or empty: %v", err)
+	}
+	if flights[0].ErrorKind != "RATE_LIMIT_429" || flights[0].StatusCode != 429 {
+		t.Errorf("unexpected flight event: %+v", flights[0])
 	}
 }

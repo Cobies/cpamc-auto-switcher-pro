@@ -62,15 +62,10 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 				"ConfigFields":     []any{},
 			},
 			"capabilities": map[string]any{
-				"management_api":        true,
-				"model_provider":        true,
-				"model_router":          true,
-				"scheduler":             true,
-				"auth_provider":          true,
-				"executor":              true,
-				"executor_model_scope":   "gemini-4-argon,gemini-2.5-pro,gemini-argon",
-				"executor_input_formats":  []string{"openai/chat", "gemini/chat"},
-				"executor_output_formats": []string{"openai/chat", "gemini/chat"},
+				"management_api": true,
+				"model_provider": true,
+				"model_router":   true,
+				"scheduler":      true,
 			},
 		}
 		raw, err := json.Marshal(registration)
@@ -177,16 +172,6 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 					"Path":        sseProxyRoutePath,
 					"Description": "SSE Proxy con keep-alive para streaming sin cortes (terminated)",
 				},
-				{
-					"Method":      http.MethodGet,
-					"Path":        argonStatusRoutePath,
-					"Description": "Consulta el estado del daemon companion y las sesiones de Gemini 4 Argon",
-				},
-				{
-					"Method":      http.MethodPost,
-					"Path":        argonSyncSessionRoutePath,
-					"Description": "Sincroniza e ingesta sesiones y cookies de Gemini Argon en caliente",
-				},
 			},
 			"resources": []map[string]any{
 				{
@@ -218,11 +203,6 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 					"Path":        "/create-prefixes",
 					"Menu":        "📋 Directorio de Cuentas",
 					"Description": "Directorio e inspección de cuentas vinculadas y prefijos (edición manual de emergencia)",
-				},
-				{
-					"Path":        "/argon",
-					"Menu":        "⚡ Gemini 4 Argon",
-					"Description": "Puerta de enlace, sesiones y monitoreo de Gemini 4 Argon Web",
 				},
 				{
 					"Path":        "/maintenance",
@@ -295,80 +275,6 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 		}
 		return OKEnvelope(raw), nil
 
-	case "auth.identifier", "auth.id":
-		return OKEnvelope([]byte(`{"Identifier":"gemini-argon"}`)), nil
-
-	case "auth.parse", "parse_auth":
-		var req map[string]any
-		if len(request) > 0 {
-			_ = json.Unmarshal(request, &req)
-		}
-		prefix := "argon"
-		if p, ok := req["prefix"].(string); ok && p != "" {
-			prefix = p
-		}
-		label := "Gemini 4 Argon"
-		if l, ok := req["label"].(string); ok && l != "" {
-			label = l
-		}
-		res := map[string]any{
-			"Handled": true,
-			"Auth": map[string]any{
-				"Provider": "gemini-argon",
-				"Prefix":   prefix,
-				"Label":    label,
-				"Status":   "active",
-			},
-		}
-		raw, err := json.Marshal(res)
-		if err != nil {
-			return nil, err
-		}
-		return OKEnvelope(raw), nil
-
-	case "auth.refresh":
-		var req map[string]any
-		if len(request) > 0 {
-			_ = json.Unmarshal(request, &req)
-		}
-		res := map[string]any{
-			"Handled": true,
-			"Auth": map[string]any{
-				"Provider": "gemini-argon",
-				"Status":   "active",
-			},
-		}
-		raw, err := json.Marshal(res)
-		if err != nil {
-			return nil, err
-		}
-		return OKEnvelope(raw), nil
-
-	case "executor.identifier", "executor.id":
-		return OKEnvelope([]byte(`{"Identifier":"gemini-argon"}`)), nil
-
-	case "executor.execute":
-		resp, err := HandleArgonExecuteRPC(request, false)
-		if err != nil {
-			return ErrorEnvelope("execution_error", err.Error()), nil
-		}
-		raw, err := json.Marshal(resp)
-		if err != nil {
-			return nil, err
-		}
-		return OKEnvelope(raw), nil
-
-	case "executor.execute_stream":
-		resp, err := HandleArgonExecuteRPC(request, true)
-		if err != nil {
-			return ErrorEnvelope("execution_error", err.Error()), nil
-		}
-		raw, err := json.Marshal(resp)
-		if err != nil {
-			return nil, err
-		}
-		return OKEnvelope(raw), nil
-
 	default:
 		return ErrorEnvelope("unknown_method", "unknown method: "+method), nil
 	}
@@ -400,7 +306,7 @@ func MatchProfilesRoute(rawPath string) (subpath string, matched bool) {
 
 	matchedIdx := -1
 	for i, seg := range segments {
-		if seg == "home" || seg == "profiles" || seg == "center" || seg == "control-switcher" || seg == "pulse-tokens" || seg == "pulso-tokens" || seg == "create-prefixes" || seg == "create-groups" || seg == "auto-auth-files" || seg == "argon" || seg == "gemini-argon" || seg == "maintenance" || seg == "quick-guide" {
+		if seg == "home" || seg == "profiles" || seg == "center" || seg == "control-switcher" || seg == "pulse-tokens" || seg == "pulso-tokens" || seg == "create-prefixes" || seg == "create-groups" || seg == "auto-auth-files" || seg == "maintenance" || seg == "quick-guide" {
 			matchedIdx = i
 			break
 		}
@@ -480,11 +386,6 @@ func HandleManagementHTTP(request []byte) ([]byte, error) {
 	// Health check routes
 	if isHealthPath(req.Path) {
 		return handleHealthHTTP(req)
-	}
-
-	// Argon Gateway routes
-	if isArgonPath(req.Path) {
-		return handleArgonHTTP(req)
 	}
 
 	// Readiness check routes

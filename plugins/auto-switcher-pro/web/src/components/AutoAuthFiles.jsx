@@ -56,7 +56,7 @@ const getPoolGroupStyle = (assignedPrefix) => {
     agy_son: { primary: '#f59e0b', bg: 'rgba(245, 158, 11, 0.18)', border: 'rgba(245, 158, 11, 0.5)', color: '#fef08a' },
     agy_opus: { primary: '#ec4899', bg: 'rgba(236, 72, 153, 0.18)', border: 'rgba(236, 72, 153, 0.5)', color: '#fbcfe8' },
     agy_clau: { primary: '#10b981', bg: 'rgba(16, 185, 129, 0.18)', border: 'rgba(16, 185, 129, 0.5)', color: '#6ee7b7' },
-    clau: { primary: '#10b981', bg: 'rgba(16, 185, 129, 0.18)', border: 'rgba(16, 185, 129, 0.5)', color: '#6ee7b7' },
+    clau: { primary: '#10b981', bg: 'rgba(16, 185, 129, 0.18)', border: 'rgba(16, 185, 129, 0.5)', color: '#67e8f9' },
     codex: { primary: '#6366f1', bg: 'rgba(99, 102, 241, 0.18)', border: 'rgba(99, 102, 241, 0.5)', color: '#c7d2fe' },
   };
 
@@ -1029,8 +1029,9 @@ export default function AutoAuthFiles({
                   <div className="auto-auth-grid">
                     {group.cards.map(({ card, originalIdx: idx }) => {
                       const isGemini = card.familyRole === 'gemini';
-                      const roleBadgeClass = isGemini ? 'master' : 'virtual';
-                      const familyTitle = isGemini ? '💎 Gemini' : '🎭 Claude';
+                      const isCodex = card.familyRole === 'codex';
+                      const roleBadgeClass = isGemini ? 'master' : isCodex ? 'codex' : 'virtual';
+                      const familyTitle = isGemini ? '💎 Gemini' : isCodex ? '🧩 Codex' : '🎭 Claude';
 
                       const excludes55 = (card.exclusionBadges || []).includes('Excluye 5.5');
                       const virtualFileToDelete = card.virtualFileName;
