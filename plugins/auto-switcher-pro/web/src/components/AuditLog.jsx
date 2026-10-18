@@ -75,6 +75,45 @@ export default function AuditLog() {
     };
   }, [data]);
 
+  const handleExportForensicBundle = useCallback(() => {
+    const maskEmail = (em) => {
+      if (!em || typeof em !== 'string') return '--';
+      const clean = em.replace(/^antigravity-/, '').replace(/\.json$/, '');
+      const parts = clean.split('@');
+      if (parts.length < 2) return clean;
+      const user = parts[0];
+      const domain = parts[1];
+      const maskedUser = user.length > 5 ? `${user.slice(0, 3)}...${user.slice(-2)}` : `${user.slice(0, 2)}...`;
+      return `${maskedUser}@${domain}`;
+    };
+
+    const bundle = {
+      generator: 'CPAMC Auto Switcher Pro · Forensic Flight Recorder',
+      exported_at: new Date().toISOString(),
+      summary: counts,
+      audit_events: data.audit_events.map((e) => ({
+        ...e,
+        previous_leader: maskEmail(e.previous_leader),
+        new_leader: maskEmail(e.new_leader),
+      })),
+      flight_recorder: data.flight_recorder.map((f) => ({
+        ...f,
+        account_email: maskEmail(f.account_email),
+      })),
+    };
+
+    const jsonStr = JSON.stringify(bundle, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `auto-switcher-forensic-report-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [counts, data]);
+
   return (
     <div className="audit-log-container" data-testid="audit-log-view">
       {/* Header */}
@@ -95,6 +134,17 @@ export default function AuditLog() {
               Actualizado: {lastRefreshed.toLocaleTimeString()}
             </span>
           )}
+          <button
+            type="button"
+            className="audit-btn-export"
+            onClick={handleExportForensicBundle}
+            disabled={loading || (data.audit_events.length === 0 && data.flight_recorder.length === 0)}
+            data-testid="btn-export-forensic"
+            title="Descarga un bundle forense anonimizado para soporte o auditoría"
+          >
+            <span>📦</span>
+            <span>Descargar Reporte Forense</span>
+          </button>
           <button
             type="button"
             className="audit-btn-refresh"

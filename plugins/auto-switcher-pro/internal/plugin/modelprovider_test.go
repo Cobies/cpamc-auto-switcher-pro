@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func testModelProviderRegistry(t *testing.T) *PoolRegistry {
@@ -365,6 +366,43 @@ func TestSchedulerPickQuotaDepletedRotatesToReserve(t *testing.T) {
 	// Because leader A is depleted (< 15%), it must automatically rotate to reserve B!
 	if !resp.Handled || resp.AuthID != "antigravity-b@gmail.com.json" {
 		t.Fatalf("expected quota-depleted leader to trigger preventive rotation to reserve B, got: %+v", resp)
+	}
+}
+
+func TestSchedulerPickAdaptivePacing(t *testing.T) {
+	registry := testModelProviderRegistry(t)
+	previous := activeRegistry
+	activeRegistry = func() *PoolRegistry { return registry }
+	t.Cleanup(func() { activeRegistry = previous })
+
+	pe := GetPredictiveEngine()
+	// Set critical fatigue on both A and B
+	pe.RecordLiveQuota(AccountQuotaTelemetry{AccountKey: "antigravity-a@gmail.com.json", Window5hPct: 10.0})
+	pe.RecordLiveQuota(AccountQuotaTelemetry{AccountKey: "antigravity-b@gmail.com.json", Window5hPct: 10.0})
+	t.Cleanup(func() {
+		pe.RecordLiveQuota(AccountQuotaTelemetry{AccountKey: "antigravity-a@gmail.com.json", Window5hPct: 100.0})
+		pe.RecordLiveQuota(AccountQuotaTelemetry{AccountKey: "antigravity-b@gmail.com.json", Window5hPct: 100.0})
+	})
+
+	req := schedulerPickRequest{
+		Provider: "antigravity",
+		Model:    "claude-sonnet-4-6",
+		Options:  schedulerOptions{Metadata: map[string]any{"requested_model": "clau/claude-sonnet-4-6"}},
+		Candidates: []schedulerCandidate{
+			{ID: "antigravity-a@gmail.com.json", Provider: "antigravity", Status: "active"},
+			{ID: "antigravity-b@gmail.com.json", Provider: "antigravity", Status: "active"},
+		},
+	}
+	start := time.Now()
+	resp := handleSchedulerPick(req)
+	duration := time.Since(start)
+
+	if !resp.Handled {
+		t.Fatalf("expected handled response: %+v", resp)
+	}
+	// Verify adaptive micro-pause was applied (at least 300ms)
+	if duration < 300*time.Millisecond {
+		t.Errorf("expected adaptive pacing delay >= 300ms, got %v", duration)
 	}
 }
 

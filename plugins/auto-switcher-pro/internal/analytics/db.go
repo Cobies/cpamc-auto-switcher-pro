@@ -242,6 +242,7 @@ func initWriteWorker() {
 	writeQueueOnce.Do(func() {
 		writeQueue = make(chan writeTask, 2048)
 		go runWriteWorker()
+		go startAutoVacuumDaemon()
 	})
 }
 
@@ -585,4 +586,37 @@ func QueryFlightEvents(limit int) ([]FlightRecorderEvent, error) {
 		}
 	}
 	return events, nil
+}
+
+// AutoVacuumCheckpoint purges rotation and audit records older than maxAgeDays (default: 30 days)
+// and forces SQLite to truncate its WAL journal file, keeping disk usage lean.
+func AutoVacuumCheckpoint(maxAgeDays int) error {
+	db, err := InitDB()
+	if err != nil || db == nil {
+		return fmt.Errorf("db unavailable: %w", err)
+	}
+
+	if maxAgeDays <= 0 {
+		maxAgeDays = 30
+	}
+
+	cutoffMs := time.Now().AddDate(0, 0, -maxAgeDays).UnixMilli()
+
+	// 1. Purge old records
+	_, _ = db.Exec(`DELETE FROM pool_rotations WHERE timestamp < ?`, cutoffMs)
+	_, _ = db.Exec(`DELETE FROM audit_events WHERE timestamp < ?`, cutoffMs)
+	_, _ = db.Exec(`DELETE FROM flight_recorder WHERE timestamp < ?`, cutoffMs)
+	_, _ = db.Exec(`DELETE FROM session_affinity WHERE last_turn_ms < ?`, cutoffMs)
+
+	// 2. Truncate WAL journal to reclaim physical disk space
+	_, err = db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+	return err
+}
+
+func startAutoVacuumDaemon() {
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	for range ticker.C {
+		_ = AutoVacuumCheckpoint(30)
+	}
 }

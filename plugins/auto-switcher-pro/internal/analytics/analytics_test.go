@@ -150,4 +150,32 @@ func TestSQLiteAnalyticsLifecycle(t *testing.T) {
 	if flights[0].ErrorKind != "RATE_LIMIT_429" || flights[0].StatusCode != 429 {
 		t.Errorf("unexpected flight event: %+v", flights[0])
 	}
+
+	// 7. Test AutoVacuumCheckpoint
+	// Insert an ancient event (60 days old)
+	ancientTs := now - (60 * 24 * 60 * 60 * 1000)
+	RecordAuditEvent(AuditEvent{
+		Timestamp:      ancientTs,
+		PoolID:         "Pool-01-gemini",
+		EventType:      "PREVENTIVE",
+		TriggerReason:  "ancient_record",
+		PreviousLeader: "old@gmail.com",
+		NewLeader:      "new@gmail.com",
+	})
+	time.Sleep(100 * time.Millisecond)
+
+	// Run checkpoint keeping only last 30 days
+	if err := AutoVacuumCheckpoint(30); err != nil {
+		t.Fatalf("AutoVacuumCheckpoint failed: %v", err)
+	}
+
+	auditsAfter, err := QueryAuditEvents(100)
+	if err != nil {
+		t.Fatalf("QueryAuditEvents after checkpoint failed: %v", err)
+	}
+	for _, a := range auditsAfter {
+		if a.TriggerReason == "ancient_record" {
+			t.Errorf("expected ancient_record to be purged by AutoVacuumCheckpoint")
+		}
+	}
 }

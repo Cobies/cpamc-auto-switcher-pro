@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"auto-switcher-pro/internal/analytics"
 	"auto-switcher-pro/internal/license"
@@ -841,6 +842,27 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 					}
 				}
 			}
+		}
+	}
+
+	// Adaptive Pacing: Si el pool completo experimenta fatiga colectiva severa
+	// (el líder y todas las reservas disponibles tienen >= 80% fatiga o enfriamiento),
+	// inyectar una micro-pausa adaptativa (350ms) para que el RPM de Google se recupere
+	// sin bloquear al usuario ni provocar un 429 fatal.
+	if len(cascade) > 0 {
+		allFatigued := true
+		for _, member := range cascade {
+			if _, isAvail := available[strings.ToLower(member)]; isAvail {
+				mEmail := strings.TrimSuffix(strings.TrimPrefix(member, "antigravity-"), ".json")
+				fatiguePct, isCooling, _ := predEngine.GetAccountStatus(mEmail)
+				if fatiguePct < 80.0 && !isCooling && !predEngine.ShouldPreventiveCool(mEmail) {
+					allFatigued = false
+					break
+				}
+			}
+		}
+		if allFatigued {
+			time.Sleep(350 * time.Millisecond)
 		}
 	}
 

@@ -72,6 +72,31 @@
   cursor: not-allowed;
 }
 
+.audit-btn-export {
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.audit-btn-export:hover:not(:disabled) {
+  background: rgba(245, 158, 11, 0.25);
+  border-color: #fbbf24;
+}
+
+.audit-btn-export:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* KPI Badges */
 .audit-kpi-grid {
   display: grid;
