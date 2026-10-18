@@ -120,6 +120,9 @@ func TestModelCatalogForAuthDeduplicatesAndSorts(t *testing.T) {
 }
 
 func TestPoolPrefixedCatalogIncludesRoutesAndBaselineWithoutPools(t *testing.T) {
+	// Reset in-memory argon store to ensure clean test isolation
+	GetArgonStore().accounts = make(map[string]ArgonAccountInfo)
+
 	r := NewPoolRegistry(t.TempDir() + "/empty.json")
 	catalog := poolPrefixedCatalog(r)
 	if len(catalog) != len(baselineAntigravityModels) {

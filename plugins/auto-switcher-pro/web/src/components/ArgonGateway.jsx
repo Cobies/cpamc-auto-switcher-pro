@@ -558,7 +558,7 @@ export default function ArgonGateway() {
                     className="hero-model-name"
                     data-testid="hero-model-name"
                   >
-                    gemini-2.5-pro (Web Thinking)
+                    Gemini 4 Argon (Web Thinking)
                   </div>
                   <div className="hero-model-helper">
                     Ruteo virtual activo · 🛡️ Aislamiento en RAM (Disco intacto)
@@ -648,9 +648,13 @@ export default function ArgonGateway() {
                   {/* Activity Sparkline Row */}
                   <div className="card-activity-wrap">
                     <div className="activity-header">
-                      <span className="activity-title">ACTIVITY (~3.3H)</span>
+                      <span className="activity-title">CONSUMO REAL (~MEMORIA RAM)</span>
                       <span className="activity-meta">
-                        <strong>{isReady ? '5 reqs · 100% ok' : '0 reqs'}</strong>
+                        <strong>
+                          {acc.total_requests && acc.total_requests > 0
+                            ? `${acc.total_requests} reqs · ${Math.round(((acc.success_count || 0) / acc.total_requests) * 100)}% ok`
+                            : '0 reqs · Sin peticiones'}
+                        </strong>
                       </span>
                     </div>
                   </div>

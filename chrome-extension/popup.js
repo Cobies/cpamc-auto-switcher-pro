@@ -62,10 +62,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         const uMatch = url.pathname.match(/\/u\/(\d+)/);
         if (uMatch) {
           detectedAuthUser = uMatch[1];
-          // Solo actualizar si el usuario no ha ingresado un authuser manual previamente
-          if (!authUserInput.value || authUserInput.value === '0') {
-            authUserInput.value = detectedAuthUser;
-          }
+          // Sincronizar dinámicamente con la pestaña activa
+          authUserInput.value = detectedAuthUser;
+        } else {
+          detectedAuthUser = "0";
+          if (!authUserInput.value) authUserInput.value = "0";
         }
         detectedText.textContent = `gemini.google.com (Pestaña /u/${detectedAuthUser})`;
       } else {

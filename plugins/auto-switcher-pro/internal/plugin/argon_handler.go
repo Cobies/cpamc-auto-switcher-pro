@@ -39,16 +39,19 @@ const (
 
 // ArgonAccountInfo models a single Google Gemini Argon web session.
 type ArgonAccountInfo struct {
-	AccountID    string  `json:"account_id"`
-	AuthUser     string  `json:"authuser"` // e.g. "0", "1"
-	Email        string  `json:"email"`
-	Status       string  `json:"status"` // "ready", "cooldown", "expired", "busy", "captcha"
-	QuotaPct     float64 `json:"quota_pct"`
-	ResetAt      string  `json:"reset_at,omitempty"`
-	ResetSeconds int64   `json:"reset_seconds,omitempty"`
-	LastSyncAt   string  `json:"last_sync_at,omitempty"`
-	HasCookies   bool    `json:"has_cookies"`
-	ErrorMessage string  `json:"error_message,omitempty"`
+	AccountID     string  `json:"account_id"`
+	AuthUser      string  `json:"authuser"` // e.g. "0", "1"
+	Email         string  `json:"email"`
+	Status        string  `json:"status"` // "ready", "cooldown", "expired", "busy", "captcha"
+	QuotaPct      float64 `json:"quota_pct"`
+	ResetAt       string  `json:"reset_at,omitempty"`
+	ResetSeconds  int64   `json:"reset_seconds,omitempty"`
+	LastSyncAt    string  `json:"last_sync_at,omitempty"`
+	HasCookies    bool    `json:"has_cookies"`
+	ErrorMessage  string  `json:"error_message,omitempty"`
+	TotalRequests int64   `json:"total_requests"`
+	SuccessCount  int64   `json:"success_count"`
+	FailedCount   int64   `json:"failed_count"`
 }
 
 // ArgonStatusResponse models the payload returned by /auto-switcher-pro/argon/status.
@@ -310,6 +313,26 @@ func (s *ArgonSessionStore) IngestSession(payload SyncSessionPayload, authDir st
 	}
 
 	return acc, nil
+}
+
+// RecordAccountTelemetry updates live turn execution metrics for a specific Argon account.
+func (s *ArgonSessionStore) RecordAccountTelemetry(accID string, success bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	acc, exists := s.accounts[accID]
+	if !exists {
+		return
+	}
+	acc.TotalRequests++
+	if success {
+		acc.SuccessCount++
+		acc.Status = "ready"
+		acc.ErrorMessage = ""
+	} else {
+		acc.FailedCount++
+	}
+	s.accounts[accID] = acc
 }
 
 // SetAccountCooldown sets a cooldown for an account based on error classification.
@@ -770,15 +793,18 @@ func HandleArgonExecuteRPC(request []byte, isStream bool) (any, error) {
 					if errType != ArgonErrNone {
 						store.SetAccountCooldown(fmt.Sprintf("argon_u%s", authUser), errType, cooldownSec, errMsg)
 					}
+					store.RecordAccountTelemetry(fmt.Sprintf("argon_u%s", authUser), false)
 					lastErr = fmt.Errorf("daemon error (%s): %s", errType, errMsg)
 					break
 				}
 			}
+			store.RecordAccountTelemetry(fmt.Sprintf("argon_u%s", authUser), false)
 			lastErr = fmt.Errorf("daemon returned HTTP %d: %s", resp.StatusCode, string(body))
 			continue
 		}
 
 		daemonOutput = body
+		store.RecordAccountTelemetry(fmt.Sprintf("argon_u%s", authUser), true)
 		break
 	}
 

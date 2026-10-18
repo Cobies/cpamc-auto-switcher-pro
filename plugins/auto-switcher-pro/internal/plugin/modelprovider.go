@@ -470,9 +470,7 @@ func modelCatalogForAuth(diskPrefix string, memberPools []PoolDefinition) []plug
 	// If this auth is an Argon credential, add Argon models
 	if diskPrefix == "argon" || strings.Contains(strings.ToLower(diskPrefix), "argon") {
 		add("gemini-4-argon")
-		add("gemini-2.5-pro")
 		add("argon/gemini-4-argon")
-		add("argon/gemini-2.5-pro")
 	}
 
 	sortModelsByID(models)
@@ -530,9 +528,7 @@ func poolPrefixedCatalog(registry *PoolRegistry) []pluginModelInfo {
 		argonAccounts := GetArgonStore().ListAccounts()
 		if len(argonAccounts) > 0 {
 			addModelCustom("gemini-4-argon", "Gemini 4 Argon (Web Thinking)", "gemini-argon")
-			addModelCustom("gemini-2.5-pro", "Gemini 2.5 Pro (Argon)", "gemini-argon")
 			addModelCustom("argon/gemini-4-argon", "Gemini 4 Argon (Web Thinking)", "gemini-argon")
-			addModelCustom("argon/gemini-2.5-pro", "Gemini 2.5 Pro (Argon)", "gemini-argon")
 		}
 	}
 
@@ -569,11 +565,8 @@ func routeDecisionFor(registry *PoolRegistry, requestedModel string) modelRouteR
 	}
 
 	// 0.5 Direct Argon model routes (Modalidad A - Solo)
-	if trimmed == "gemini-4-argon" || trimmed == "gemini-2.5-pro" || strings.HasPrefix(trimmed, "argon/") {
+	if trimmed == "gemini-4-argon" || strings.HasPrefix(trimmed, "argon/") {
 		targetM := "gemini-4-argon"
-		if trimmed == "gemini-2.5-pro" || trimmed == "argon/gemini-2.5-pro" {
-			targetM = "gemini-2.5-pro"
-		}
 		return modelRouteResponse{
 			Handled:     true,
 			TargetKind:  "provider",
