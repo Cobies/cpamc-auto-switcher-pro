@@ -22,6 +22,7 @@ const poolFamilyRole = (family) => {
   if (f === 'gemini_pure' || f.startsWith('gemini_pure')) return 'gemini';
   if (f === 'codex' || f.startsWith('codex')) return 'codex';
   if (f === 'gemini_sonnet' || f === 'gemini_opus' || f === 'gemini_claude' || f === 'claude') return 'claude';
+  if (f === 'gemini_argon' || f.startsWith('gemini_argon') || f === 'argon') return 'argon';
   return f;
 };
 
@@ -87,6 +88,15 @@ const MODEL_FAMILIES = {
     quota: 'Codex',
     note: 'Cuentas individuales Codex / OpenAI (prefijo codex*). Convención: codex, codex2...',
   },
+  argon: {
+    label: 'Gemini 4 Argon Web',
+    icon: '⚡',
+    hintPrefix: 'argon',
+    provider: 'gemini-argon',
+    quota: 'Gemini Web Reasoning',
+    targetPatterns: ['argon', 'gemini-4-argon'],
+    note: 'Pool de sesiones Web Google Gemini Pro con Thinking Reasoning nativo. Convención: argon, argon2...',
+  },
 };
 
 // Patrones de nombre por familia objetivo: se usan para liberar modelos del
@@ -98,6 +108,8 @@ const FAMILY_TARGET_PATTERNS = {
   gemini_claude: ['claude', 'gpt'],
   claude: ['claude', 'gpt'],
   codex: ['codex'],
+  argon: ['gemini-4-argon', 'gemini-2.5-pro'],
+  gemini_argon: ['gemini-4-argon', 'gemini-2.5-pro'],
 };
 
 // Determina si un prefijo es descendiente estricto de un pool base:
@@ -136,6 +148,9 @@ function matchesFamilyModel(base, modelId, exclude55 = false) {
   }
   if (b.startsWith('codex')) {
     return id.includes('codex');
+  }
+  if (b.startsWith('argon')) {
+    return id.includes('argon') || id.includes('gemini');
   }
   return true;
 }

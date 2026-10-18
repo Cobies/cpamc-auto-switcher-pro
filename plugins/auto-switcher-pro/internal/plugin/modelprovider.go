@@ -467,6 +467,14 @@ func modelCatalogForAuth(diskPrefix string, memberPools []PoolDefinition) []plug
 		}
 	}
 
+	// If this auth is an Argon credential, add Argon models
+	if diskPrefix == "argon" || strings.Contains(strings.ToLower(diskPrefix), "argon") {
+		add("gemini-4-argon")
+		add("gemini-2.5-pro")
+		add("argon/gemini-4-argon")
+		add("argon/gemini-2.5-pro")
+	}
+
 	sortModelsByID(models)
 	return models
 }
@@ -479,7 +487,7 @@ func poolPrefixedCatalog(registry *PoolRegistry) []pluginModelInfo {
 	pools := registry.ListPools()
 	models := make([]pluginModelInfo, 0, 16)
 	seen := make(map[string]struct{})
-	addModel := func(id, display string) {
+	addModelCustom := func(id, display, ownedBy string) {
 		id = strings.TrimSpace(id)
 		if id == "" {
 			return
@@ -491,13 +499,21 @@ func poolPrefixedCatalog(registry *PoolRegistry) []pluginModelInfo {
 		models = append(models, pluginModelInfo{
 			ID:          id,
 			Object:      "model",
-			OwnedBy:     antigravityProviderKey,
+			OwnedBy:     ownedBy,
 			DisplayName: display,
 		})
 	}
+	addModel := func(id, display string) {
+		addModelCustom(id, display, antigravityProviderKey)
+	}
+
+	hasArgonPool := false
 	for _, pool := range pools {
 		if !pool.IsEnabled() {
 			continue
+		}
+		if familyCanonicalShortName(pool.Family, pool.BasePrefix) == "argon" {
+			hasArgonPool = true
 		}
 		cleanPoolName := strings.TrimSpace(pool.DisplayName)
 		if cleanPoolName == "" {
@@ -507,6 +523,19 @@ func poolPrefixedCatalog(registry *PoolRegistry) []pluginModelInfo {
 			addModel(cleanPoolName, cleanPoolName)
 		}
 	}
+
+	// Modalidad A (Solo): Si NO hay un pool activo de Argon y existen cuentas sincronizadas en disco/RAM,
+	// publicar directamente gemini-4-argon y las variantes con prefijo argon/
+	if !hasArgonPool {
+		argonAccounts := GetArgonStore().ListAccounts()
+		if len(argonAccounts) > 0 {
+			addModelCustom("gemini-4-argon", "Gemini 4 Argon (Web Thinking)", "gemini-argon")
+			addModelCustom("gemini-2.5-pro", "Gemini 2.5 Pro (Argon)", "gemini-argon")
+			addModelCustom("argon/gemini-4-argon", "Gemini 4 Argon (Web Thinking)", "gemini-argon")
+			addModelCustom("argon/gemini-2.5-pro", "Gemini 2.5 Pro (Argon)", "gemini-argon")
+		}
+	}
+
 	if len(models) == 0 {
 		return cloneBaseline()
 	}
@@ -539,6 +568,21 @@ func routeDecisionFor(registry *PoolRegistry, requestedModel string) modelRouteR
 		}
 	}
 
+	// 0.5 Direct Argon model routes (Modalidad A - Solo)
+	if trimmed == "gemini-4-argon" || trimmed == "gemini-2.5-pro" || strings.HasPrefix(trimmed, "argon/") {
+		targetM := "gemini-4-argon"
+		if trimmed == "gemini-2.5-pro" || trimmed == "argon/gemini-2.5-pro" {
+			targetM = "gemini-2.5-pro"
+		}
+		return modelRouteResponse{
+			Handled:     true,
+			TargetKind:  "provider",
+			Target:      "gemini-argon",
+			TargetModel: targetM,
+			Reason:      fmt.Sprintf("auto-switcher-pro argon direct route (%s -> %s)", trimmed, targetM),
+		}
+	}
+
 	slash := strings.Index(trimmed, "/")
 	if slash <= 0 {
 		// Direct Clean Pool Identifier invocation (e.g. "Pool-01-gemini")
@@ -566,10 +610,16 @@ func routeDecisionFor(registry *PoolRegistry, requestedModel string) modelRouteR
 			canonicalTarget = pool.ActiveModelForAccount(activeAuth)
 		}
 		resolvedModel := ResolveActiveModelFallback(canonicalTarget)
+		targetKind := "provider"
+		targetProvider := antigravityProviderKey
+		if familyCanonicalShortName(pool.Family, pool.BasePrefix) == "argon" {
+			targetProvider = "gemini-argon"
+			resolvedModel = "gemini-4-argon"
+		}
 		return modelRouteResponse{
 			Handled:     true,
-			TargetKind:  "provider",
-			Target:      antigravityProviderKey,
+			TargetKind:  targetKind,
+			Target:      targetProvider,
 			TargetModel: resolvedModel,
 			Reason:      fmt.Sprintf("auto-switcher-pro sovereign pool route (%s -> %s)", trimmed, resolvedModel),
 		}
@@ -589,10 +639,15 @@ func routeDecisionFor(registry *PoolRegistry, requestedModel string) modelRouteR
 	resolvedRest := ResolveActiveModelFallback(rest)
 	for _, target := range poolTargets(pool) {
 		if strings.EqualFold(target, rest) || strings.EqualFold(target, resolvedRest) {
+			targetProvider := antigravityProviderKey
+			if familyCanonicalShortName(pool.Family, pool.BasePrefix) == "argon" {
+				targetProvider = "gemini-argon"
+				resolvedRest = "gemini-4-argon"
+			}
 			return modelRouteResponse{
 				Handled:     true,
 				TargetKind:  "provider",
-				Target:      antigravityProviderKey,
+				Target:      targetProvider,
 				TargetModel: resolvedRest,
 				Reason:      fmt.Sprintf("auto-switcher-pro 2N pool route (%s)", pool.BasePrefix),
 			}

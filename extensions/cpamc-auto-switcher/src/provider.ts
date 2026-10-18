@@ -317,11 +317,11 @@ function toPiModelFromCPA(model: CPAModel, poolLabels?: Map<string, string>) {
 
     const slash = id.indexOf("/");
     const prefix = slash > 0 ? id.slice(0, slash) : "";
-    const isParent = prefix === "agy" || prefix === "agy2" || prefix === "agy_son" || prefix === "agy_opus";
+    const isParent = prefix === "agy" || prefix === "agy2" || prefix === "agy_son" || prefix === "agy_opus" || prefix === "argon";
     const poolLabel = poolLabels?.get(prefix) ?? null;
     const rolePrefix = poolLabel
         ? (poolLabel.includes("LÍDER") ? `⭐ [${poolLabel}] ` : `[${poolLabel}] `)
-        : (isParent ? "⭐ [ACTIVA] " : "");
+        : (isParent ? `⭐ [${prefix === "argon" ? "LIBRE argon" : "ACTIVA"}] ` : "");
 
     return {
         id,
@@ -618,9 +618,9 @@ async function fetchAccountPrefixesAndExclusions(baseUrl: string, signal?: Abort
         for (const fileName of activeAuthFiles) {
             if (!poolMemberFiles.has(fileName)) {
                 const pref = authFilePrefixes.get(fileName) ?? "";
-                if (!pref) {
-                    // Cuenta libre sin prefijo: habilitar su proveedor legítimo
-                    const prov = authFileProviders.get(fileName) || "antigravity";
+                if (!pref || pref === "argon" || pref.startsWith("argon")) {
+                    // Cuenta libre sin prefijo o cuenta Argon libre: habilitar su proveedor legítimo
+                    const prov = authFileProviders.get(fileName) || (pref.startsWith("argon") ? "gemini-argon" : "antigravity");
                     activeBareProviders.add(prov);
                     const exs = authFileExclusions.get(fileName);
                     if (exs) {
@@ -654,7 +654,8 @@ function isKnownFallbackPrefix(prefix: string): boolean {
         prefix === "agy_son" || /^agy_son\d+$/.test(prefix) ||
         prefix === "agy_opus" || /^agy_opus\d+$/.test(prefix) ||
         ((prefix.startsWith("clau") || prefix.startsWith("claude")) && !prefix.startsWith("agy_")) ||
-        prefix === "codex" || /^codex\d+$/.test(prefix);
+        prefix === "codex" || /^codex\d+$/.test(prefix) ||
+        prefix === "argon" || /^argon\d*$/.test(prefix);
 }
 
 export function isCleanIncludedModel(id: string, filterData: {
@@ -687,6 +688,11 @@ export function isCleanIncludedModel(id: string, filterData: {
         let matchesActiveBareProvider = false;
 
         if (filterData.activeBareProviders.has("antigravity") && (lower.startsWith("gemini") || lower.includes("gemini"))) {
+            matchesActiveBareProvider = true;
+        } else if (
+            (filterData.activeBareProviders.has("gemini-argon") || filterData.activeBareProviders.has("gemini_argon")) &&
+            (lower.includes("argon") || lower === "gemini-4-argon" || lower === "gemini-2.5-pro")
+        ) {
             matchesActiveBareProvider = true;
         } else if (
             (filterData.activeBareProviders.has("openai") || filterData.activeBareProviders.has("codex")) &&
@@ -749,6 +755,7 @@ export function isCleanIncludedModel(id: string, filterData: {
     const isAgyOpus = prefix === "agy_opus" || /^agy_opus\d+$/.test(prefix);
     const isDirectClaude = (prefix.startsWith("clau") || prefix.startsWith("claude")) && !prefix.startsWith("agy_");
     const isCodex = prefix === "codex" || /^codex\d+$/.test(prefix);
+    const isArgon = prefix === "argon" || /^argon\d*$/.test(prefix);
 
     if (isAgyGemini && !modelSlug.includes("gemini")) {
         return false;
@@ -763,6 +770,9 @@ export function isCleanIncludedModel(id: string, filterData: {
         return false;
     }
     if (isCodex && !modelSlug.includes("codex") && !modelSlug.includes("gpt") && !modelSlug.includes("openai")) {
+        return false;
+    }
+    if (isArgon && !modelSlug.includes("gemini") && !modelSlug.includes("argon")) {
         return false;
     }
 

@@ -1651,12 +1651,11 @@ export function buildManagedPoolCards(nodes = [], registeredPools = null) {
       ''
     ).toLowerCase();
 
-    // Only Antigravity accounts form the Gemini/Claude package cards
-    if (
-      provider &&
-      provider !== 'antigravity' &&
-      !classification.fileName.startsWith('antigravity-')
-    ) {
+    // Only Antigravity accounts and Gemini Argon accounts form the cards
+    const isAntigravity = provider === 'antigravity' || classification.fileName.startsWith('antigravity-');
+    const isArgon = provider === 'gemini_argon' || provider === 'gemini-argon' || classification.fileName.startsWith('gemini-argon');
+
+    if (!isAntigravity && !isArgon) {
       return;
     }
 
@@ -1719,6 +1718,27 @@ export function buildManagedPoolCards(nodes = [], registeredPools = null) {
       failed: masterData.failed || 0,
       nextRetryAfter: masterData.next_retry_after || '',
     };
+
+    // Dedicated card for Gemini Argon web sessions
+    if (masterFileName.startsWith('gemini-argon') || masterFileName.includes('argon')) {
+      const argonPrefix = masterPrefix || 'argon';
+      const match = argonPrefix.match(/^(.*)_(\d+)$/);
+      cards.push({
+        cardId: `${masterFileName}::argon`,
+        masterFileName,
+        maskedEmail,
+        familyRole: 'argon',
+        assignedPrefix: argonPrefix,
+        poolRole: match ? 'reserve' : 'leader',
+        activePoolBase: match ? match[1] : argonPrefix,
+        exclusionBadges: masterInfo.classification?.exclusionBadges || [],
+        excludedModels: masterInfo.classification?.excludedModels || [],
+        excluded_models: masterInfo.classification?.excludedModels || [],
+        virtualFileName: '',
+        ...accountTelemetry,
+      });
+      return;
+    }
 
     // Virtual files derived from this master
     const relatedVirtuals = virtualEntries.filter(

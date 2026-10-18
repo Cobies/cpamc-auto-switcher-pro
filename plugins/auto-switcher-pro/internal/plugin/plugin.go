@@ -62,10 +62,15 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 				"ConfigFields":     []any{},
 			},
 			"capabilities": map[string]any{
-				"management_api": true,
-				"model_provider": true,
-				"model_router":   true,
-				"scheduler":      true,
+				"management_api":        true,
+				"model_provider":        true,
+				"model_router":          true,
+				"scheduler":             true,
+				"auth_provider":          true,
+				"executor":              true,
+				"executor_model_scope":   "gemini-4-argon,gemini-2.5-pro,gemini-argon",
+				"executor_input_formats":  []string{"openai/chat", "gemini/chat"},
+				"executor_output_formats": []string{"openai/chat", "gemini/chat"},
 			},
 		}
 		raw, err := json.Marshal(registration)
@@ -284,6 +289,80 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 			}
 		}
 		resp := handleSchedulerPick(req)
+		raw, err := json.Marshal(resp)
+		if err != nil {
+			return nil, err
+		}
+		return OKEnvelope(raw), nil
+
+	case "auth.identifier", "auth.id":
+		return OKEnvelope([]byte(`{"Identifier":"gemini-argon"}`)), nil
+
+	case "auth.parse", "parse_auth":
+		var req map[string]any
+		if len(request) > 0 {
+			_ = json.Unmarshal(request, &req)
+		}
+		prefix := "argon"
+		if p, ok := req["prefix"].(string); ok && p != "" {
+			prefix = p
+		}
+		label := "Gemini 4 Argon"
+		if l, ok := req["label"].(string); ok && l != "" {
+			label = l
+		}
+		res := map[string]any{
+			"Handled": true,
+			"Auth": map[string]any{
+				"Provider": "gemini-argon",
+				"Prefix":   prefix,
+				"Label":    label,
+				"Status":   "active",
+			},
+		}
+		raw, err := json.Marshal(res)
+		if err != nil {
+			return nil, err
+		}
+		return OKEnvelope(raw), nil
+
+	case "auth.refresh":
+		var req map[string]any
+		if len(request) > 0 {
+			_ = json.Unmarshal(request, &req)
+		}
+		res := map[string]any{
+			"Handled": true,
+			"Auth": map[string]any{
+				"Provider": "gemini-argon",
+				"Status":   "active",
+			},
+		}
+		raw, err := json.Marshal(res)
+		if err != nil {
+			return nil, err
+		}
+		return OKEnvelope(raw), nil
+
+	case "executor.identifier", "executor.id":
+		return OKEnvelope([]byte(`{"Identifier":"gemini-argon"}`)), nil
+
+	case "executor.execute":
+		resp, err := HandleArgonExecuteRPC(request, false)
+		if err != nil {
+			return ErrorEnvelope("execution_error", err.Error()), nil
+		}
+		raw, err := json.Marshal(resp)
+		if err != nil {
+			return nil, err
+		}
+		return OKEnvelope(raw), nil
+
+	case "executor.execute_stream":
+		resp, err := HandleArgonExecuteRPC(request, true)
+		if err != nil {
+			return ErrorEnvelope("execution_error", err.Error()), nil
+		}
 		raw, err := json.Marshal(resp)
 		if err != nil {
 			return nil, err

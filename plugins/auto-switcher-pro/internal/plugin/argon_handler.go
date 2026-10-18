@@ -1,8 +1,12 @@
 package plugin
 
 import (
+	"bytes"
+	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -295,6 +299,7 @@ func (s *ArgonSessionStore) IngestSession(payload SyncSessionPayload, authDir st
 			"authuser":        authUser,
 			"email":           email,
 			"raw_cookies":     rawCookies,
+			"cookie":          rawCookies,
 			"excluded_models": []string{},
 			"updated_at":      nowStr,
 		}
@@ -330,8 +335,113 @@ func (s *ArgonSessionStore) SetAccountCooldown(accID string, errType string, coo
 	s.accounts[accID] = acc
 }
 
+// RehydrateFromDisk scans authDir for existing gemini-argon-u*.json credentials
+// and populates in-memory accounts if they aren't already present.
+func (s *ArgonSessionStore) RehydrateFromDisk(authDir string) {
+	if authDir == "" {
+		return
+	}
+	files, err := os.ReadDir(authDir)
+	if err != nil {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, fi := range files {
+		name := fi.Name()
+		if fi.IsDir() || !strings.HasPrefix(name, "gemini-argon-u") || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+
+		rawAuthUser := strings.TrimSuffix(strings.TrimPrefix(name, "gemini-argon-u"), ".json")
+		accID := fmt.Sprintf("argon_u%s", rawAuthUser)
+		if _, exists := s.accounts[accID]; exists {
+			continue
+		}
+
+		fullPath := filepath.Join(authDir, name)
+		data, err := os.ReadFile(fullPath)
+		if err != nil {
+			continue
+		}
+
+		var parsed struct {
+			AuthUser   string `json:"authuser"`
+			Email      string `json:"email"`
+			RawCookies string `json:"raw_cookies"`
+			Cookie     string `json:"cookie"`
+		}
+		if err := json.Unmarshal(data, &parsed); err != nil {
+			continue
+		}
+
+		u := strings.TrimSpace(parsed.AuthUser)
+		if u == "" {
+			u = rawAuthUser
+		}
+		mail := strings.TrimSpace(parsed.Email)
+		if mail == "" {
+			mail = fmt.Sprintf("gemini-argon-u%s@google.com", u)
+		}
+		cookies := strings.TrimSpace(parsed.RawCookies)
+		if cookies == "" {
+			cookies = strings.TrimSpace(parsed.Cookie)
+		}
+
+		s.accounts[accID] = ArgonAccountInfo{
+			AccountID:    accID,
+			AuthUser:     u,
+			Email:        mail,
+			Status:       "ready",
+			QuotaPct:     100.0,
+			LastSyncAt:   time.Now().UTC().Format(time.RFC3339),
+			HasCookies:   cookies != "",
+			ErrorMessage: "",
+		}
+	}
+}
+
+// GetActiveReadySession finds the first ready in-memory account with valid session cookies.
+func (s *ArgonSessionStore) GetActiveReadySession(authDir string) (cookies string, authUser string, email string, err error) {
+	s.RehydrateFromDisk(authDir)
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, acc := range s.accounts {
+		if acc.Status == "ready" && acc.HasCookies {
+			// Read disk file if needed to fetch raw cookies
+			if authDir != "" {
+				targetFile := filepath.Join(authDir, fmt.Sprintf("gemini-argon-u%s.json", acc.AuthUser))
+				if data, err := os.ReadFile(targetFile); err == nil {
+					var diskObj struct {
+						RawCookies string `json:"raw_cookies"`
+						Cookie     string `json:"cookie"`
+					}
+					if json.Unmarshal(data, &diskObj) == nil {
+						c := strings.TrimSpace(diskObj.RawCookies)
+						if c == "" {
+							c = strings.TrimSpace(diskObj.Cookie)
+						}
+						if c != "" {
+							return c, acc.AuthUser, acc.Email, nil
+						}
+					}
+				}
+			}
+			return "", acc.AuthUser, acc.Email, nil
+		}
+	}
+
+	return "", "0", "", fmt.Errorf("no hay sesiones de Gemini Argon listas o con cookies válidas")
+}
+
 // ListAccounts returns all active/cooldown accounts in memory, plus any on-disk accounts.
 func (s *ArgonSessionStore) ListAccounts() []ArgonAccountInfo {
+	s.RehydrateFromDisk(resolveAuthDir())
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -499,3 +609,305 @@ func handleArgonHTTP(req ManagementRequestPayload) ([]byte, error) {
 		"message": "Ruta de Argon Gateway no encontrada",
 	})
 }
+
+// C-ABI Executor structures for CPAMC integration
+type argonExecutorRequest struct {
+	Model          string              `json:"Model"`
+	Stream         bool                `json:"Stream"`
+	Headers        map[string][]string `json:"Headers"`
+	Payload        json.RawMessage     `json:"Payload"`
+	StorageJSON    json.RawMessage     `json:"StorageJSON"`
+	AuthMetadata   map[string]any      `json:"AuthMetadata"`
+	AuthAttributes map[string]string   `json:"AuthAttributes"`
+	StreamID       string              `json:"stream_id,omitempty"`
+	HostCallbackID string              `json:"host_callback_id,omitempty"`
+}
+
+type argonExecutorResponse struct {
+	Payload  json.RawMessage     `json:"Payload"`
+	Headers  map[string][]string `json:"Headers,omitempty"`
+	Metadata map[string]any      `json:"Metadata,omitempty"`
+}
+
+type argonExecutorStreamResponse struct {
+	Headers map[string][]string `json:"Headers,omitempty"`
+	Chunks  []argonStreamChunk  `json:"Chunks,omitempty"`
+}
+
+type argonStreamChunk struct {
+	Payload []byte `json:"Payload,omitempty"`
+	Error   string `json:"Error,omitempty"`
+}
+
+// HandleArgonExecuteRPC handles CPAMC's executor.execute and executor.execute_stream RPC calls.
+func HandleArgonExecuteRPC(request []byte, isStream bool) (any, error) {
+	var req argonExecutorRequest
+	if len(request) > 0 {
+		if err := json.Unmarshal(request, &req); err != nil {
+			return nil, fmt.Errorf("invalid executor request: %w", err)
+		}
+	}
+
+	store := GetArgonStore()
+	authDir := resolveAuthDir()
+
+	// Extract credentials: first from req.StorageJSON if present, else from store
+	var cookies, authUser, email string
+	if len(req.StorageJSON) > 0 {
+		var st struct {
+			RawCookies string `json:"raw_cookies"`
+			Cookie     string `json:"cookie"`
+			AuthUser   string `json:"authuser"`
+			Email      string `json:"email"`
+		}
+		if json.Unmarshal(req.StorageJSON, &st) == nil {
+			c := strings.TrimSpace(st.RawCookies)
+			if c == "" {
+				c = strings.TrimSpace(st.Cookie)
+			}
+			if c != "" {
+				cookies = c
+				authUser = st.AuthUser
+				email = st.Email
+			}
+		}
+	}
+
+	if cookies == "" {
+		var err error
+		cookies, authUser, email, err = store.GetActiveReadySession(authDir)
+		if err != nil {
+			return nil, fmt.Errorf("gemini argon session error: %w", err)
+		}
+	}
+
+	if authUser == "" {
+		authUser = "0"
+	}
+
+	// Parse incoming chat request payload
+	var chatReq struct {
+		Model           string            `json:"model"`
+		Messages        []map[string]any  `json:"messages"`
+		Tools           json.RawMessage   `json:"tools,omitempty"`
+		ReasoningEffort string            `json:"reasoning_effort,omitempty"`
+	}
+	if len(req.Payload) > 0 {
+		_ = json.Unmarshal(req.Payload, &chatReq)
+	}
+
+	targetModel := "gemini-4-argon"
+	if req.Model != "" {
+		targetModel = req.Model
+	} else if chatReq.Model != "" {
+		targetModel = chatReq.Model
+	}
+
+	runnerInput := map[string]any{
+		"model":            targetModel,
+		"upstream_model":   "gemini-4-argon",
+		"messages":         chatReq.Messages,
+		"credential":       cookies,
+		"authuser":         authUser,
+		"email":            email,
+		"reasoning_effort": chatReq.ReasoningEffort,
+	}
+	if len(chatReq.Tools) > 0 && string(chatReq.Tools) != "null" {
+		var toolsParsed any
+		if json.Unmarshal(chatReq.Tools, &toolsParsed) == nil {
+			runnerInput["tools"] = toolsParsed
+		}
+	}
+
+	inBytes, err := json.Marshal(runnerInput)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode runner input: %w", err)
+	}
+
+	// Dispatch to companion Playwright daemon with fallback candidates
+	daemonURLs := []string{
+		store.daemonURL,
+		"http://172.19.0.1:8319",
+		"http://127.0.0.1:8319",
+		"http://host.docker.internal:8319",
+	}
+
+	var daemonOutput []byte
+	var lastErr error
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	for _, dURL := range daemonURLs {
+		targetEndpoint := strings.TrimRight(dURL, "/") + "/generate"
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, targetEndpoint, bytes.NewReader(inBytes))
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+
+		client := &http.Client{Timeout: 90 * time.Second}
+		resp, err := client.Do(httpReq)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			var errEnv map[string]any
+			if json.Unmarshal(body, &errEnv) == nil {
+				if errMsg, ok := errEnv["error"].(string); ok && errMsg != "" {
+					// Classify error and set cooldown if necessary
+					errType, _, cooldownSec := ClassifyArgonError(errMsg)
+					if errType != ArgonErrNone {
+						store.SetAccountCooldown(fmt.Sprintf("argon_u%s", authUser), errType, cooldownSec, errMsg)
+					}
+					lastErr = fmt.Errorf("daemon error (%s): %s", errType, errMsg)
+					break
+				}
+			}
+			lastErr = fmt.Errorf("daemon returned HTTP %d: %s", resp.StatusCode, string(body))
+			continue
+		}
+
+		daemonOutput = body
+		break
+	}
+
+	if len(daemonOutput) == 0 {
+		if lastErr != nil {
+			return nil, lastErr
+		}
+		return nil, fmt.Errorf("failed to communicate with companion Playwright daemon on port 8319")
+	}
+
+	if !isStream {
+		return argonExecutorResponse{
+			Payload: daemonOutput,
+			Headers: map[string][]string{
+				"Content-Type": {"application/json"},
+			},
+		}, nil
+	}
+
+	// Format into streaming SSE chunks for CPAMC
+	chunks, err := formatArgonStreamChunks(daemonOutput, targetModel)
+	if err != nil {
+		return nil, err
+	}
+
+	return argonExecutorStreamResponse{
+		Headers: map[string][]string{
+			"Content-Type":  {"text/event-stream"},
+			"Cache-Control": {"no-cache"},
+		},
+		Chunks: chunks,
+	}, nil
+}
+
+func formatArgonStreamChunks(payload []byte, model string) ([]argonStreamChunk, error) {
+	var resp struct {
+		ID      string `json:"id"`
+		Model   string `json:"model"`
+		Choices []struct {
+			Index   int `json:"index"`
+			Message struct {
+				Role      string          `json:"role"`
+				Content   *string         `json:"content"`
+				ToolCalls json.RawMessage `json:"tool_calls"`
+			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(payload, &resp); err != nil || len(resp.Choices) == 0 {
+		return nil, fmt.Errorf("invalid Gemini response payload: %w", err)
+	}
+
+	choice := resp.Choices[0]
+	chunkID := resp.ID
+	if chunkID == "" {
+		b := make([]byte, 6)
+		_, _ = rand.Read(b)
+		chunkID = fmt.Sprintf("chatcmpl-gw-%x", b)
+	}
+
+	chunks := make([]argonStreamChunk, 0, 4)
+
+	// 1. Initial role chunk
+	roleDelta := map[string]any{
+		"id":      chunkID,
+		"object":  "chat.completion.chunk",
+		"created": time.Now().Unix(),
+		"model":   model,
+		"choices": []map[string]any{
+			{
+				"index":         0,
+				"delta":         map[string]any{"role": "assistant"},
+				"finish_reason": nil,
+			},
+		},
+	}
+	r1, _ := json.Marshal(roleDelta)
+	chunks = append(chunks, argonStreamChunk{Payload: append([]byte("data: "), append(r1, []byte("\n\n")...)...)})
+
+	// 2. Content delta chunk
+	contentDelta := map[string]any{
+		"id":      chunkID,
+		"object":  "chat.completion.chunk",
+		"created": time.Now().Unix(),
+		"model":   model,
+		"choices": []map[string]any{
+			{
+				"index": 0,
+				"delta": func() map[string]any {
+					d := make(map[string]any)
+					if choice.Message.Content != nil {
+						d["content"] = *choice.Message.Content
+					}
+					if len(choice.Message.ToolCalls) > 0 && string(choice.Message.ToolCalls) != "null" {
+						d["tool_calls"] = choice.Message.ToolCalls
+					}
+					return d
+				}(),
+				"finish_reason": nil,
+			},
+		},
+	}
+	r2, _ := json.Marshal(contentDelta)
+	chunks = append(chunks, argonStreamChunk{Payload: append([]byte("data: "), append(r2, []byte("\n\n")...)...)})
+
+	// 3. Finish chunk
+	finishReason := choice.FinishReason
+	if finishReason == "" {
+		finishReason = "stop"
+	}
+	finalDelta := map[string]any{
+		"id":      chunkID,
+		"object":  "chat.completion.chunk",
+		"created": time.Now().Unix(),
+		"model":   model,
+		"choices": []map[string]any{
+			{
+				"index":         0,
+				"delta":         map[string]any{},
+				"finish_reason": finishReason,
+			},
+		},
+	}
+	r3, _ := json.Marshal(finalDelta)
+	chunks = append(chunks, argonStreamChunk{Payload: append([]byte("data: "), append(r3, []byte("\n\n")...)...)})
+
+	// 4. Final [DONE] chunk
+	chunks = append(chunks, argonStreamChunk{Payload: []byte("data: [DONE]\n\n")})
+
+	return chunks, nil
+}
+
