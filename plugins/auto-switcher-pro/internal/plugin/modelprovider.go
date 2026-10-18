@@ -695,6 +695,37 @@ func extractSessionID(req schedulerPickRequest) string {
 	return ""
 }
 
+// extractTaskType classifies the request into HEAVY (subagents, deep research, heavy audits)
+// or LIGHT (routine queries, simple turns) based on headers and metadata.
+func extractTaskType(req schedulerPickRequest) string {
+	if req.Options.Headers != nil {
+		for k, vals := range req.Options.Headers {
+			if strings.EqualFold(k, "x-task-type") || strings.EqualFold(k, "x-pi-task") {
+				if len(vals) > 0 && strings.TrimSpace(vals[0]) != "" {
+					val := strings.ToLower(strings.TrimSpace(vals[0]))
+					if strings.Contains(val, "heavy") || strings.Contains(val, "research") || strings.Contains(val, "subagent") {
+						return "HEAVY"
+					}
+					return "LIGHT"
+				}
+			}
+		}
+	}
+	if req.Options.Metadata != nil {
+		for _, key := range []string{"task_type", "task", "agent", "subagent"} {
+			if v, ok := req.Options.Metadata[key]; ok {
+				if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+					sLower := strings.ToLower(strings.TrimSpace(s))
+					if strings.Contains(sLower, "research") || strings.Contains(sLower, "subagent") || strings.Contains(sLower, "heavy") {
+						return "HEAVY"
+					}
+				}
+			}
+		}
+	}
+	return "LIGHT"
+}
+
 // schedulerPickCascade resolves auth selection for pool requests with the
 // Líder -> Cascading Reserves semantics: the leader serves while available and
 // reserves take over in cascade order. The host delivers Candidates already
@@ -862,11 +893,14 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 	}
 
 	sessionID := extractSessionID(req)
+	taskType := extractTaskType(req)
 
-	// Predictive Token-Budget Routing:
-	// Si se debe recurrir a las reservas (failover o rotación preventiva), ordenar las reservas
-	// disponibles por mayor cuota combinada (Window5hPct + WeeklyPct) para asignar la tarea
-	// al miembro con mayor capacidad restante y evitar caídas prematuras.
+	// Task-Aware & Predictive Token-Budget Routing:
+	// Si se debe recurrir a las reservas (failover o rotación preventiva):
+	// - Tareas HEAVY (investigaciones/subagentes): Priorizan la cuota semanal (WeeklyPct)
+	//   para proteger las cuentas con cuota semanal limitada de ser estranguladas.
+	// - Tareas LIGHT (comandos/preguntas directas): Priorizan la ventana corta de 5h (Window5hPct),
+	//   reservando la capacidad semanal de las mejores cuentas para trabajo pesado.
 	orderedCascade := make([]string, 0, len(cascade))
 	if len(cascade) > 0 {
 		orderedCascade = append(orderedCascade, cascade[0]) // Mantener el líder en el índice 0
@@ -878,8 +912,15 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 				qA, hasA := predEngine.GetLiveQuota(emailA)
 				qB, hasB := predEngine.GetLiveQuota(emailB)
 				if hasA && hasB {
-					scoreA := qA.Window5hPct + qA.WeeklyPct
-					scoreB := qB.Window5hPct + qB.WeeklyPct
+					if taskType == "HEAVY" {
+						// Para tareas pesadas, la cuota semanal manda (70% peso semanal, 30% 5h)
+						scoreA := (qA.WeeklyPct * 0.7) + (qA.Window5hPct * 0.3)
+						scoreB := (qB.WeeklyPct * 0.7) + (qB.Window5hPct * 0.3)
+						return scoreA > scoreB
+					}
+					// Para tareas ligeras, la cuota de 5h manda (70% peso 5h, 30% semanal)
+					scoreA := (qA.Window5hPct * 0.7) + (qA.WeeklyPct * 0.3)
+					scoreB := (qB.Window5hPct * 0.7) + (qB.WeeklyPct * 0.3)
 					return scoreA > scoreB
 				}
 				if hasA {

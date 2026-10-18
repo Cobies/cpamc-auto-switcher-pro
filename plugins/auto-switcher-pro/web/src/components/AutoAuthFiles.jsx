@@ -1048,6 +1048,18 @@ export default function AutoAuthFiles({
                           }
                         : detectSpecialistState(card, cardInherited);
                       const poolGroupStyle = getPoolGroupStyle(card.assignedPrefix);
+                      const cardTelemetry = extractAccountTelemetry(card);
+                      const cardCd = classifyCooldowns(cardTelemetry.cooldowns);
+                      const cardEarliestCooldown =
+                        cardCd.active.length > 0
+                          ? cardCd.active.reduce(
+                              (earliest, a) =>
+                                a.retryAtMs !== null && (!earliest || earliest.retryAtMs === null || a.retryAtMs < earliest.retryAtMs)
+                                  ? a
+                                  : earliest,
+                              null
+                            )
+                          : null;
 
                       return (
                         <div
@@ -1138,29 +1150,49 @@ export default function AutoAuthFiles({
 
                           <div className="auto-auth-badges-row">
                             <div className="status-pill-group">
-                              <span
-                                className="badge-pool-prefix"
-                                style={{
-                                  ...(poolGroupStyle.statusBadgeStyle || {}),
-                                  background: card.isDynamicRAMLeader
-                                    ? 'rgba(16, 185, 129, 0.2)'
-                                    : 'rgba(51, 65, 85, 0.4)',
-                                  borderColor: card.isDynamicRAMLeader
-                                    ? '#10b981'
-                                    : 'rgba(148, 163, 184, 0.3)',
-                                  color: card.isDynamicRAMLeader ? '#34d399' : '#94a3b8',
-                                  fontWeight: 700,
-                                }}
-                              >
-                                {card.isDynamicRAMLeader
-                                  ? '🟢 EN CALIENTE: DESPACHANDO EN RAM'
-                                  : '⏸️ EN BANQUILLO: RESERVA LISTA'}
-                              </span>
-                              {card.isDynamicRAMLeader && (
-                                <span className="badge-ram-leader">
-                                  👑 Turno Activo
-                                </span>
-                              )}
+                              {(() => {
+                                const hasCooldown = Boolean(cardEarliestCooldown);
+                                const isResting = hasCooldown;
+                                const cooldownMinutes = cardEarliestCooldown?.retryAt
+                                  ? formatRemainingDuration(cardEarliestCooldown.retryAt)
+                                  : '';
+
+                                if (card.isDynamicRAMLeader) {
+                                  return (
+                                    <>
+                                      <span
+                                        className="badge-pool-prefix badge-state-ram-leader"
+                                        title="Esta cuenta es la que actualmente procesa las peticiones en caliente"
+                                      >
+                                        🟢 EN CALIENTE: DESPACHANDO EN RAM
+                                      </span>
+                                      <span className="badge-ram-leader" style={{ marginLeft: 4 }}>
+                                        👑 Turno Activo (Líder en RAM)
+                                      </span>
+                                    </>
+                                  );
+                                }
+
+                                if (isResting) {
+                                  return (
+                                    <span
+                                      className="badge-pool-prefix badge-state-resting"
+                                      title="Cuenta en descanso temporal por cuota o cooldown para recuperar ventana"
+                                    >
+                                      💤 EN REPOSO PREVENTIVO{cooldownMinutes ? ` · restan ${cooldownMinutes}` : ''}
+                                    </span>
+                                  );
+                                }
+
+                                return (
+                                  <span
+                                    className="badge-pool-prefix badge-state-reserve"
+                                    title="Reserva sana con cuota disponible lista para relevo inmediato"
+                                  >
+                                    ⏸️ EN BANQUILLO: RESERVA LISTA
+                                  </span>
+                                );
+                              })()}
                             </div>
 
                             <div className="isolation-pill-group">

@@ -823,6 +823,32 @@
   cursor: not-allowed;
 }
 
+/* RAM Leader vs Resting vs Reserve Status Pill Badges */
+.badge-state-ram-leader {
+  background: rgba(16, 185, 129, 0.22) !important;
+  border: 1px solid #10b981 !important;
+  color: #34d399 !important;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.25);
+  font-weight: 800 !important;
+  letter-spacing: 0.03em;
+}
+
+.badge-state-resting {
+  background: rgba(245, 158, 11, 0.22) !important;
+  border: 1px solid #f59e0b !important;
+  color: #fbbf24 !important;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.25);
+  font-weight: 800 !important;
+  letter-spacing: 0.03em;
+}
+
+.badge-state-reserve {
+  background: rgba(51, 65, 85, 0.5) !important;
+  border: 1px solid rgba(148, 163, 184, 0.4) !important;
+  color: #94a3b8 !important;
+  font-weight: 700 !important;
+}
+
 .spinning {
   display: inline-block;
   animation: spin 1s linear infinite;

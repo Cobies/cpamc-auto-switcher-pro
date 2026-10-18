@@ -767,4 +767,80 @@ func TestSchedulerPickGhostWarmupShadowTarget(t *testing.T) {
 	}
 }
 
+func TestSchedulerPickTaskAwareRouting(t *testing.T) {
+	registry := testModelProviderRegistry(t)
+	// Add third member C to test reserve ranking
+	p, _ := registry.GetPool("pool-agy-1")
+	p.Reserves = []string{"antigravity-b@gmail.com.json", "antigravity-c@gmail.com.json"}
+	_ = registry.SavePool(p)
+
+	previous := activeRegistry
+	activeRegistry = func() *PoolRegistry { return registry }
+	t.Cleanup(func() { activeRegistry = previous })
+
+	pe := GetPredictiveEngine()
+	// Deplete leader A (<15%) so scheduler evaluates reserves B and C
+	pe.RecordLiveQuota(AccountQuotaTelemetry{AccountKey: "antigravity-a@gmail.com.json", Window5hPct: 5.0, WeeklyPct: 5.0})
+	// Reserve B: High 5h (95%), but Low Weekly (30%)
+	pe.RecordLiveQuota(AccountQuotaTelemetry{AccountKey: "antigravity-b@gmail.com.json", Window5hPct: 95.0, WeeklyPct: 30.0})
+	// Reserve C: Moderate 5h (60%), but High Weekly (95%)
+	pe.RecordLiveQuota(AccountQuotaTelemetry{AccountKey: "antigravity-c@gmail.com.json", Window5hPct: 60.0, WeeklyPct: 95.0})
+
+	t.Cleanup(func() {
+		pe.RecordLiveQuota(AccountQuotaTelemetry{AccountKey: "antigravity-a@gmail.com.json", Window5hPct: 100.0, WeeklyPct: 100.0})
+		pe.RecordLiveQuota(AccountQuotaTelemetry{AccountKey: "antigravity-b@gmail.com.json", Window5hPct: 100.0, WeeklyPct: 100.0})
+		pe.RecordLiveQuota(AccountQuotaTelemetry{AccountKey: "antigravity-c@gmail.com.json", Window5hPct: 100.0, WeeklyPct: 100.0})
+	})
+
+	// 1. HEAVY task (research/subagent): should pick Reserve C due to superior Weekly quota
+	reqHeavy := schedulerPickRequest{
+		Provider: "antigravity",
+		Model:    "gemini-3.8-flash-high",
+		Options: schedulerOptions{
+			Metadata: map[string]any{
+				"requested_model": "agy/gemini-3.8-flash-high",
+				"task_type":       "deep-researcher",
+				"session_id":      "session-heavy-turn-1",
+			},
+		},
+		Candidates: []schedulerCandidate{
+			{ID: "antigravity-a@gmail.com.json", Provider: "antigravity", Status: "active"},
+			{ID: "antigravity-b@gmail.com.json", Provider: "antigravity", Status: "active"},
+			{ID: "antigravity-c@gmail.com.json", Provider: "antigravity", Status: "active"},
+		},
+	}
+	respHeavy := handleSchedulerPick(reqHeavy)
+	if !respHeavy.Handled || respHeavy.AuthID != "antigravity-c@gmail.com.json" {
+		t.Fatalf("expected Reserve C (highest weekly quota) picked for HEAVY task, got: %+v", respHeavy)
+	}
+
+	// Reset ActiveLeader to A so both B and C are evaluated as reserves for the LIGHT task
+	registry.SetActiveLeader("agy", "antigravity-a@gmail.com.json")
+
+	// 2. LIGHT task (routine turn): should pick Reserve B due to superior 5h window
+	// Using a distinct session header to test independent routing without session affinity to C
+	reqLight := schedulerPickRequest{
+		Provider: "antigravity",
+		Model:    "gemini-3.8-flash-high",
+		Options: schedulerOptions{
+			Metadata: map[string]any{
+				"requested_model": "agy/gemini-3.8-flash-high",
+				"session_id":      "session-light-turn-2",
+			},
+			Headers: map[string][]string{
+				"X-Task-Type": {"light"},
+			},
+		},
+		Candidates: []schedulerCandidate{
+			{ID: "antigravity-a@gmail.com.json", Provider: "antigravity", Status: "active"},
+			{ID: "antigravity-b@gmail.com.json", Provider: "antigravity", Status: "active"},
+			{ID: "antigravity-c@gmail.com.json", Provider: "antigravity", Status: "active"},
+		},
+	}
+	respLight := handleSchedulerPick(reqLight)
+	if !respLight.Handled || respLight.AuthID != "antigravity-b@gmail.com.json" {
+		t.Fatalf("expected Reserve B (highest 5h quota) picked for LIGHT task, got: %+v", respLight)
+	}
+}
+
 
