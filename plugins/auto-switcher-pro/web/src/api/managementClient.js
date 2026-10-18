@@ -2687,6 +2687,19 @@ export async function syncArgonSession(payload, options = {}) {
   return res.json();
 }
 
+/**
+ * Elimina una sesión de Gemini Argon en RAM y disco.
+ */
+export async function deleteArgonSession(authuser, options = {}) {
+  const res = await apiFetch('/v0/management/auto-switcher-pro/argon/delete-session', {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ authuser: String(authuser || '0') }),
+  });
+  return res.json();
+}
+
 
 
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { getArgonStatus, syncArgonSession } from '../api/managementClient';
+import { getArgonStatus, syncArgonSession, deleteArgonSession } from '../api/managementClient';
 import QuotaClock from './QuotaClock';
 import './AutoAuthFiles.css';
 import './ArgonGateway.css';
@@ -135,6 +135,24 @@ export default function ArgonGateway() {
       setFeedback({ type: 'error', message: err.message || 'Fallo de red al enviar cookies.' });
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteSession = async (authUser, email) => {
+    if (!window.confirm(`¿Estás seguro de que deseas eliminar la sesión /u/${authUser} (${email})? Se borrará de memoria RAM y de disco.`)) {
+      return;
+    }
+    setFeedback(null);
+    try {
+      const res = await deleteArgonSession(authUser);
+      if (res && res.ok) {
+        setFeedback({ type: 'success', message: res.message || 'Sesión eliminada con éxito.' });
+        loadStatus();
+      } else {
+        setFeedback({ type: 'error', message: res?.message || 'Error al eliminar la sesión.' });
+      }
+    } catch (err) {
+      setFeedback({ type: 'error', message: err.message || 'Error de red al eliminar la sesión.' });
     }
   };
 
@@ -638,7 +656,17 @@ export default function ArgonGateway() {
                   </div>
 
                   {/* Refresh Quota Footer */}
-                  <div className="card-quota-footer">
+                  <div className="card-quota-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <button
+                      type="button"
+                      className="btn-card-refresh"
+                      style={{ background: 'rgba(239, 68, 68, 0.15)', borderColor: 'rgba(239, 68, 68, 0.35)', color: '#fca5a5' }}
+                      onClick={() => handleDeleteSession(acc.authuser, acc.email)}
+                      title="Eliminar esta sesión de cuenta"
+                    >
+                      <span>🗑️</span>
+                      <span>Eliminar Sesión</span>
+                    </button>
                     <button
                       type="button"
                       className="btn-card-refresh"

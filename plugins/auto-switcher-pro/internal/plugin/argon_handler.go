@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -351,19 +352,36 @@ func (s *ArgonSessionStore) ListAccounts() []ArgonAccountInfo {
 		list = append(list, acc)
 	}
 
-	// If no in-memory accounts registered yet, supply default virtual u/0 account for display
-	if len(list) == 0 {
-		list = append(list, ArgonAccountInfo{
-			AccountID:  "argon_u0",
-			AuthUser:   "0",
-			Email:      "gemini-argon-default@google.com",
-			Status:     "ready",
-			QuotaPct:   100.0,
-			HasCookies: false,
-		})
+	return list
+}
+
+// DeleteAccount removes an account from memory and optionally deletes its file on disk.
+func (s *ArgonSessionStore) DeleteAccount(authUser, authDir string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	safeAuthUser := ""
+	for _, r := range strings.TrimSpace(authUser) {
+		if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '_' {
+			safeAuthUser += string(r)
+		}
+	}
+	if safeAuthUser == "" {
+		safeAuthUser = "0"
 	}
 
-	return list
+	accID := fmt.Sprintf("argon_u%s", safeAuthUser)
+	_, exists := s.accounts[accID]
+	if exists {
+		delete(s.accounts, accID)
+	}
+
+	if authDir != "" {
+		targetFile := filepath.Join(authDir, fmt.Sprintf("gemini-argon-u%s.json", safeAuthUser))
+		_ = os.Remove(targetFile)
+	}
+
+	return exists
 }
 
 func handleArgonHTTP(req ManagementRequestPayload) ([]byte, error) {
@@ -445,6 +463,34 @@ func handleArgonHTTP(req ManagementRequestPayload) ([]byte, error) {
 			"ok":      true,
 			"account": acc,
 			"message": fmt.Sprintf("Sesión Google Gemini Argon (/u/%s) sincronizada exitosamente.", acc.AuthUser),
+		})
+	}
+
+	// 3. /auto-switcher-pro/argon/delete-session
+	if strings.HasSuffix(normPath, "/delete-session") {
+		if method != http.MethodDelete && method != http.MethodPost {
+			return jsonManagementResponse(http.StatusMethodNotAllowed, map[string]string{
+				"error":   "method_not_allowed",
+				"message": "Sólo se permite DELETE o POST en /auto-switcher-pro/argon/delete-session",
+			})
+		}
+
+		authUser := "0"
+		if len(req.Body) > 0 {
+			var body struct {
+				AuthUser string `json:"authuser"`
+			}
+			if err := json.Unmarshal(req.Body, &body); err == nil && body.AuthUser != "" {
+				authUser = body.AuthUser
+			}
+		}
+
+		authDir := resolveAuthDir()
+		store.DeleteAccount(authUser, authDir)
+
+		return jsonManagementResponse(http.StatusOK, map[string]any{
+			"ok":      true,
+			"message": fmt.Sprintf("Sesión /u/%s eliminada de RAM y disco.", authUser),
 		})
 	}
 
