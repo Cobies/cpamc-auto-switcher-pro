@@ -18,6 +18,7 @@ const (
 	agentMatrixRoutePath          = "/auto-switcher-pro/agent-matrix"
 	agentMatrixPingRoutePath      = "/auto-switcher-pro/agent-matrix/ping"
 	agentMatrixHeartbeatRoutePath = "/auto-switcher-pro/agent-matrix/heartbeat"
+	agentMatrixScanRoutePath      = "/auto-switcher-pro/agent-matrix/scan-environment"
 )
 
 var (
@@ -36,6 +37,21 @@ func isAgentMatrixPingPath(path string) bool {
 
 func isAgentMatrixHeartbeatPath(path string) bool {
 	return strings.Contains(path, agentMatrixHeartbeatRoutePath)
+}
+
+func isAgentMatrixScanPath(path string) bool {
+	return strings.Contains(path, agentMatrixScanRoutePath)
+}
+
+// DiscoveredHarness represents a dynamically detected runtime harness and its actual agents.
+type DiscoveredHarness struct {
+	ID         string      `json:"id"`          // "gentle_shell", "jok3r_pi", "opencode"
+	Name       string      `json:"name"`        // "Gentle-Shell CLI", "j0k3r-pi"
+	Icon       string      `json:"icon"`        // "📟", "⚡", "💻"
+	Badge      string      `json:"badge"`       // "📟 Gentle-Shell Terminal CLI"
+	ConfigPath string      `json:"config_path"` // "~/.gentle-shell/agent/profiles.json"
+	Subtitle   string      `json:"subtitle"`    // Explanatory callout
+	Agents     []AgentInfo `json:"agents"`      // The REAL agents discovered on disk
 }
 
 // AgentInfo represents an agent's unified metadata across Gentle-AI and jok3r-pi.
@@ -73,6 +89,7 @@ type DiscoveredUpstreamModel struct {
 // AgentMatrixPayload represents the JSON wire format for GET/POST /agent-matrix.
 type AgentMatrixPayload struct {
 	OK               bool                      `json:"ok"`
+	Harnesses        []DiscoveredHarness       `json:"harnesses"`
 	GentleAgents     []AgentInfo               `json:"gentle_agents"`
 	Jok3rAgents      []AgentInfo               `json:"jok3r_agents"`
 	Jok3rDetected    bool                      `json:"jok3r_detected"`
@@ -129,6 +146,9 @@ func handleAgentMatrixHTTP(req ManagementRequestPayload) ([]byte, error) {
 	if isAgentMatrixHeartbeatPath(req.Path) {
 		return handleAgentMatrixHeartbeatHTTP(req)
 	}
+	if isAgentMatrixScanPath(req.Path) {
+		return handleAgentMatrixScanHTTP(req)
+	}
 
 	// Header-based opportunistic detection
 	for k, v := range req.Headers {
@@ -176,6 +196,17 @@ func handleAgentMatrixHeartbeatHTTP(req ManagementRequestPayload) ([]byte, error
 		"ok":      true,
 		"message": "heartbeat registered",
 	})
+}
+
+func handleAgentMatrixScanHTTP(req ManagementRequestPayload) ([]byte, error) {
+	method := strings.ToUpper(strings.TrimSpace(req.Method))
+	if method != http.MethodPost {
+		return jsonManagementResponse(http.StatusMethodNotAllowed, map[string]string{
+			"error":   "method_not_allowed",
+			"message": "scan requires POST",
+		})
+	}
+	return getAgentMatrixResponse()
 }
 
 // PingRequest represents a test ping for a specific pool / route.
@@ -444,36 +475,15 @@ func getAgentMatrixResponse() ([]byte, error) {
 		}
 	}
 
-	// 1. Fetch persisted records from SQLite
-	savedGentle, _ := analytics.GetAgentProfiles("gentle_ai")
-	savedJok3r, _ := analytics.GetAgentProfiles("jok3r_pi")
+	// 1. Fetch dynamic manifests and discovered harnesses
+	harnesses, gentleAgents, jok3rAgents, jok3rDetected := loadManifestOrDiscover(availablePools, poolCapabilities)
 
-	gentleMap := make(map[string]analytics.AgentProfileRecord)
-	for _, p := range savedGentle {
-		gentleMap[p.AgentID] = p
-	}
-	jok3rMap := make(map[string]analytics.AgentProfileRecord)
-	for _, p := range savedJok3r {
-		jok3rMap[p.AgentID] = p
-	}
-
-	// 2. Discover Gentle-AI Universe agents (Gentle-Shell & OpenCode) dynamically
-	gentleAgents := discoverUniverseAgents("gentle_ai", gentleMap)
-
-	// 3. Discover j0k3r-pi Universe agents dynamically (strictly conditional on dynamic detection)
-	jok3rDetected := isJok3rDetected()
-	var jok3rAgents []AgentInfo
-	if jok3rDetected {
-		jok3rAgents = discoverUniverseAgents("jok3r_pi", jok3rMap)
-	} else {
-		jok3rAgents = []AgentInfo{}
-	}
-
-	// 4. Discover Upstream / Unassigned direct models from baseline & host auth files
+	// 2. Discover Upstream / Unassigned direct models from baseline & host auth files
 	upstreamModels := discoverUpstreamModels(availablePools)
 
 	payload := AgentMatrixPayload{
 		OK:               true,
+		Harnesses:        harnesses,
 		GentleAgents:     gentleAgents,
 		Jok3rAgents:      jok3rAgents,
 		Jok3rDetected:    jok3rDetected,
@@ -484,6 +494,169 @@ func getAgentMatrixResponse() ([]byte, error) {
 	}
 
 	return jsonManagementResponse(http.StatusOK, payload)
+}
+
+func loadManifestOrDiscover(availablePools []string, poolCapabilities map[string]bool) ([]DiscoveredHarness, []AgentInfo, []AgentInfo, bool) {
+	manifestPaths := []string{
+		"/CLIProxyAPI/plugins/.harnesses/manifest.json",
+		filepath.Join(os.Getenv("HOME"), "services/cliproxy/plugins/.harnesses/manifest.json"),
+		"./plugins/.harnesses/manifest.json",
+		"./.harnesses/manifest.json",
+	}
+
+	var rawManifest []byte
+	for _, p := range manifestPaths {
+		if data, err := os.ReadFile(p); err == nil && len(data) > 0 {
+			rawManifest = data
+			break
+		}
+	}
+
+	var harnesses []DiscoveredHarness
+	var gentleAgents []AgentInfo
+	var jok3rAgents []AgentInfo
+	jok3rDetected := isJok3rDetected()
+
+	if len(rawManifest) > 0 {
+		var diskManifest struct {
+			Version           string              `json:"version"`
+			ScannedAtMs       int64               `json:"scanned_at_ms"`
+			DetectedHarnesses []DiscoveredHarness `json:"detected_harnesses"`
+		}
+		if err := json.Unmarshal(rawManifest, &diskManifest); err == nil && len(diskManifest.DetectedHarnesses) > 0 {
+			for _, h := range diskManifest.DetectedHarnesses {
+				// If j0k3r-pi is in manifest but dynamic detection says false, skip it
+				if h.ID == "jok3r_pi" && !jok3rDetected {
+					continue
+				}
+
+				saved, _ := analytics.GetAgentProfiles(h.ID)
+				if len(saved) == 0 && (h.ID == "gentle_shell" || h.ID == "gentle_ai") {
+					saved, _ = analytics.GetAgentProfiles("gentle_ai")
+				}
+				savedMap := make(map[string]analytics.AgentProfileRecord)
+				for _, p := range saved {
+					savedMap[p.AgentID] = p
+				}
+
+				// Merge with dynamically discovered local files so new markdown subagents appear immediately
+				var dynamicDiscovered []AgentInfo
+				if h.ID == "jok3r_pi" {
+					dynamicDiscovered = discoverUniverseAgents("jok3r_pi", savedMap)
+				} else if h.ID == "gentle_shell" || h.ID == "gentle_ai" {
+					dynamicDiscovered = discoverUniverseAgents("gentle_ai", savedMap)
+				}
+
+				seenAgent := make(map[string]bool)
+				var agentsWithState []AgentInfo
+
+				for _, a := range h.Agents {
+					seenAgent[a.AgentID] = true
+					a.Universe = h.ID
+					if rec, ok := savedMap[a.AgentID]; ok {
+						if rec.PrimaryPool != "" {
+							a.PrimaryPool = rec.PrimaryPool
+						}
+						if rec.FallbackPool != "" {
+							a.FallbackPool = rec.FallbackPool
+						}
+						if rec.ThinkingLevel != "" {
+							a.ThinkingLevel = rec.ThinkingLevel
+						}
+						if rec.Concurrency > 0 {
+							a.Concurrency = rec.Concurrency
+						}
+					} else {
+						if a.PrimaryPool == "" {
+							if len(availablePools) > 0 {
+								a.PrimaryPool = availablePools[0]
+							} else {
+								a.PrimaryPool = "Pool-01-gemini"
+							}
+						}
+						if a.FallbackPool == "" {
+							if len(availablePools) > 1 {
+								a.FallbackPool = availablePools[1]
+							} else {
+								a.FallbackPool = a.PrimaryPool
+							}
+						}
+						if a.ThinkingLevel == "" {
+							a.ThinkingLevel = "medium"
+						}
+						if a.Concurrency <= 0 {
+							a.Concurrency = 1
+						}
+					}
+
+					if poolCapabilities[a.PrimaryPool] == false {
+						a.ThinkingLevel = "none"
+					}
+					agentsWithState = append(agentsWithState, a)
+				}
+
+				// Append any newly created local agents discovered dynamically from markdown
+				for _, da := range dynamicDiscovered {
+					if !seenAgent[da.AgentID] {
+						seenAgent[da.AgentID] = true
+						if poolCapabilities[da.PrimaryPool] == false {
+							da.ThinkingLevel = "none"
+						}
+						agentsWithState = append(agentsWithState, da)
+					}
+				}
+
+				h.Agents = agentsWithState
+				harnesses = append(harnesses, h)
+
+				if h.ID == "gentle_shell" || h.ID == "gentle_ai" {
+					gentleAgents = h.Agents
+				} else if h.ID == "jok3r_pi" {
+					jok3rAgents = h.Agents
+				}
+			}
+
+			return harnesses, gentleAgents, jok3rAgents, jok3rDetected
+		}
+	}
+
+	// Fallback to legacy scanning if no manifest exists on disk
+	savedGentle, _ := analytics.GetAgentProfiles("gentle_ai")
+	gentleMap := make(map[string]analytics.AgentProfileRecord)
+	for _, p := range savedGentle {
+		gentleMap[p.AgentID] = p
+	}
+	gentleAgents = discoverUniverseAgents("gentle_ai", gentleMap)
+	harnesses = append(harnesses, DiscoveredHarness{
+		ID:         "gentle_shell",
+		Name:       "Gentle-Shell CLI",
+		Icon:       "📟",
+		Badge:      "📟 Gentle-Shell Terminal CLI",
+		ConfigPath: "~/.gentle-shell/agent/profiles.json",
+		Subtitle:   "⚡ Terminal CLI Soberana: Arnés independiente para desarrollo ágil en consola con streaming nativo.",
+		Agents:     gentleAgents,
+	})
+
+	jok3rDetected = isJok3rDetected()
+	if jok3rDetected {
+		savedJok3r, _ := analytics.GetAgentProfiles("jok3r_pi")
+		jok3rMap := make(map[string]analytics.AgentProfileRecord)
+		for _, p := range savedJok3r {
+			jok3rMap[p.AgentID] = p
+		}
+		jok3rAgents = discoverUniverseAgents("jok3r_pi", jok3rMap)
+		harnesses = append(harnesses, DiscoveredHarness{
+			ID:         "jok3r_pi",
+			Name:       "j0k3r-pi",
+			Icon:       "⚡",
+			Badge:      "⚡ j0k3r-pi Orchestrator",
+			ConfigPath: "~/.pi/agent-j0k3r/subagents.json",
+			Subtitle:   "⚡ Suite Todo-en-Uno Soberana: Orquestador interactivo de terminal y escuadrón de subagentes Planned Workflow.",
+			Agents:     jok3rAgents,
+		})
+	}
+
+	return harnesses, gentleAgents, jok3rAgents, jok3rDetected
 }
 
 func discoverUpstreamModels(pools []string) []DiscoveredUpstreamModel {
@@ -768,7 +941,7 @@ func postAgentMatrixResponse(body []byte) ([]byte, error) {
 				"fallback": "cpamc/" + a.FallbackPool,
 				"effort":   effort,
 			}
-		} else if a.Universe == "gentle_ai" {
+		} else if a.Universe == "gentle_shell" || a.Universe == "gentle_ai" {
 			gentleProfiles[a.AgentID] = map[string]any{
 				"model":    "cpamc/" + a.PrimaryPool,
 				"fallback": "cpamc/" + a.FallbackPool,

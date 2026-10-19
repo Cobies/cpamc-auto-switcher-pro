@@ -2723,6 +2723,26 @@ export async function testAgentRoute(poolId, targetModel = '', options = {}) {
   return data;
 }
 
+/**
+ * Escanea el entorno para detectar dinámicamente los arneses y agentes del equipo.
+ *
+ * @param {Object} [options]
+ */
+export async function scanAgentEnvironment(options = {}) {
+  const res = await apiFetch('/v0/management/auto-switcher-pro/agent-matrix/scan-environment', {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'scan' }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data?.ok) {
+    throw new Error(data?.message || 'Error al escanear arneses del equipo');
+  }
+  return data;
+}
+
+
 
 
 

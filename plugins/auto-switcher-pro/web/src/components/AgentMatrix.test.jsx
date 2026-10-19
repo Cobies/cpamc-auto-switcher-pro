@@ -90,10 +90,9 @@ describe('AgentMatrix Component', () => {
     expect(screen.getByText('👑 ORQUESTADOR J0K3R')).toBeDefined();
     expect(screen.getByText('🛠️ gentle-ai-worker')).toBeDefined();
 
-    // 2. Check Clarity Item 1: OpenCode + Gentle-Shell dual runtime clarity
-    expect(screen.getByText('💻 OpenCode Editor')).toBeDefined();
-    expect(screen.getByText('📟 Gentle-Shell CLI')).toBeDefined();
-    expect(screen.getByText(/Sincronización Simultánea/i)).toBeDefined();
+    // 2. Check Dynamic Harness clarity badges
+    expect(screen.getByText('📟 Gentle-Shell Terminal CLI')).toBeDefined();
+    expect(screen.getByText(/Terminal CLI Soberana/i)).toBeDefined();
 
     // 3. Check Clarity Item 2: Rescate Failover 429 clarity
     expect(screen.getAllByText(/RESCATE EN CALIENTE \(FAILOVER 429\)/i).length).toBeGreaterThan(0);
@@ -161,19 +160,19 @@ describe('AgentMatrix Component', () => {
       expect(screen.getByText('Matriz de Agentes & Orquestación')).toBeDefined();
     });
 
-    // 1. Gentle-AI must be displayed
+    // 1. Gentle-AI / Gentle-Shell must be displayed
     expect(screen.getByText('👑 ORQUESTADOR GENTLE')).toBeDefined();
     expect(screen.getByText('🛠️ gentle-ai-worker')).toBeDefined();
-    expect(screen.getByText('💻 OpenCode Editor')).toBeDefined();
-    expect(screen.getByText('📟 Gentle-Shell CLI')).toBeDefined();
+    expect(screen.getByText('📟 Gentle-Shell Terminal CLI')).toBeDefined();
 
     // 2. j0k3r-pi MUST NOT be displayed in tabs or body
     expect(screen.queryByText('👑 ORQUESTADOR J0K3R')).toBeNull();
     expect(screen.queryByText('UNIVERSO J0K3R-PI')).toBeNull();
-    expect(screen.queryByText('🅱️ j0k3r-pi')).toBeNull();
+    expect(screen.queryByText('⚡ j0k3r-pi')).toBeNull();
     expect(screen.queryByText('Vista Global Completa')).toBeNull();
 
-    // 3. Single active universe badge must be visible
-    expect(screen.getByText(/Universo Activo: Gentle-AI/i)).toBeDefined();
+    // 3. Single active universe badge must be visible with detected agent count
+    expect(screen.getAllByText(/Gentle-Shell CLI/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/1 agentes detectados en disco/i)).toBeDefined();
   });
 });

@@ -197,6 +197,11 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 					"Path":        agentMatrixHeartbeatRoutePath,
 					"Description": "Registra el latido / presencia de un arnés de orquestación (Gentle-AI o j0k3r-pi)",
 				},
+				{
+					"Method":      http.MethodPost,
+					"Path":        agentMatrixScanRoutePath,
+					"Description": "Escanea el entorno y detecta los arneses y agentes reales del equipo",
+				},
 			},
 			"resources": []map[string]any{
 				{

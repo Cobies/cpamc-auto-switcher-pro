@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { fetchAgentMatrix, saveAgentMatrix, testAgentRoute } from '../api/managementClient';
+import { fetchAgentMatrix, saveAgentMatrix, testAgentRoute, scanAgentEnvironment } from '../api/managementClient';
 import './AgentMatrix.css';
 
 const UNIVERSE_STORAGE_KEY = 'agent_matrix_active_universe';
@@ -12,17 +12,16 @@ export default function AgentMatrix() {
     return 'all';
   });
 
-  const [gentleAgents, setGentleAgents] = useState([]);
-  const [jok3rAgents, setJok3rAgents] = useState([]);
-  const [jok3rDetected, setJok3rDetected] = useState(false);
+  const [harnesses, setHarnesses] = useState([]);
   const [availablePools, setAvailablePools] = useState([]);
   const [poolCapabilities, setPoolCapabilities] = useState({});
   const [poolDetails, setPoolDetails] = useState({});
   const [upstreamModels, setUpstreamModels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const [feedback, setFeedback] = useState({ text: '', type: '' });
-  const [pingStates, setPingStates] = useState({}); // { [agentId]: { loading: bool, latency: number, text: string, ok: bool } }
+  const [pingStates, setPingStates] = useState({}); // { [agentKey]: { loading: bool, latency: number, text: string, ok: bool } }
 
   const handleUniverseChange = (univ) => {
     setActiveUniverse(univ);
@@ -31,72 +30,129 @@ export default function AgentMatrix() {
     }
   };
 
+  const processPayload = useCallback((data) => {
+    if (!data?.ok) return;
+
+    let detected = [];
+    if (Array.isArray(data.harnesses) && data.harnesses.length > 0) {
+      detected = data.harnesses;
+    } else {
+      // Fallback: build harnesses array from legacy gentle_agents / jok3r_agents if provided
+      if (data.gentle_agents && data.gentle_agents.length > 0) {
+        detected.push({
+          id: 'gentle_shell',
+          name: 'Gentle-Shell CLI',
+          icon: '📟',
+          badge: '📟 Gentle-Shell Terminal CLI',
+          config_path: '~/.gentle-shell/agent/profiles.json',
+          subtitle: '⚡ Terminal CLI Soberana: Arnés independiente para desarrollo ágil en consola con streaming nativo.',
+          agents: data.gentle_agents,
+        });
+      }
+      if (data.jok3r_detected && data.jok3r_agents && data.jok3r_agents.length > 0) {
+        detected.push({
+          id: 'jok3r_pi',
+          name: 'j0k3r-pi',
+          icon: '⚡',
+          badge: '⚡ j0k3r-pi Orchestrator',
+          config_path: '~/.pi/agent-j0k3r/subagents.json',
+          subtitle: '⚡ Suite Todo-en-Uno Soberana: Orquestador interactivo de terminal y escuadrón de subagentes Planned Workflow.',
+          agents: data.jok3r_agents,
+        });
+      }
+    }
+
+    setHarnesses(detected);
+    setAvailablePools(data.available_pools || []);
+    setPoolCapabilities(data.pool_capabilities || {});
+    setPoolDetails(data.pool_details || {});
+    setUpstreamModels(data.upstream_models || []);
+
+    // Ensure activeUniverse matches an available harness or 'all'
+    setActiveUniverse((prev) => {
+      if (detected.length === 1) {
+        return detected[0].id;
+      }
+      if (detected.length > 1) {
+        const exists = detected.some((h) => h.id === prev);
+        return exists || prev === 'all' ? prev : 'all';
+      }
+      return 'all';
+    });
+  }, []);
+
   const loadMatrix = useCallback(async () => {
     try {
       setLoading(true);
       const data = await fetchAgentMatrix();
-      if (data?.ok) {
-        setGentleAgents(data.gentle_agents || []);
-        const detected = Boolean(data.jok3r_detected && data.jok3r_agents && data.jok3r_agents.length > 0);
-        setJok3rDetected(detected);
-        setJok3rAgents(detected ? (data.jok3r_agents || []) : []);
-        setAvailablePools(data.available_pools || []);
-        setPoolCapabilities(data.pool_capabilities || {});
-        setPoolDetails(data.pool_details || {});
-        setUpstreamModels(data.upstream_models || []);
-
-        if (!detected) {
-          setActiveUniverse('gentle_ai');
-        }
-      }
+      processPayload(data);
     } catch (err) {
       setFeedback({ text: `Error al cargar matriz: ${err.message}`, type: 'error' });
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [processPayload]);
 
   useEffect(() => {
     loadMatrix();
   }, [loadMatrix]);
 
-  const handlePoolChange = (universe, agentId, field, value) => {
-    const updateList = (list) =>
-      list.map((a) => {
-        if (a.agent_id !== agentId) return a;
-        const updated = { ...a, [field]: value };
-        // Auto-sanitize thinking if changed to a non-reasoning pool
-        if (field === 'primary_pool' && poolCapabilities[value] === false) {
-          updated.thinking_level = 'none';
-        } else if (field === 'primary_pool' && poolCapabilities[value] !== false && updated.thinking_level === 'none') {
-          updated.thinking_level = 'medium';
-        }
-        return updated;
-      });
-
-    if (universe === 'gentle_ai') {
-      setGentleAgents(updateList);
-    } else {
-      setJok3rAgents(updateList);
+  const handleScanEnvironment = async () => {
+    try {
+      setScanning(true);
+      const data = await scanAgentEnvironment();
+      if (data?.ok) {
+        processPayload(data);
+        const count = Array.isArray(data.harnesses) ? data.harnesses.length : (data.jok3r_detected ? 2 : 1);
+        const names = Array.isArray(data.harnesses) ? data.harnesses.map((h) => h.name).join(' y ') : 'Arneses activos';
+        setFeedback({
+          text: `✅ Entorno escaneado: ${count} arnés(es) detectado(s) (${names})`,
+          type: 'success',
+        });
+        setTimeout(() => setFeedback({ text: '', type: '' }), 4500);
+      }
+    } catch (err) {
+      setFeedback({ text: `Error al escanear entorno: ${err.message}`, type: 'error' });
+    } finally {
+      setScanning(false);
     }
+  };
+
+  const handlePoolChange = (universe, agentId, field, value) => {
+    setHarnesses((prev) =>
+      prev.map((h) => {
+        if (h.id !== universe) return h;
+        const updatedAgents = h.agents.map((a) => {
+          if (a.agent_id !== agentId) return a;
+          const updated = { ...a, [field]: value };
+          if (field === 'primary_pool' && poolCapabilities[value] === false) {
+            updated.thinking_level = 'none';
+          } else if (field === 'primary_pool' && poolCapabilities[value] !== false && updated.thinking_level === 'none') {
+            updated.thinking_level = 'medium';
+          }
+          return updated;
+        });
+        return { ...h, agents: updatedAgents };
+      })
+    );
   };
 
   const handleTestRoute = async (agent) => {
     const agentKey = `${agent.universe}_${agent.agent_id}`;
     setPingStates((prev) => ({
       ...prev,
-      [agentKey]: { loading: true, text: 'Verificando ruta...', ok: true },
+      [agentKey]: { loading: true, latency: 0, text: 'Verificando...', ok: true },
     }));
 
     try {
-      const res = await testAgentRoute(agent.primary_pool, poolDetails[agent.primary_pool]?.target_model || '');
+      const res = await testAgentRoute(agent.primary_pool, poolDetails[agent.primary_pool]?.target_model);
       setPingStates((prev) => ({
         ...prev,
         [agentKey]: {
           loading: false,
           latency: res.latency_ms,
-          text: `⚡ ${res.latency_ms}ms · ${res.account_email}`,
-          ok: res.ok,
+          text: `⚡ OK (${res.latency_ms}ms) · ${res.account_email}`,
+          ok: true,
         },
       }));
     } catch (err) {
@@ -104,6 +160,7 @@ export default function AgentMatrix() {
         ...prev,
         [agentKey]: {
           loading: false,
+          latency: 0,
           text: `❌ Fallo: ${err.message || 'Error'}`,
           ok: false,
         },
@@ -114,7 +171,7 @@ export default function AgentMatrix() {
   const handleSave = async () => {
     try {
       setSaving(true);
-      const allAgents = [...gentleAgents, ...jok3rAgents];
+      const allAgents = harnesses.flatMap((h) => h.agents || []);
       const res = await saveAgentMatrix(allAgents);
       setFeedback({ text: res?.message || 'Matriz guardada y sincronizada con éxito', type: 'success' });
       setTimeout(() => setFeedback({ text: '', type: '' }), 4000);
@@ -158,7 +215,7 @@ export default function AgentMatrix() {
   const renderPoolTransparencyPill = (poolId) => {
     const detail = poolDetails[poolId];
     if (!detail) {
-      if (poolId.includes('/')) {
+      if (poolId && poolId.includes('/')) {
         return (
           <div className="pool-transparency-pill upstream-pill" title={`Modelo upstream directo: ${poolId}`}>
             <span className="dot-active">🌐</span>
@@ -180,9 +237,9 @@ export default function AgentMatrix() {
     );
   };
 
-  const renderOrchestrator = (agent) => {
+  const renderOrchestrator = (agent, harnessId) => {
     if (!agent) return null;
-    const agentKey = `${agent.universe}_${agent.agent_id}`;
+    const agentKey = `${harnessId}_${agent.agent_id}`;
     const ping = pingStates[agentKey];
 
     return (
@@ -190,11 +247,6 @@ export default function AgentMatrix() {
         <div className="orchestrator-info">
           <div className="orchestrator-title">
             <span>{agent.displayName || agent.agent_id}</span>
-            {agent.universe === 'gentle_ai' && (
-              <span className="orchestrator-dual-chip" title="Afecta simultáneamente a OpenCode y Gentle-Shell">
-                💻 OpenCode + 📟 Shell
-              </span>
-            )}
             <button
               type="button"
               className="btn-ping-route"
@@ -220,7 +272,7 @@ export default function AgentMatrix() {
             <select
               className="matrix-select"
               value={agent.primary_pool}
-              onChange={(e) => handlePoolChange(agent.universe, agent.agent_id, 'primary_pool', e.target.value)}
+              onChange={(e) => handlePoolChange(harnessId, agent.agent_id, 'primary_pool', e.target.value)}
             >
               {renderDropdownOptions()}
             </select>
@@ -244,7 +296,7 @@ export default function AgentMatrix() {
             <select
               className="matrix-select"
               value={agent.fallback_pool}
-              onChange={(e) => handlePoolChange(agent.universe, agent.agent_id, 'fallback_pool', e.target.value)}
+              onChange={(e) => handlePoolChange(harnessId, agent.agent_id, 'fallback_pool', e.target.value)}
             >
               {renderDropdownOptions()}
             </select>
@@ -269,7 +321,7 @@ export default function AgentMatrix() {
                     key={lvl}
                     type="button"
                     className={`thinking-btn ${agent.thinking_level === lvl ? `active ${lvl}` : ''}`}
-                    onClick={() => handlePoolChange(agent.universe, agent.agent_id, 'thinking_level', lvl)}
+                    onClick={() => handlePoolChange(harnessId, agent.agent_id, 'thinking_level', lvl)}
                   >
                     {lvl.toUpperCase()}
                   </button>
@@ -282,8 +334,10 @@ export default function AgentMatrix() {
     );
   };
 
-  const renderTable = (agents) => {
+  const renderTable = (agents, harnessId) => {
     const subagents = agents.filter((a) => !a.is_orchestrator);
+    if (subagents.length === 0) return null;
+
     return (
       <table className="agents-table">
         <thead>
@@ -301,19 +355,14 @@ export default function AgentMatrix() {
         </thead>
         <tbody>
           {subagents.map((a) => {
-            const agentKey = `${a.universe}_${a.agent_id}`;
+            const agentKey = `${harnessId}_${a.agent_id}`;
             const ping = pingStates[agentKey];
 
             return (
               <tr key={a.agent_id}>
                 <td className="agent-name-cell">
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span>{a.displayName || a.agent_id}</span>
-                    {a.universe === 'gentle_ai' && (
-                      <span className="cell-gentle-tag" title="Sincronizado con OpenCode y Gentle-Shell">
-                        💻+📟
-                      </span>
-                    )}
+                    <span style={{ fontWeight: 600 }}>{a.displayName || a.agent_id}</span>
                   </div>
                   <div className="agent-desc-sub">{a.description}</div>
                 </td>
@@ -321,7 +370,7 @@ export default function AgentMatrix() {
                   <select
                     className="matrix-select"
                     value={a.primary_pool}
-                    onChange={(e) => handlePoolChange(a.universe, a.agent_id, 'primary_pool', e.target.value)}
+                    onChange={(e) => handlePoolChange(harnessId, a.agent_id, 'primary_pool', e.target.value)}
                   >
                     {renderDropdownOptions()}
                   </select>
@@ -339,7 +388,7 @@ export default function AgentMatrix() {
                   <select
                     className="matrix-select"
                     value={a.fallback_pool}
-                    onChange={(e) => handlePoolChange(a.universe, a.agent_id, 'fallback_pool', e.target.value)}
+                    onChange={(e) => handlePoolChange(harnessId, a.agent_id, 'fallback_pool', e.target.value)}
                   >
                     {renderDropdownOptions()}
                   </select>
@@ -360,7 +409,7 @@ export default function AgentMatrix() {
                           key={lvl}
                           type="button"
                           className={`thinking-btn ${a.thinking_level === lvl ? `active ${lvl}` : ''}`}
-                          onClick={() => handlePoolChange(a.universe, a.agent_id, 'thinking_level', lvl)}
+                          onClick={() => handlePoolChange(harnessId, a.agent_id, 'thinking_level', lvl)}
                         >
                           {lvl.charAt(0).toUpperCase()}
                         </button>
@@ -379,26 +428,31 @@ export default function AgentMatrix() {
                       borderRadius: 4,
                     }}
                   >
-                    {a.concurrency} {a.concurrency === 1 ? 'tarea' : 'tareas'}
+                    {a.concurrency || 1} {a.concurrency === 1 ? 'tarea' : 'tareas'}
                   </span>
                 </td>
                 <td>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <button
-                      type="button"
-                      className="btn-ping-route-table"
-                      onClick={() => handleTestRoute(a)}
-                      disabled={ping?.loading}
-                      title="Ejecutar Dry-Run de verificación para este agente"
+                  <button
+                    type="button"
+                    className="btn-ping-route"
+                    onClick={() => handleTestRoute(a)}
+                    disabled={ping?.loading}
+                    title="Test rápido de conectividad y latencia con el líder del pool"
+                  >
+                    {ping?.loading ? '⏳...' : '⚡ Test'}
+                  </button>
+                  {ping?.text && (
+                    <div
+                      style={{
+                        fontSize: 10,
+                        color: ping.ok ? '#10b981' : '#ef4444',
+                        marginTop: 4,
+                        whiteSpace: 'nowrap',
+                      }}
                     >
-                      {ping?.loading ? '⏳' : '⚡ Test'}
-                    </button>
-                    {ping?.text && (
-                      <span className={`ping-result-badge-table ${ping.ok ? 'ok' : 'err'}`}>
-                        {ping.text}
-                      </span>
-                    )}
-                  </div>
+                      {ping.text}
+                    </div>
+                  )}
                 </td>
               </tr>
             );
@@ -407,9 +461,6 @@ export default function AgentMatrix() {
       </table>
     );
   };
-
-  const gentleOrchestrator = gentleAgents.find((a) => a.is_orchestrator);
-  const jok3rOrchestrator = jok3rAgents.find((a) => a.is_orchestrator);
 
   return (
     <div className="agent-matrix-container">
@@ -421,7 +472,7 @@ export default function AgentMatrix() {
             <span>Matriz de Agentes & Orquestación</span>
           </h2>
           <p className="matrix-subtitle">
-            Control unificado de orquestadores y subagentes para los 2 Grandes Universos de Ejecución
+            Control unificado de orquestadores y subagentes detectados dinámicamente en el equipo
           </p>
         </div>
 
@@ -440,9 +491,19 @@ export default function AgentMatrix() {
           )}
           <button
             type="button"
+            className="matrix-scan-btn"
+            onClick={handleScanEnvironment}
+            disabled={scanning || loading}
+            title="Escanear y detectar los arneses instalados en el equipo"
+          >
+            <span>{scanning ? '⏳' : '🔍'}</span>
+            <span>{scanning ? 'Escaneando...' : 'Detectar Arneses'}</span>
+          </button>
+          <button
+            type="button"
             className="matrix-save-btn"
             onClick={handleSave}
-            disabled={saving}
+            disabled={saving || loading}
           >
             <span>💾</span>
             <span>{saving ? 'Guardando...' : 'Guardar Todo'}</span>
@@ -450,8 +511,8 @@ export default function AgentMatrix() {
         </div>
       </div>
 
-      {/* Universe Segmented Filter with Persistent Storage (Solo si j0k3r-pi está detectado) */}
-      {jok3rDetected ? (
+      {/* Universe Segmented Tabs (Dinámico según harnesses detectados) */}
+      {harnesses.length > 1 ? (
         <div className="matrix-tabs">
           <button
             type="button"
@@ -461,24 +522,19 @@ export default function AgentMatrix() {
             <span>🌐</span>
             <span>Vista Global Completa</span>
           </button>
-          <button
-            type="button"
-            className={`matrix-tab-btn ${activeUniverse === 'gentle_ai' ? 'active' : ''}`}
-            onClick={() => handleUniverseChange('gentle_ai')}
-          >
-            <span>🅰️</span>
-            <span>Gentle-AI (OpenCode / Shell)</span>
-          </button>
-          <button
-            type="button"
-            className={`matrix-tab-btn ${activeUniverse === 'jok3r_pi' ? 'active' : ''}`}
-            onClick={() => handleUniverseChange('jok3r_pi')}
-          >
-            <span>🅱️</span>
-            <span>j0k3r-pi</span>
-          </button>
+          {harnesses.map((h) => (
+            <button
+              key={h.id}
+              type="button"
+              className={`matrix-tab-btn ${activeUniverse === h.id ? 'active' : ''}`}
+              onClick={() => handleUniverseChange(h.id)}
+            >
+              <span>{h.icon}</span>
+              <span>{h.name} ({h.agents?.filter((a) => !a.is_orchestrator).length || 0})</span>
+            </button>
+          ))}
         </div>
-      ) : (
+      ) : harnesses.length === 1 ? (
         <div className="matrix-tabs" style={{ background: 'transparent', border: 'none', padding: 0 }}>
           <div className="matrix-single-universe-badge" style={{
             display: 'inline-flex',
@@ -492,62 +548,52 @@ export default function AgentMatrix() {
             color: '#7dd3fc',
             fontWeight: 600,
           }}>
-            <span>💻 OpenCode Editor + 📟 Gentle-Shell CLI</span>
-            <span style={{ fontSize: '11px', color: '#94a3b8' }}>• (Universo Activo: Gentle-AI)</span>
+            <span>{harnesses[0].icon} {harnesses[0].name}</span>
+            <span style={{ fontSize: '11px', color: '#94a3b8' }}>• ({harnesses[0].agents?.filter((a) => !a.is_orchestrator).length || 0} agentes detectados en disco)</span>
+          </div>
+        </div>
+      ) : (
+        <div className="matrix-tabs" style={{ background: 'transparent', border: 'none', padding: 0 }}>
+          <div style={{ color: '#94a3b8', fontSize: 12 }}>
+            No se detectaron arneses configurados. Pulsa en <strong>🔍 Detectar Arneses</strong> para escanear el entorno.
           </div>
         </div>
       )}
 
-      {/* Universe A: Gentle-AI */}
-      {(activeUniverse === 'all' || activeUniverse === 'gentle_ai') && (
-        <div className="universe-section">
-          <div className="universe-header">
-            <div>
-              <h3>
-                <span>🅰️</span>
-                <span>UNIVERSO GENTLE-AI</span>
-                <span className="dual-runtime-badge">
-                  <span className="chip-opencode">💻 OpenCode Editor</span>
-                  <span style={{ opacity: 0.5 }}>+</span>
-                  <span className="chip-shell">📟 Gentle-Shell CLI</span>
-                </span>
-              </h3>
-              <p className="universe-clarity-callout">
-                💡 <strong>Sincronización Simultánea:</strong> OpenCode y Gentle-Shell son dos puertas de acceso que comparten el mismo arnés subyacente (<code>gentle-ai</code>). Al cambiar los modelos en esta sección, se actualizan simultáneamente en tu editor OpenCode y en tu terminal Gentle-Shell.
-              </p>
+      {/* Harness Sections (100% Dinámicas) */}
+      {harnesses.map((harness) => {
+        if (activeUniverse !== 'all' && activeUniverse !== harness.id) {
+          return null;
+        }
+
+        const orch = harness.agents?.find((a) => a.is_orchestrator);
+        const subagents = harness.agents?.filter((a) => !a.is_orchestrator) || [];
+
+        return (
+          <div key={harness.id} className="universe-section">
+            <div className="universe-header">
+              <div>
+                <h3>
+                  <span>{harness.icon}</span>
+                  <span>{harness.name.toUpperCase()}</span>
+                  <span className="dual-runtime-badge">
+                    <span className="chip-shell">{harness.badge || harness.name}</span>
+                  </span>
+                </h3>
+                <p className="universe-clarity-callout">
+                  {harness.subtitle}
+                </p>
+              </div>
+              <span className="universe-meta">
+                {harness.config_path}
+              </span>
             </div>
-            <span className="universe-meta">
-              ~/.gentle-shell/agent/profiles.json
-            </span>
+
+            {orch && renderOrchestrator(orch, harness.id)}
+            {renderTable(subagents, harness.id)}
           </div>
-
-          {renderOrchestrator(gentleOrchestrator)}
-          {renderTable(gentleAgents)}
-        </div>
-      )}
-
-      {/* Universe B: j0k3r-pi (Solo si está detectado dinámicamente) */}
-      {jok3rDetected && (activeUniverse === 'all' || activeUniverse === 'jok3r_pi') && (
-        <div className="universe-section">
-          <div className="universe-header">
-            <div>
-              <h3>
-                <span>🅱️</span>
-                <span>UNIVERSO J0K3R-PI</span>
-              </h3>
-              <p className="universe-clarity-callout" style={{ borderColor: 'rgba(16, 185, 129, 0.2)', background: 'rgba(16, 185, 129, 0.04)' }}>
-                ⚡ <strong>Suite Todo-en-Uno Soberana:</strong> Orquestador interactivo de terminal y escuadrón de subagentes Planned Workflow (<code>00-discovery</code>, <code>01-planning</code>, <code>02-apply</code>, etc.).
-              </p>
-            </div>
-            <span className="universe-meta">
-              ~/.pi/agent-j0k3r/subagents.json
-            </span>
-          </div>
-
-          {renderOrchestrator(jok3rOrchestrator)}
-          {renderTable(jok3rAgents)}
-        </div>
-      )}
+        );
+      })}
 
       {/* Footer Banner: Cache & Token Optimization */}
       <div className="matrix-cache-footer">
