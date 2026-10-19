@@ -336,7 +336,7 @@ func MatchProfilesRoute(rawPath string) (subpath string, matched bool) {
 
 	matchedIdx := -1
 	for i, seg := range segments {
-		if seg == "home" || seg == "profiles" || seg == "center" || seg == "control-switcher" || seg == "pulse-tokens" || seg == "pulso-tokens" || seg == "create-prefixes" || seg == "create-groups" || seg == "auto-auth-files" || seg == "maintenance" || seg == "quick-guide" || seg == "audit-log" {
+		if seg == "home" || seg == "profiles" || seg == "center" || seg == "control-switcher" || seg == "pulse-tokens" || seg == "pulso-tokens" || seg == "create-prefixes" || seg == "create-groups" || seg == "auto-auth-files" || seg == "maintenance" || seg == "quick-guide" || seg == "audit-log" || seg == "agent-matrix" {
 			matchedIdx = i
 			break
 		}
