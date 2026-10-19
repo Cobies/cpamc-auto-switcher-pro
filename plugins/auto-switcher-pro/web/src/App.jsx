@@ -8,6 +8,7 @@ import GroupManager from './components/GroupManager';
 import AutoAuthFiles from './components/AutoAuthFiles';
 import Maintenance from './components/Maintenance';
 import AuditLog from './components/AuditLog';
+import AgentMatrix from './components/AgentMatrix';
 import QuickGuideModal from './components/QuickGuideModal';
 import LicenseModal from './components/LicenseModal';
 import logoImg from './assets/auto-switcher-pro-logo.png';
@@ -51,6 +52,7 @@ export default function App() {
         case 6: return 'maintenance';
         case 7: return 'quick-guide';
         case 8: return 'audit-log';
+        case 9: return 'agent-matrix';
         default: break;
       }
     }
@@ -81,6 +83,9 @@ export default function App() {
     }
     if (hash.includes('tab-audit-log') || hash.includes('audit-log') || hash.includes('bitacora') || hash.includes('caja-negra')) {
       return 'audit-log';
+    }
+    if (hash.includes('tab-agent-matrix') || hash.includes('agent-matrix') || hash.includes('matriz')) {
+      return 'agent-matrix';
     }
     if (hash.includes('tab-profiles')) {
       return 'profiles';
@@ -593,6 +598,29 @@ export default function App() {
               <span>📜</span>
               <span>Bitácora & Caja Negra</span>
             </button>
+
+            {/* 10. Matriz de Agentes & Orquestación */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('agent-matrix')}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                border: activeTab === 'agent-matrix' ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid transparent',
+                background: activeTab === 'agent-matrix' ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
+                color: activeTab === 'agent-matrix' ? '#bae6fd' : '#94a3b8',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+              data-testid="tab-agent-matrix"
+            >
+              <span>🎛️</span>
+              <span>Matriz de Agentes</span>
+            </button>
           </div>
 
           <div className="header-divider" />
@@ -805,6 +833,12 @@ export default function App() {
         {activeTab === 'audit-log' && (
           <div style={{ width: '100%', height: '100%', overflowY: 'auto' }}>
             <AuditLog />
+          </div>
+        )}
+
+        {activeTab === 'agent-matrix' && (
+          <div style={{ width: '100%', height: '100%', overflowY: 'auto' }}>
+            <AgentMatrix />
           </div>
         )}
 

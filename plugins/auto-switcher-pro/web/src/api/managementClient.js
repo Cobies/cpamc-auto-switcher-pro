@@ -2671,6 +2671,58 @@ export async function fetchAuditLog(options = {}) {
   return res.json();
 }
 
+/**
+ * Consulta la matriz de orquestación de agentes (Gentle-AI & jok3r-pi).
+ */
+export async function fetchAgentMatrix(options = {}) {
+  const res = await apiFetch('/v0/management/auto-switcher-pro/agent-matrix', {
+    ...options,
+    method: 'GET',
+  });
+  return res.json();
+}
+
+/**
+ * Guarda y sincroniza la matriz de agentes en SQLite WAL y archivos de perfil en disco.
+ *
+ * @param {Array<Object>} agents
+ * @param {Object} [options]
+ */
+export async function saveAgentMatrix(agents, options = {}) {
+  const res = await apiFetch('/v0/management/auto-switcher-pro/agent-matrix', {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ agents }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data?.ok) {
+    throw new Error(data?.message || 'Error al guardar matriz de agentes');
+  }
+  return data;
+}
+
+/**
+ * Ejecuta una prueba de fuego (Dry-Run Ping) para verificar latencia y salud de una ruta.
+ *
+ * @param {string} poolId
+ * @param {string} [targetModel]
+ * @param {Object} [options]
+ */
+export async function testAgentRoute(poolId, targetModel = '', options = {}) {
+  const res = await apiFetch('/v0/management/auto-switcher-pro/agent-matrix/ping', {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pool_id: poolId, target_model: targetModel }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data?.ok) {
+    throw new Error(data?.message || 'Error en prueba de ruta');
+  }
+  return data;
+}
+
 
 
 

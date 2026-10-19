@@ -5,6 +5,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { initDynamicProvider } from "./src/provider.js";
 import { initFailoverHook, scheduleAutoSwitcher } from "./src/failover.js";
 import { registerModelPicker } from "./src/picker.js";
+import { registerAgentMatrixCommand } from "./src/matrix-command.js";
 import { CpamcTuiAdapter } from "./src/adapter.js";
 import { querySwitcherAccounts, checkProactivePoolRebalance, applyOptimisticQuotaDecrement, getRotationPairForModelSync } from "./src/store.js";
 import { saveProjectModel, getProjectModel, clearProjectModel } from "./src/project-model-store.js";
@@ -44,6 +45,9 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 
 	// 3. Inicializar selector complementario /cpamc-model
 	registerModelPicker(pi);
+
+	// 3a. Inicializar comando /agent:matrix
+	registerAgentMatrixCommand(pi);
 
 	// 3b. Comando para restablecer el modelo del proyecto actual al default de Pi
 	pi.registerCommand("model-default", {

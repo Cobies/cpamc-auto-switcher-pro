@@ -177,6 +177,21 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 					"Path":        auditLogRoutePath,
 					"Description": "Obtiene la bitácora histórica de rotaciones y eventos de caja negra forense",
 				},
+				{
+					"Method":      http.MethodGet,
+					"Path":        agentMatrixRoutePath,
+					"Description": "Obtiene la matriz de orquestación de modelos para Gentle-AI y jok3r-pi",
+				},
+				{
+					"Method":      http.MethodPost,
+					"Path":        agentMatrixRoutePath,
+					"Description": "Actualiza y sincroniza la matriz de agentes en SQLite WAL y perfiles en disco",
+				},
+				{
+					"Method":      http.MethodPost,
+					"Path":        agentMatrixPingRoutePath,
+					"Description": "Ejecuta una prueba de fuego (dry-run ping) verificando latencia y salud de una ruta de modelo",
+				},
 			},
 			"resources": []map[string]any{
 				{
@@ -223,6 +238,11 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 					"Path":        "/audit-log",
 					"Menu":        "📜 Bitácora & Caja Negra",
 					"Description": "Historial forense de rotaciones, rescates 429 e incidentes en disco (SQLite WAL)",
+				},
+				{
+					"Path":        "/agent-matrix",
+					"Menu":        "🎛️ Matriz de Agentes & Orquestación",
+					"Description": "Control unificado de orquestadores y subagentes para Gentle-AI (OpenCode) y j0k3r-pi",
 				},
 			},
 		}
@@ -411,6 +431,11 @@ func HandleManagementHTTP(request []byte) ([]byte, error) {
 	// Audit log & flight recorder routes
 	if isAuditLogPath(req.Path) {
 		return handleAuditLogHTTP(req)
+	}
+
+	// Agent matrix & orchestration routes
+	if isAgentMatrixPath(req.Path) {
+		return handleAgentMatrixHTTP(req)
 	}
 
 	// Virtualize route: POST for cloning, DELETE for removing virtual credential.

@@ -114,6 +114,41 @@ func TestSQLiteAnalyticsLifecycle(t *testing.T) {
 		LatencyMs:    450,
 	})
 
+	// 7. Test Agent Profile assignments (Universal Matrix)
+	err = UpsertAgentProfile(AgentProfileRecord{
+		Universe:      "gentle_ai",
+		AgentID:       "orchestrator",
+		PrimaryPool:   "Pool-04-claude",
+		FallbackPool:  "Pool-01-gemini",
+		ThinkingLevel: "high",
+		Concurrency:   1,
+	})
+	if err != nil {
+		t.Fatalf("UpsertAgentProfile failed: %v", err)
+	}
+
+	err = UpsertAgentProfile(AgentProfileRecord{
+		Universe:      "jok3r_pi",
+		AgentID:       "02-apply",
+		PrimaryPool:   "Pool-04-claude",
+		FallbackPool:  "Pool-02-gemini",
+		ThinkingLevel: "medium",
+		Concurrency:   1,
+	})
+	if err != nil {
+		t.Fatalf("UpsertAgentProfile failed: %v", err)
+	}
+
+	profilesGentle, err := GetAgentProfiles("gentle_ai")
+	if err != nil || len(profilesGentle) != 1 || profilesGentle[0].PrimaryPool != "Pool-04-claude" {
+		t.Fatalf("expected 1 gentle_ai profile with Pool-04-claude, got: %+v (err: %v)", profilesGentle, err)
+	}
+
+	allProfiles, err := GetAgentProfiles("")
+	if err != nil || len(allProfiles) != 2 {
+		t.Fatalf("expected 2 total profiles, got: %+v (err: %v)", allProfiles, err)
+	}
+
 	// Wait for worker queue to flush
 	time.Sleep(150 * time.Millisecond)
 

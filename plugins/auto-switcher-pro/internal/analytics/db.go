@@ -137,6 +137,18 @@ func InitDB() (*sql.DB, error) {
 		);
 		CREATE INDEX IF NOT EXISTS idx_flight_recorder_ts ON flight_recorder(timestamp);
 		CREATE INDEX IF NOT EXISTS idx_flight_recorder_acc ON flight_recorder(account_email);
+
+		CREATE TABLE IF NOT EXISTS agent_profiles (
+			universe TEXT NOT NULL,
+			agent_id TEXT NOT NULL,
+			primary_pool TEXT NOT NULL,
+			fallback_pool TEXT NOT NULL,
+			thinking_level TEXT DEFAULT 'medium',
+			concurrency INTEGER DEFAULT 1,
+			updated_at_ms INTEGER NOT NULL,
+			PRIMARY KEY (universe, agent_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_agent_profiles_univ ON agent_profiles(universe);
 		`
 		if _, err := db.Exec(schema); err != nil {
 			initErr = fmt.Errorf("failed to init schema: %w", err)
@@ -611,6 +623,97 @@ func AutoVacuumCheckpoint(maxAgeDays int) error {
 	// 2. Truncate WAL journal to reclaim physical disk space
 	_, err = db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
 	return err
+}
+
+// AgentProfileRecord represents a persisted agent assignment in SQLite WAL.
+type AgentProfileRecord struct {
+	Universe      string `json:"universe"`      // "gentle_ai" or "jok3r_pi"
+	AgentID       string `json:"agent_id"`      // "orchestrator", "worker", "01-planning", etc.
+	PrimaryPool   string `json:"primary_pool"`  // "Pool-04-claude"
+	FallbackPool  string `json:"fallback_pool"` // "Pool-01-gemini"
+	ThinkingLevel string `json:"thinking_level"`// "low", "medium", "high"
+	Concurrency   int    `json:"concurrency"`   // 1 to 5
+	UpdatedAtMs   int64  `json:"updated_at_ms"`
+}
+
+// UpsertAgentProfile stores or updates an agent profile assignment.
+func UpsertAgentProfile(p AgentProfileRecord) error {
+	db, err := InitDB()
+	if err != nil || db == nil {
+		return fmt.Errorf("db unavailable: %w", err)
+	}
+
+	if p.Universe == "" || p.AgentID == "" {
+		return fmt.Errorf("universe and agent_id cannot be empty")
+	}
+	if p.ThinkingLevel == "" {
+		p.ThinkingLevel = "medium"
+	}
+	if p.Concurrency <= 0 {
+		p.Concurrency = 1
+	}
+	if p.UpdatedAtMs <= 0 {
+		p.UpdatedAtMs = time.Now().UnixMilli()
+	}
+
+	_, err = db.Exec(`INSERT INTO agent_profiles (
+		universe, agent_id, primary_pool, fallback_pool, thinking_level, concurrency, updated_at_ms
+	) VALUES (?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(universe, agent_id) DO UPDATE SET
+		primary_pool = excluded.primary_pool,
+		fallback_pool = excluded.fallback_pool,
+		thinking_level = excluded.thinking_level,
+		concurrency = excluded.concurrency,
+		updated_at_ms = excluded.updated_at_ms`,
+		p.Universe,
+		p.AgentID,
+		p.PrimaryPool,
+		p.FallbackPool,
+		p.ThinkingLevel,
+		p.Concurrency,
+		p.UpdatedAtMs,
+	)
+	return err
+}
+
+// GetAgentProfiles retrieves stored agent profiles for a given universe ("gentle_ai", "jok3r_pi", or "" for all).
+func GetAgentProfiles(universe string) ([]AgentProfileRecord, error) {
+	db, err := InitDB()
+	if err != nil || db == nil {
+		return nil, fmt.Errorf("db unavailable: %w", err)
+	}
+
+	query := `SELECT universe, agent_id, primary_pool, fallback_pool, thinking_level, concurrency, updated_at_ms
+		FROM agent_profiles`
+	var rows *sql.Rows
+	if universe != "" {
+		query += ` WHERE universe = ? ORDER BY agent_id ASC`
+		rows, err = db.Query(query, universe)
+	} else {
+		query += ` ORDER BY universe ASC, agent_id ASC`
+		rows, err = db.Query(query)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var profiles []AgentProfileRecord
+	for rows.Next() {
+		var p AgentProfileRecord
+		if err := rows.Scan(
+			&p.Universe,
+			&p.AgentID,
+			&p.PrimaryPool,
+			&p.FallbackPool,
+			&p.ThinkingLevel,
+			&p.Concurrency,
+			&p.UpdatedAtMs,
+		); err == nil {
+			profiles = append(profiles, p)
+		}
+	}
+	return profiles, nil
 }
 
 func startAutoVacuumDaemon() {
