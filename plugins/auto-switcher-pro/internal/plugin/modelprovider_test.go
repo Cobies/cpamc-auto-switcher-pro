@@ -2,9 +2,12 @@ package plugin
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"auto-switcher-pro/internal/analytics"
 )
 
 func testModelProviderRegistry(t *testing.T) *PoolRegistry {
@@ -842,5 +845,176 @@ func TestSchedulerPickTaskAwareRouting(t *testing.T) {
 		t.Fatalf("expected Reserve B (highest 5h quota) picked for LIGHT task, got: %+v", respLight)
 	}
 }
+
+func TestSchedulerPickTaskAutoDowngradeAndTriageWarmup(t *testing.T) {
+	_, err := analytics.InitDB()
+	if err != nil {
+		t.Fatalf("InitDB failed: %v", err)
+	}
+
+	registry := testModelProviderRegistry(t)
+	previous := activeRegistry
+	activeRegistry = func() *PoolRegistry { return registry }
+	t.Cleanup(func() { activeRegistry = previous })
+
+	// Turn 1: Normal initialization with session ID and orchestrator role
+	sessionID := "task-session-downgrade-123"
+	reqTurn1 := schedulerPickRequest{
+		Provider: "antigravity",
+		Model:    "claude-sonnet-4-6",
+		Options: schedulerOptions{
+			Metadata: map[string]any{
+				"requested_model": "clau/claude-sonnet-4-6",
+				"session_id":      sessionID,
+			},
+			Headers: map[string][]string{
+				"X-Agent-Role": {"orchestrator"},
+			},
+		},
+		Candidates: []schedulerCandidate{
+			{ID: "antigravity-a@gmail.com.json", Provider: "antigravity", Status: "active"},
+			{ID: "antigravity-b@gmail.com.json", Provider: "antigravity", Status: "active"},
+		},
+	}
+	respTurn1 := handleSchedulerPick(reqTurn1)
+	if !respTurn1.Handled || respTurn1.AuthID != "antigravity-a@gmail.com.json" {
+		t.Fatalf("expected leader picked for turn 1, got %+v", respTurn1)
+	}
+
+	// Wait for async SQLite worker queue to commit turn 1 affinity
+	time.Sleep(150 * time.Millisecond)
+
+	// Turn 2: Follow-up turn in same session with X-Auto-Downgrade
+	reqTurn2 := schedulerPickRequest{
+		Provider: "antigravity",
+		Model:    "claude-sonnet-4-6",
+		Options: schedulerOptions{
+			Metadata: map[string]any{
+				"requested_model": "clau/claude-sonnet-4-6",
+				"session_id":      sessionID,
+			},
+			Headers: map[string][]string{
+				"X-Auto-Downgrade": {"true"},
+			},
+		},
+		Candidates: []schedulerCandidate{
+			{ID: "antigravity-a@gmail.com.json", Provider: "antigravity", Status: "active"},
+			{ID: "antigravity-b@gmail.com.json", Provider: "antigravity", Status: "active"},
+		},
+	}
+	respTurn2 := handleSchedulerPick(reqTurn2)
+	if !respTurn2.Handled {
+		t.Fatalf("expected handled turn 2, got %+v", respTurn2)
+	}
+
+	// Wait for async SQLite worker queue to commit turn 2 audit event
+	time.Sleep(150 * time.Millisecond)
+
+	// Verify AUTO_DOWNGRADE audit event was recorded
+	events, err := analytics.QueryAuditEvents(10)
+	if err != nil {
+		t.Fatalf("QueryAuditEvents failed: %v", err)
+	}
+	foundDowngrade := false
+	for _, e := range events {
+		if e.EventType == "AUTO_DOWNGRADE" {
+			foundDowngrade = true
+			break
+		}
+	}
+	if !foundDowngrade {
+		t.Errorf("expected AUTO_DOWNGRADE event recorded for turn 2")
+	}
+}
+
+func TestSchedulerPickCircuitBreakerLoopProtector(t *testing.T) {
+	_, err := analytics.InitDB()
+	if err != nil {
+		t.Fatalf("InitDB failed: %v", err)
+	}
+
+	registry := testModelProviderRegistry(t)
+	previous := activeRegistry
+	activeRegistry = func() *PoolRegistry { return registry }
+	t.Cleanup(func() { activeRegistry = previous })
+
+	sessionID := fmt.Sprintf("test-breaker-%d", time.Now().UnixNano())
+
+	// Upsert profile for agent '02-apply' with MaxClaudeTurns = 2
+	_ = analytics.UpsertAgentProfile(analytics.AgentProfileRecord{
+		Universe:       "jok3r_pi",
+		AgentID:        "02-apply",
+		PrimaryPool:    "pool-clau-1",
+		FallbackPool:   "pool-agy-1",
+		ThinkingLevel:  "high",
+		MaxClaudeTurns: 2,
+		Concurrency:    1,
+		UpdatedAtMs:    time.Now().UnixMilli(),
+	})
+
+	// Pre-seed turn 1 and turn 2 in session affinity for pool-clau-1
+	analytics.SetSessionAffinity(analytics.SessionAffinity{
+		SessionID:    sessionID,
+		PoolID:       "pool-clau-1",
+		AccountEmail: "antigravity-a@gmail.com",
+	})
+	time.Sleep(100 * time.Millisecond)
+	analytics.SetSessionAffinity(analytics.SessionAffinity{
+		SessionID:    sessionID,
+		PoolID:       "pool-clau-1",
+		AccountEmail: "antigravity-a@gmail.com",
+	})
+	time.Sleep(150 * time.Millisecond)
+
+	// Turn 2 request: agent 02-apply asking for Claude, but turnCount has reached max_claude_turns (2)
+	reqTurn2 := schedulerPickRequest{
+		Provider: "antigravity",
+		Model:    "claude-sonnet-4-6",
+		Options: schedulerOptions{
+			Metadata: map[string]any{
+				"requested_model": "clau/claude-sonnet-4-6",
+				"session_id":      sessionID,
+				"agent_id":        "02-apply",
+			},
+			Headers: map[string][]string{
+				"X-Agent-Id":   {"02-apply"},
+				"X-Agent-Role": {"apply"},
+			},
+		},
+		Candidates: []schedulerCandidate{
+			{ID: "antigravity-a@gmail.com.json", Provider: "antigravity", Status: "active"},
+			{ID: "antigravity-b@gmail.com.json", Provider: "antigravity", Status: "active"},
+		},
+	}
+
+	resp := handleSchedulerPick(reqTurn2)
+	if !resp.Handled {
+		t.Fatalf("expected request handled, got %+v", resp)
+	}
+
+	// Should be diverted to pool-agy-1's leader!
+	if resp.AuthID != "antigravity-a@gmail.com.json" {
+		t.Errorf("expected diverted AuthID antigravity-a@gmail.com.json, got %s", resp.AuthID)
+	}
+
+	time.Sleep(150 * time.Millisecond)
+
+	// Verify CIRCUIT_BREAKER_LOOP_PREVENTED audit event
+	events, err := analytics.QueryAuditEvents(10)
+	if err != nil {
+		t.Fatalf("QueryAuditEvents failed: %v", err)
+	}
+	foundBreaker := false
+	for _, e := range events {
+		if e.EventType == "CIRCUIT_BREAKER_LOOP_PREVENTED" {
+			foundBreaker = true
+			break
+		}
+	}
+	if !foundBreaker {
+		t.Errorf("expected CIRCUIT_BREAKER_LOOP_PREVENTED event recorded")
+	}
+}
+
 
 

@@ -1,5 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { fetchAgentMatrix, saveAgentMatrix, testAgentRoute, scanAgentEnvironment } from '../api/managementClient';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+  fetchAgentMatrix,
+  saveAgentMatrix,
+  testAgentRoute,
+  scanAgentEnvironment,
+  triggerTriageWarmup,
+} from '../api/managementClient';
 import './AgentMatrix.css';
 
 const UNIVERSE_STORAGE_KEY = 'agent_matrix_active_universe';
@@ -20,6 +26,7 @@ export default function AgentMatrix() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [warming, setWarming] = useState(false);
   const [feedback, setFeedback] = useState({ text: '', type: '' });
   const [pingStates, setPingStates] = useState({}); // { [agentKey]: { loading: bool, latency: number, text: string, ok: bool } }
 
@@ -118,6 +125,22 @@ export default function AgentMatrix() {
     }
   };
 
+  const handleTriggerWarmup = async () => {
+    try {
+      setWarming(true);
+      await triggerTriageWarmup(['Pool-01-gemini', 'Pool-04-claude']);
+      setFeedback({
+        text: '⚡ Shadow Warmup ejecutado: Sockets TLS y Prompt Cache precalentados',
+        type: 'success',
+      });
+      setTimeout(() => setFeedback({ text: '', type: '' }), 4000);
+    } catch (err) {
+      setFeedback({ text: `Error en warmup: ${err.message}`, type: 'error' });
+    } finally {
+      setWarming(false);
+    }
+  };
+
   const handlePoolChange = (universe, agentId, field, value) => {
     setHarnesses((prev) =>
       prev.map((h) => {
@@ -181,6 +204,48 @@ export default function AgentMatrix() {
       setSaving(false);
     }
   };
+
+  // Semáforo de Estrés de Cuota ("Token Burn Gauge")
+  const stress = useMemo(() => {
+    let claudePressure = 0;
+    for (const h of harnesses) {
+      for (const a of h.agents || []) {
+        const isClaude = (a.primary_pool || '').toLowerCase().includes('claude') || (a.primary_pool || '').toLowerCase().includes('sonnet');
+        const thinkWeight = a.thinking_level === 'high' ? 3 : (a.thinking_level === 'medium' ? 2 : (a.thinking_level === 'low' ? 1 : 0));
+        const concurrency = a.concurrency || 1;
+
+        if (isClaude) {
+          claudePressure += concurrency * (thinkWeight === 0 ? 1 : thinkWeight);
+        }
+      }
+    }
+
+    if (claudePressure <= 4) {
+      return {
+        level: 'optimal',
+        badge: '🟢 Distribución Óptima',
+        autonomy: '> 8 horas continuas',
+        desc: 'Cargas balanceadas hacia Gemini; cuota de Claude reservada para tareas críticas.',
+        claudePressure,
+      };
+    } else if (claudePressure <= 8) {
+      return {
+        level: 'moderate',
+        badge: '🟡 Carga Moderada',
+        autonomy: '3 - 5 horas continuas',
+        desc: 'Uso activo de Claude; vigilar ráfagas de subagentes concurrentes en paralelo.',
+        claudePressure,
+      };
+    } else {
+      return {
+        level: 'critical',
+        badge: '🔴 Estrés Crítico de Cuota',
+        autonomy: '< 30 minutos',
+        desc: 'Riesgo de agotar la ventana de 5h. Se recomienda desviar discovery/verify a Gemini o activar Auto-Downgrade T2+.',
+        claudePressure,
+      };
+    }
+  }, [harnesses]);
 
   if (loading) {
     return (
@@ -349,6 +414,12 @@ export default function AgentMatrix() {
               RESCATE EN CALIENTE (FAILOVER 429) ℹ️
             </th>
             <th>THINKING</th>
+            <th title="Task Auto-Downgrade: en turnos >= 2 de la misma tarea, reduce automáticamente el costo de razonamiento ahorrando 60-75% de tokens.">
+              AUTO-DOWNGRADE
+            </th>
+            <th title="Disyuntor de Presupuesto (Loop Protector): Si el subagente supera este número de turnos consecutivos en Claude sin resolver la tarea, se desvía automáticamente a Gemini Flash High para no vaciar la cuota.">
+              TOPE BUCLE (CLAUDE)
+            </th>
             <th>CONCURRENCIA</th>
             <th>TEST</th>
           </tr>
@@ -416,6 +487,30 @@ export default function AgentMatrix() {
                       ))}
                     </div>
                   )}
+                </td>
+                <td>
+                  <button
+                    type="button"
+                    className={`btn-downgrade-toggle ${a.auto_downgrade ? 'active' : ''}`}
+                    onClick={() => handlePoolChange(harnessId, a.agent_id, 'auto_downgrade', !a.auto_downgrade)}
+                    title="Task Auto-Downgrade: en turnos >= 2 de la misma tarea mitiga el costo de razonamiento ahorrando 60-75% de tokens"
+                  >
+                    <span>{a.auto_downgrade ? '🟢 T2+ Activo' : '⚪ Inactivo'}</span>
+                  </button>
+                </td>
+                <td>
+                  <select
+                    className="matrix-select"
+                    style={{ width: '92px', fontSize: '11px', padding: '3px 6px' }}
+                    value={a.max_claude_turns ?? 3}
+                    onChange={(e) => handlePoolChange(harnessId, a.agent_id, 'max_claude_turns', parseInt(e.target.value, 10))}
+                    title="Tope de turnos consecutivos en Claude antes de activar el disyuntor de protección"
+                  >
+                    <option value={2}>2 turnos</option>
+                    <option value={3}>3 turnos</option>
+                    <option value={5}>5 turnos</option>
+                    <option value={0}>Sin tope</option>
+                  </select>
                 </td>
                 <td>
                   <span
@@ -492,6 +587,17 @@ export default function AgentMatrix() {
           <button
             type="button"
             className="matrix-scan-btn"
+            style={{ borderColor: 'rgba(245, 158, 11, 0.4)', color: '#fbbf24', background: 'rgba(245, 158, 11, 0.08)' }}
+            onClick={handleTriggerWarmup}
+            disabled={warming || loading}
+            title="Disparar Shadow Warmup predictivo para pre-calentar conexiones y prompt cache"
+          >
+            <span>{warming ? '⏳' : '⚡'}</span>
+            <span>{warming ? 'Calentando...' : 'Warmup Triage'}</span>
+          </button>
+          <button
+            type="button"
+            className="matrix-scan-btn"
             onClick={handleScanEnvironment}
             disabled={scanning || loading}
             title="Escanear y detectar los arneses instalados en el equipo"
@@ -509,6 +615,13 @@ export default function AgentMatrix() {
             <span>{saving ? 'Guardando...' : 'Guardar Todo'}</span>
           </button>
         </div>
+      </div>
+
+      {/* Semáforo de Estrés de Cuota ("Token Burn Gauge") */}
+      <div className={`token-burn-gauge ${stress.level}`} data-testid="token-burn-gauge">
+        <span className="gauge-badge">{stress.badge}</span>
+        <span className="gauge-autonomy">Autonomía estimada: {stress.autonomy}</span>
+        <span className="gauge-desc">{stress.desc}</span>
       </div>
 
       {/* Universe Segmented Tabs (Dinámico según harnesses detectados) */}

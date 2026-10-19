@@ -774,6 +774,96 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 		// Not a pool request (native credential or non-pool model): native scheduler.
 		return schedulerPickResponse{Handled: false}
 	}
+
+	sessionID := extractSessionID(req)
+	turnCount := 1
+	if sessionID != "" {
+		if aff, ok := analytics.GetSessionAffinity(sessionID, pool.ID); ok && aff.TurnCount > 0 {
+			turnCount = aff.TurnCount
+		}
+	}
+
+	// Identify role and agent_id
+	isOrchestrator := false
+	agentID := ""
+	if req.Options.Headers != nil {
+		for k, vals := range req.Options.Headers {
+			if len(vals) == 0 {
+				continue
+			}
+			val := strings.ToLower(strings.TrimSpace(vals[0]))
+			if strings.EqualFold(k, "x-agent-role") || strings.EqualFold(k, "x-client-role") {
+				if strings.Contains(val, "orchestrator") || strings.Contains(val, "triage") {
+					isOrchestrator = true
+				}
+			}
+			if strings.EqualFold(k, "x-agent-id") {
+				agentID = strings.TrimSpace(vals[0])
+			}
+		}
+	}
+	if req.Options.Metadata != nil {
+		if v, ok := req.Options.Metadata["agent_id"].(string); ok && strings.TrimSpace(v) != "" {
+			agentID = strings.TrimSpace(v)
+		}
+		if v, ok := req.Options.Metadata["role"].(string); ok {
+			if strings.Contains(strings.ToLower(v), "orchestrator") {
+				isOrchestrator = true
+			}
+		}
+	}
+	if strings.Contains(strings.ToLower(agentID), "orchestrator") {
+		isOrchestrator = true
+	}
+
+	// CIRCUIT BREAKER / LOOP PROTECTOR:
+	// If a subagent/worker iterates on expensive Claude models for >= maxClaudeTurns (default 3),
+	// automatically divert to Gemini Flash High to protect the team's 5h Claude budget.
+	isClaudePool := strings.Contains(strings.ToLower(pool.ID), "claude") ||
+		strings.Contains(strings.ToLower(pool.DisplayName), "claude") ||
+		strings.Contains(strings.ToLower(pool.Family), "claude")
+
+	maxClaudeTurns := 3
+	if agentID != "" {
+		if recs, err := analytics.GetAgentProfiles(""); err == nil {
+			for _, rec := range recs {
+				if rec.AgentID == agentID && rec.MaxClaudeTurns >= 0 {
+					maxClaudeTurns = rec.MaxClaudeTurns
+					break
+				}
+			}
+		}
+	}
+
+	if !isOrchestrator && isClaudePool && maxClaudeTurns > 0 && turnCount >= maxClaudeTurns {
+		var divertedPool *PoolDefinition
+		if dp, ok := registry.GetPool("Pool-01-gemini"); ok && dp.IsEnabled() {
+			divertedPool = &dp
+		}
+		if divertedPool == nil {
+			for _, p := range registry.ListPools() {
+				if p.IsEnabled() && (p.Family == "gemini_pure" || strings.Contains(strings.ToLower(p.ID), "gemini") || strings.Contains(strings.ToLower(p.ID), "agy")) {
+					divertedPool = &p
+					break
+				}
+			}
+		}
+
+		if divertedPool != nil {
+			analytics.RecordAuditEvent(analytics.AuditEvent{
+				PoolID:         pool.ID,
+				EventType:      "CIRCUIT_BREAKER_LOOP_PREVENTED",
+				TriggerReason:  fmt.Sprintf("exceeded_max_claude_turns_%d", maxClaudeTurns),
+				PreviousLeader: pool.ID,
+				NewLeader:      divertedPool.ID,
+				LatencyMs:      1,
+				StatusCode:     200,
+				DetailsJSON:    fmt.Sprintf(`{"turn_count":%d,"agent_id":"%s","diverted_to":"%s","max_claude_turns":%d}`, turnCount, agentID, divertedPool.ID, maxClaudeTurns),
+			})
+			pool = divertedPool
+		}
+	}
+
 	// 2) Symmetrical Pool Members with Dynamic Active Leader ordering:
 	// Start from the current ActiveLeader in RAM (if set), followed by remaining pool members.
 	allMembers := pool.AllMembers()
@@ -892,7 +982,6 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 		}
 	}
 
-	sessionID := extractSessionID(req)
 	taskType := extractTaskType(req)
 
 	// Task-Aware & Predictive Token-Budget Routing:
@@ -1001,11 +1090,49 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 			predEngine.RecordActivity(email)
 
 			// Preservar afinidad de sesión para no invalidar el caché en turnos subsiguientes
+			turnCount := 1
 			if sessionID != "" {
+				if existingAff, ok := analytics.GetSessionAffinity(sessionID, pool.ID); ok {
+					turnCount = existingAff.TurnCount + 1
+				}
 				analytics.SetSessionAffinity(analytics.SessionAffinity{
 					SessionID:    sessionID,
 					PoolID:       pool.ID,
 					AccountEmail: email,
+				})
+			}
+
+			// Task Auto-Downgrade: if turnCount >= 2 on expensive Claude reasoning pools or requested via header
+			autoDowngradeHeader := false
+			isOrchestratorTurn := false
+			if req.Options.Headers != nil {
+				for k, vals := range req.Options.Headers {
+					if strings.EqualFold(k, "x-auto-downgrade") && len(vals) > 0 && strings.EqualFold(vals[0], "true") {
+						autoDowngradeHeader = true
+					}
+					if (strings.EqualFold(k, "x-agent-role") || strings.EqualFold(k, "x-client-role")) && len(vals) > 0 {
+						if strings.Contains(strings.ToLower(vals[0]), "orchestrator") {
+							isOrchestratorTurn = true
+						}
+					}
+				}
+			}
+
+			// Opportunistic Orchestrator Triage Warmup trigger
+			if isOrchestratorTurn {
+				TriggerTriageShadowWarmup(nil)
+			}
+
+			if turnCount >= 2 && (autoDowngradeHeader || strings.Contains(strings.ToLower(pool.ID), "claude")) {
+				analytics.RecordAuditEvent(analytics.AuditEvent{
+					PoolID:         pool.ID,
+					EventType:      "AUTO_DOWNGRADE",
+					TriggerReason:  fmt.Sprintf("task_turn_%d_optimization", turnCount),
+					PreviousLeader: leaderEmail,
+					NewLeader:      email,
+					LatencyMs:      1,
+					StatusCode:     200,
+					DetailsJSON:    fmt.Sprintf(`{"turn_count":%d,"action":"mitigate_reasoning_overhead","model":"%s"}`, turnCount, originalModel),
 				})
 			}
 

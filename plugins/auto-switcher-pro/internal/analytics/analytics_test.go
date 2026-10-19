@@ -167,6 +167,22 @@ func TestSQLiteAnalyticsLifecycle(t *testing.T) {
 	if !ok || aff.AccountEmail != "leader@gmail.com" {
 		t.Errorf("expected valid session affinity for leader@gmail.com, got %+v (ok=%v)", aff, ok)
 	}
+	if aff.TurnCount < 1 {
+		t.Errorf("expected TurnCount >= 1, got %d", aff.TurnCount)
+	}
+
+	// Trigger second turn for same session to verify turn_count increment
+	SetSessionAffinity(SessionAffinity{
+		SessionID:    "session-xyz-123",
+		PoolID:       "Pool-01-gemini",
+		AccountEmail: "leader@gmail.com",
+		LastTurnMs:   time.Now().UnixMilli(),
+	})
+	time.Sleep(50 * time.Millisecond)
+	affTurn2, ok := GetSessionAffinity("session-xyz-123", "Pool-01-gemini")
+	if !ok || affTurn2.TurnCount < 2 {
+		t.Errorf("expected TurnCount >= 2 after second turn, got %d", affTurn2.TurnCount)
+	}
 
 	// Validate Audit Events
 	audits, err := QueryAuditEvents(10)

@@ -252,21 +252,21 @@ func TestAgentMatrixHandler_DynamicDiscoveryAndMtime(t *testing.T) {
 		t.Errorf("expected GentleAgents to remain available as default universe")
 	}
 
-	// 6. Test Heartbeat endpoint
-	heartbeatReq := ManagementRequestPayload{
+	// 7. Test Triage Shadow Warmup endpoint
+	warmupReq := ManagementRequestPayload{
 		Method: http.MethodPost,
-		Path:   "/v0/management/auto-switcher-pro/agent-matrix/heartbeat",
-		Body:   []byte(`{"harness":"jok3r_pi","name":"j0k3r-pi"}`),
+		Path:   "/v0/management/auto-switcher-pro/agent-matrix/warmup-triage",
+		Body:   []byte(`{"target_pools":["Pool-01-gemini","Pool-04-claude"]}`),
 	}
-	rawHb, err := handleAgentMatrixHTTP(heartbeatReq)
+	rawWarmup, err := handleAgentMatrixHTTP(warmupReq)
 	if err != nil {
-		t.Fatalf("handleAgentMatrixHTTP heartbeat failed: %v", err)
+		t.Fatalf("handleAgentMatrixHTTP warmup-triage failed: %v", err)
 	}
-	var envHb Envelope
-	_ = json.Unmarshal(rawHb, &envHb)
-	var respHb ManagementResponsePayload
-	_ = json.Unmarshal(envHb.Result, &respHb)
-	if respHb.StatusCode != http.StatusOK {
-		t.Errorf("expected 200 OK for heartbeat, got %d", respHb.StatusCode)
+	var envWarmup Envelope
+	_ = json.Unmarshal(rawWarmup, &envWarmup)
+	var respWarmup ManagementResponsePayload
+	_ = json.Unmarshal(envWarmup.Result, &respWarmup)
+	if respWarmup.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 OK for warmup-triage, got %d", respWarmup.StatusCode)
 	}
 }

@@ -103,6 +103,7 @@ func InitDB() (*sql.DB, error) {
 			session_id TEXT NOT NULL,
 			pool_id TEXT NOT NULL,
 			account_email TEXT NOT NULL,
+			turn_count INTEGER DEFAULT 1,
 			last_turn_ms INTEGER NOT NULL,
 			PRIMARY KEY (session_id, pool_id)
 		);
@@ -144,6 +145,8 @@ func InitDB() (*sql.DB, error) {
 			primary_pool TEXT NOT NULL,
 			fallback_pool TEXT NOT NULL,
 			thinking_level TEXT DEFAULT 'medium',
+			auto_downgrade INTEGER DEFAULT 0,
+			max_claude_turns INTEGER DEFAULT 3,
 			concurrency INTEGER DEFAULT 1,
 			updated_at_ms INTEGER NOT NULL,
 			PRIMARY KEY (universe, agent_id)
@@ -162,6 +165,10 @@ func InitDB() (*sql.DB, error) {
 			initErr = fmt.Errorf("failed to init schema: %w", err)
 			return
 		}
+		// Non-destructive migrations
+		_, _ = db.Exec(`ALTER TABLE session_affinity ADD COLUMN turn_count INTEGER DEFAULT 1;`)
+		_, _ = db.Exec(`ALTER TABLE agent_profiles ADD COLUMN auto_downgrade INTEGER DEFAULT 0;`)
+		_, _ = db.Exec(`ALTER TABLE agent_profiles ADD COLUMN max_claude_turns INTEGER DEFAULT 3;`)
 
 		// Idempotent column check for existing databases
 		_, _ = db.Exec(`ALTER TABLE pool_rotations ADD COLUMN pool_id TEXT DEFAULT '';`)
@@ -213,6 +220,7 @@ type SessionAffinity struct {
 	SessionID    string `json:"session_id"`
 	PoolID       string `json:"pool_id"`
 	AccountEmail string `json:"account_email"`
+	TurnCount    int    `json:"turn_count"`
 	LastTurnMs   int64  `json:"last_turn_ms"`
 }
 
@@ -362,10 +370,11 @@ func executeWriteTask(db *sql.DB, task writeTask) {
 			aff.LastTurnMs = time.Now().UnixMilli()
 		}
 		stmt := `INSERT INTO session_affinity (
-			session_id, pool_id, account_email, last_turn_ms
-		) VALUES (?, ?, ?, ?)
+			session_id, pool_id, account_email, turn_count, last_turn_ms
+		) VALUES (?, ?, ?, 1, ?)
 		ON CONFLICT(session_id, pool_id) DO UPDATE SET
 			account_email=excluded.account_email,
+			turn_count=session_affinity.turn_count + 1,
 			last_turn_ms=excluded.last_turn_ms`
 		_, _ = db.Exec(stmt, aff.SessionID, aff.PoolID, aff.AccountEmail, aff.LastTurnMs)
 
@@ -506,13 +515,14 @@ func GetSessionAffinity(sessionID, poolID string) (SessionAffinity, bool) {
 	}
 
 	var aff SessionAffinity
-	query := `SELECT session_id, pool_id, account_email, last_turn_ms
+	query := `SELECT session_id, pool_id, account_email, turn_count, last_turn_ms
 		FROM session_affinity
 		WHERE session_id = ? AND pool_id = ?`
 	err = db.QueryRow(query, sessionID, poolID).Scan(
 		&aff.SessionID,
 		&aff.PoolID,
 		&aff.AccountEmail,
+		&aff.TurnCount,
 		&aff.LastTurnMs,
 	)
 	if err != nil {
@@ -635,13 +645,15 @@ func AutoVacuumCheckpoint(maxAgeDays int) error {
 
 // AgentProfileRecord represents a persisted agent assignment in SQLite WAL.
 type AgentProfileRecord struct {
-	Universe      string `json:"universe"`      // "gentle_ai" or "jok3r_pi"
-	AgentID       string `json:"agent_id"`      // "orchestrator", "worker", "01-planning", etc.
-	PrimaryPool   string `json:"primary_pool"`  // "Pool-04-claude"
-	FallbackPool  string `json:"fallback_pool"` // "Pool-01-gemini"
-	ThinkingLevel string `json:"thinking_level"`// "low", "medium", "high"
-	Concurrency   int    `json:"concurrency"`   // 1 to 5
-	UpdatedAtMs   int64  `json:"updated_at_ms"`
+	Universe       string `json:"universe"`        // "gentle_ai" or "jok3r_pi"
+	AgentID        string `json:"agent_id"`        // "orchestrator", "worker", "01-planning", etc.
+	PrimaryPool    string `json:"primary_pool"`    // "Pool-04-claude"
+	FallbackPool   string `json:"fallback_pool"`   // "Pool-01-gemini"
+	ThinkingLevel  string `json:"thinking_level"`  // "low", "medium", "high"
+	AutoDowngrade  bool   `json:"auto_downgrade"`  // true for automatic cost mitigation on Turn >= 2
+	MaxClaudeTurns int    `json:"max_claude_turns"`// Max consecutive turns in Claude before Circuit Breaker trips (default 3, 0 = unlimited)
+	Concurrency    int    `json:"concurrency"`     // 1 to 5
+	UpdatedAtMs    int64  `json:"updated_at_ms"`
 }
 
 // RegisterHarness records or updates a detected harness in the persistent registry.
@@ -711,13 +723,25 @@ func UpsertAgentProfile(p AgentProfileRecord) error {
 		p.UpdatedAtMs = time.Now().UnixMilli()
 	}
 
+	autoDowngradeInt := 0
+	if p.AutoDowngrade {
+		autoDowngradeInt = 1
+	}
+
+	maxClaudeTurns := p.MaxClaudeTurns
+	if maxClaudeTurns < 0 {
+		maxClaudeTurns = 3
+	}
+
 	_, err = db.Exec(`INSERT INTO agent_profiles (
-		universe, agent_id, primary_pool, fallback_pool, thinking_level, concurrency, updated_at_ms
-	) VALUES (?, ?, ?, ?, ?, ?, ?)
+		universe, agent_id, primary_pool, fallback_pool, thinking_level, auto_downgrade, max_claude_turns, concurrency, updated_at_ms
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(universe, agent_id) DO UPDATE SET
 		primary_pool = excluded.primary_pool,
 		fallback_pool = excluded.fallback_pool,
 		thinking_level = excluded.thinking_level,
+		auto_downgrade = excluded.auto_downgrade,
+		max_claude_turns = excluded.max_claude_turns,
 		concurrency = excluded.concurrency,
 		updated_at_ms = excluded.updated_at_ms`,
 		p.Universe,
@@ -725,6 +749,8 @@ func UpsertAgentProfile(p AgentProfileRecord) error {
 		p.PrimaryPool,
 		p.FallbackPool,
 		p.ThinkingLevel,
+		autoDowngradeInt,
+		maxClaudeTurns,
 		p.Concurrency,
 		p.UpdatedAtMs,
 	)
@@ -738,7 +764,7 @@ func GetAgentProfiles(universe string) ([]AgentProfileRecord, error) {
 		return nil, fmt.Errorf("db unavailable: %w", err)
 	}
 
-	query := `SELECT universe, agent_id, primary_pool, fallback_pool, thinking_level, concurrency, updated_at_ms
+	query := `SELECT universe, agent_id, primary_pool, fallback_pool, thinking_level, auto_downgrade, max_claude_turns, concurrency, updated_at_ms
 		FROM agent_profiles`
 	var rows *sql.Rows
 	if universe != "" {
@@ -756,15 +782,25 @@ func GetAgentProfiles(universe string) ([]AgentProfileRecord, error) {
 	var profiles []AgentProfileRecord
 	for rows.Next() {
 		var p AgentProfileRecord
+		var autoDownInt int
+		var maxClaudeTurns sql.NullInt64
 		if err := rows.Scan(
 			&p.Universe,
 			&p.AgentID,
 			&p.PrimaryPool,
 			&p.FallbackPool,
 			&p.ThinkingLevel,
+			&autoDownInt,
+			&maxClaudeTurns,
 			&p.Concurrency,
 			&p.UpdatedAtMs,
 		); err == nil {
+			p.AutoDowngrade = autoDownInt == 1
+			if maxClaudeTurns.Valid {
+				p.MaxClaudeTurns = int(maxClaudeTurns.Int64)
+			} else {
+				p.MaxClaudeTurns = 3
+			}
 			profiles = append(profiles, p)
 		}
 	}

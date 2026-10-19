@@ -62,6 +62,7 @@ describe('AgentMatrix Component', () => {
           fallback_pool: 'Pool-01-gemini',
           thinking_level: 'none',
           concurrency: 1,
+          auto_downgrade: true,
           description: 'Implementador fullstack',
         },
       ],
@@ -108,6 +109,19 @@ describe('AgentMatrix Component', () => {
     // 6. Check Dry-Run Ping button existence
     expect(screen.getAllByText('⚡ Test Route').length).toBeGreaterThan(0);
     expect(screen.getAllByText('⚡ Test').length).toBeGreaterThan(0);
+
+    // 7. Check Token Burn Gauge & Stress Semaphore
+    const gauge = screen.getByTestId('token-burn-gauge');
+    expect(gauge).toBeDefined();
+    expect(screen.getByText(/Autonomía estimada:/i)).toBeDefined();
+
+    // 8. Check Warmup Triage button
+    expect(screen.getByText('Warmup Triage')).toBeDefined();
+
+    // 9. Check Auto-Downgrade column & Circuit Breaker Loop Protector
+    expect(screen.getByText('AUTO-DOWNGRADE')).toBeDefined();
+    expect(screen.getAllByText(/T2\+/i).length).toBeGreaterThan(0);
+    expect(screen.getByText('TOPE BUCLE (CLAUDE)')).toBeDefined();
   });
 
   it('renders strictly Gentle-AI by default and completely hides j0k3r-pi when not detected', async () => {

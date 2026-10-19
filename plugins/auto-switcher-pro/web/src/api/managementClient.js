@@ -2742,6 +2742,27 @@ export async function scanAgentEnvironment(options = {}) {
   return data;
 }
 
+/**
+ * Dispara el Shadow Warmup asíncrono para pre-calentar los sockets y prompt cache de los pools objetivo.
+ *
+ * @param {string[]} [targetPools]
+ * @param {Object} [options]
+ */
+export async function triggerTriageWarmup(targetPools = [], options = {}) {
+  const res = await apiFetch('/v0/management/auto-switcher-pro/agent-matrix/warmup-triage', {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target_pools: targetPools }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data?.ok) {
+    throw new Error(data?.message || 'Error al disparar warmup de triage');
+  }
+  return data;
+}
+
+
 
 
 

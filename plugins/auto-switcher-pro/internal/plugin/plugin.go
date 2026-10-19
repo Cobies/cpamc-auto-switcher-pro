@@ -202,6 +202,11 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 					"Path":        agentMatrixScanRoutePath,
 					"Description": "Escanea el entorno y detecta los arneses y agentes reales del equipo",
 				},
+				{
+					"Method":      http.MethodPost,
+					"Path":        agentMatrixWarmupRoutePath,
+					"Description": "Dispara el Shadow Warmup asíncrono durante el triage del orquestador",
+				},
 			},
 			"resources": []map[string]any{
 				{

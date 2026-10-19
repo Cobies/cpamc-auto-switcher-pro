@@ -19,6 +19,7 @@ const (
 	agentMatrixPingRoutePath      = "/auto-switcher-pro/agent-matrix/ping"
 	agentMatrixHeartbeatRoutePath = "/auto-switcher-pro/agent-matrix/heartbeat"
 	agentMatrixScanRoutePath      = "/auto-switcher-pro/agent-matrix/scan-environment"
+	agentMatrixWarmupRoutePath    = "/auto-switcher-pro/agent-matrix/warmup-triage"
 )
 
 var (
@@ -43,6 +44,10 @@ func isAgentMatrixScanPath(path string) bool {
 	return strings.Contains(path, agentMatrixScanRoutePath)
 }
 
+func isAgentMatrixWarmupPath(path string) bool {
+	return strings.Contains(path, agentMatrixWarmupRoutePath)
+}
+
 // DiscoveredHarness represents a dynamically detected runtime harness and its actual agents.
 type DiscoveredHarness struct {
 	ID         string      `json:"id"`          // "gentle_shell", "jok3r_pi", "opencode"
@@ -56,14 +61,16 @@ type DiscoveredHarness struct {
 
 // AgentInfo represents an agent's unified metadata across Gentle-AI and jok3r-pi.
 type AgentInfo struct {
-	Universe       string `json:"universe"`       // "gentle_ai" or "jok3r_pi"
-	AgentID        string `json:"agent_id"`       // "orchestrator", "worker", "00-discovery", etc.
-	DisplayName    string `json:"display_name"`   // "👑 Orquestador", "02-apply", etc.
-	RoleType       string `json:"role_type"`      // "orchestrator", "discovery", "planning", "apply", "verify", "research", "ui_design", "review"
-	IsOrchestrator bool   `json:"is_orchestrator"`// true for main orchestrator in each universe
-	PrimaryPool    string `json:"primary_pool"`   // "Pool-04-claude"
-	FallbackPool   string `json:"fallback_pool"`  // "Pool-01-gemini"
-	ThinkingLevel  string `json:"thinking_level"` // "low", "medium", "high", or "none"
+	Universe       string `json:"universe"`         // "gentle_ai" or "jok3r_pi"
+	AgentID        string `json:"agent_id"`         // "orchestrator", "worker", "00-discovery", etc.
+	DisplayName    string `json:"display_name"`     // "👑 Orquestador", "02-apply", etc.
+	RoleType       string `json:"role_type"`        // "orchestrator", "discovery", "planning", "apply", "verify", "research", "ui_design", "review"
+	IsOrchestrator bool   `json:"is_orchestrator"`  // true for main orchestrator in each universe
+	PrimaryPool    string `json:"primary_pool"`     // "Pool-04-claude"
+	FallbackPool   string `json:"fallback_pool"`    // "Pool-01-gemini"
+	ThinkingLevel  string `json:"thinking_level"`   // "low", "medium", "high", or "none"
+	AutoDowngrade  bool   `json:"auto_downgrade"`   // true for automatic cost mitigation on Turn >= 2
+	MaxClaudeTurns int    `json:"max_claude_turns"` // Max consecutive Claude turns before Circuit Breaker trips (default 3, 0 = unlimited)
 	Concurrency    int    `json:"concurrency"`
 	Description    string `json:"description"`
 }
@@ -100,6 +107,42 @@ type AgentMatrixPayload struct {
 	Message          string                    `json:"message,omitempty"`
 }
 
+func getJok3rRootDir() string {
+	if env := os.Getenv("HOST_PI_DIR"); env != "" {
+		if fi, err := os.Stat(env); err == nil && fi.IsDir() {
+			return env
+		}
+	}
+	if fi, err := os.Stat("/host-harnesses/j0k3r"); err == nil && fi.IsDir() {
+		return "/host-harnesses/j0k3r"
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		p := filepath.Join(home, ".pi", "agent-j0k3r")
+		if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+			return p
+		}
+	}
+	return ""
+}
+
+func getGentleRootDir() string {
+	if env := os.Getenv("HOST_GENTLE_DIR"); env != "" {
+		if fi, err := os.Stat(env); err == nil && fi.IsDir() {
+			return env
+		}
+	}
+	if fi, err := os.Stat("/host-harnesses/gentle-shell"); err == nil && fi.IsDir() {
+		return "/host-harnesses/gentle-shell"
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		p := filepath.Join(home, ".gentle-shell")
+		if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+			return p
+		}
+	}
+	return ""
+}
+
 // isJok3rDetected evaluates dynamically whether j0k3r-pi is actively running or signaled.
 func isJok3rDetected() bool {
 	if os.Getenv("FORCE_JOK3R_DETECTED") == "true" {
@@ -107,6 +150,9 @@ func isJok3rDetected() bool {
 	}
 	if os.Getenv("FORCE_JOK3R_DETECTED") == "false" {
 		return false
+	}
+	if getJok3rRootDir() != "" {
+		return true
 	}
 
 	// 1. Check if harness was registered in SQLite WAL (via active heartbeat or CLI /agent:matrix)
@@ -148,6 +194,9 @@ func handleAgentMatrixHTTP(req ManagementRequestPayload) ([]byte, error) {
 	}
 	if isAgentMatrixScanPath(req.Path) {
 		return handleAgentMatrixScanHTTP(req)
+	}
+	if isAgentMatrixWarmupPath(req.Path) {
+		return handleAgentMatrixWarmupHTTP(req)
 	}
 
 	// Header-based opportunistic detection
@@ -207,6 +256,25 @@ func handleAgentMatrixScanHTTP(req ManagementRequestPayload) ([]byte, error) {
 		})
 	}
 	return getAgentMatrixResponse()
+}
+
+func handleAgentMatrixWarmupHTTP(req ManagementRequestPayload) ([]byte, error) {
+	method := strings.ToUpper(strings.TrimSpace(req.Method))
+	if method != http.MethodPost {
+		return jsonManagementResponse(http.StatusMethodNotAllowed, map[string]string{
+			"error":   "method_not_allowed",
+			"message": "warmup requires POST",
+		})
+	}
+	var body struct {
+		TargetPools []string `json:"target_pools"`
+	}
+	_ = json.Unmarshal(req.Body, &body)
+	TriggerTriageShadowWarmup(body.TargetPools)
+	return jsonManagementResponse(http.StatusOK, map[string]any{
+		"ok":      true,
+		"message": "triage shadow warmup initiated in background",
+	})
 }
 
 // PingRequest represents a test ping for a specific pool / route.
@@ -320,51 +388,74 @@ func reconcileExternalFileChanges() {
 	matrixMu.Lock()
 	defer matrixMu.Unlock()
 
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return
-	}
+	home, _ := os.UserHomeDir()
 
 	// 1. Reconcile jok3r-pi subagents.json
-	jok3rPath := filepath.Join(home, ".pi", "agent-j0k3r", "subagents.json")
-	if info, err := os.Stat(jok3rPath); err == nil {
-		if info.ModTime().After(lastJok3rMtime) {
-			lastJok3rMtime = info.ModTime()
-			if data, err := os.ReadFile(jok3rPath); err == nil {
-				var parsed struct {
-					ModelProfiles map[string]struct {
-						Model    string `json:"model"`
-						Fallback string `json:"fallback"`
-						Effort   string `json:"effort"`
-					} `json:"model_profiles"`
-				}
-				if err := json.Unmarshal(data, &parsed); err == nil && len(parsed.ModelProfiles) > 0 {
-					now := time.Now().UnixMilli()
-					for agentID, prof := range parsed.ModelProfiles {
-						cleanModel := strings.TrimPrefix(prof.Model, "cpamc/")
-						cleanFallback := strings.TrimPrefix(prof.Fallback, "cpamc/")
-						_ = analytics.UpsertAgentProfile(analytics.AgentProfileRecord{
-							Universe:      "jok3r_pi",
-							AgentID:       agentID,
-							PrimaryPool:   cleanModel,
-							FallbackPool:  cleanFallback,
-							ThinkingLevel: prof.Effort,
-							Concurrency:   1,
-							UpdatedAtMs:   now,
-						})
+	var jok3rPaths []string
+	if jDir := getJok3rRootDir(); jDir != "" {
+		jok3rPaths = append(jok3rPaths, filepath.Join(jDir, "subagents.json"))
+	}
+	if home != "" {
+		jok3rPaths = append(jok3rPaths, filepath.Join(home, ".pi", "agent-j0k3r", "subagents.json"))
+	}
+
+	for _, jok3rPath := range jok3rPaths {
+		if info, err := os.Stat(jok3rPath); err == nil {
+			if info.ModTime().After(lastJok3rMtime) {
+				lastJok3rMtime = info.ModTime()
+				if data, err := os.ReadFile(jok3rPath); err == nil {
+					var parsed struct {
+						ModelProfiles map[string]struct {
+							Model          string `json:"model"`
+							Fallback       string `json:"fallback"`
+							Effort         string `json:"effort"`
+							MaxClaudeTurns int    `json:"max_claude_turns"`
+						} `json:"model_profiles"`
+					}
+					if err := json.Unmarshal(data, &parsed); err == nil && len(parsed.ModelProfiles) > 0 {
+						now := time.Now().UnixMilli()
+						for agentID, prof := range parsed.ModelProfiles {
+							cleanModel := strings.TrimPrefix(prof.Model, "cpamc/")
+							cleanFallback := strings.TrimPrefix(prof.Fallback, "cpamc/")
+							maxTurns := prof.MaxClaudeTurns
+							if maxTurns <= 0 {
+								maxTurns = 3
+							}
+							_ = analytics.UpsertAgentProfile(analytics.AgentProfileRecord{
+								Universe:       "jok3r_pi",
+								AgentID:        agentID,
+								PrimaryPool:    cleanModel,
+								FallbackPool:   cleanFallback,
+								ThinkingLevel:  prof.Effort,
+								AutoDowngrade:  true,
+								MaxClaudeTurns: maxTurns,
+								Concurrency:    1,
+								UpdatedAtMs:    now,
+							})
+						}
 					}
 				}
 			}
+			break
 		}
 	}
 
 	// 2. Reconcile gentle-ai profiles.json
-	gentleDirs := []string{
-		filepath.Join(home, ".pi", "gentle-ai"),
-		filepath.Join(home, ".gentle-shell", "agent"),
+	var gentlePaths []string
+	if gDir := getGentleRootDir(); gDir != "" {
+		gentlePaths = append(gentlePaths,
+			filepath.Join(gDir, "agent", "profiles.json"),
+			filepath.Join(gDir, "profiles.json"),
+		)
 	}
-	for _, dir := range gentleDirs {
-		pPath := filepath.Join(dir, "profiles.json")
+	if home != "" {
+		gentlePaths = append(gentlePaths,
+			filepath.Join(home, ".gentle-shell", "agent", "profiles.json"),
+			filepath.Join(home, ".pi", "gentle-ai", "profiles.json"),
+		)
+	}
+
+	for _, pPath := range gentlePaths {
 		if info, err := os.Stat(pPath); err == nil {
 			if info.ModTime().After(lastGentleMtime) {
 				lastGentleMtime = info.ModTime()
@@ -372,9 +463,10 @@ func reconcileExternalFileChanges() {
 					var parsed struct {
 						Profiles struct {
 							Current map[string]struct {
-								Model    string `json:"model"`
-								Fallback string `json:"fallback"`
-								Effort   string `json:"effort"`
+								Model          string `json:"model"`
+								Fallback       string `json:"fallback"`
+								Effort         string `json:"effort"`
+								MaxClaudeTurns int    `json:"max_claude_turns"`
 							} `json:"current"`
 						} `json:"profiles"`
 					}
@@ -383,19 +475,26 @@ func reconcileExternalFileChanges() {
 						for agentID, prof := range parsed.Profiles.Current {
 							cleanModel := strings.TrimPrefix(prof.Model, "cpamc/")
 							cleanFallback := strings.TrimPrefix(prof.Fallback, "cpamc/")
+							maxTurns := prof.MaxClaudeTurns
+							if maxTurns <= 0 {
+								maxTurns = 3
+							}
 							_ = analytics.UpsertAgentProfile(analytics.AgentProfileRecord{
-								Universe:      "gentle_ai",
-								AgentID:       agentID,
-								PrimaryPool:   cleanModel,
-								FallbackPool:  cleanFallback,
-								ThinkingLevel: prof.Effort,
-								Concurrency:   1,
-								UpdatedAtMs:   now,
+								Universe:       "gentle_ai",
+								AgentID:        agentID,
+								PrimaryPool:    cleanModel,
+								FallbackPool:   cleanFallback,
+								ThinkingLevel:  prof.Effort,
+								AutoDowngrade:  true,
+								MaxClaudeTurns: maxTurns,
+								Concurrency:    1,
+								UpdatedAtMs:    now,
 							})
 						}
 					}
 				}
 			}
+			break
 		}
 	}
 }
@@ -563,10 +662,21 @@ func loadManifestOrDiscover(availablePools []string, poolCapabilities map[string
 						if rec.ThinkingLevel != "" {
 							a.ThinkingLevel = rec.ThinkingLevel
 						}
+						a.AutoDowngrade = rec.AutoDowngrade
+						if rec.MaxClaudeTurns >= 0 {
+							a.MaxClaudeTurns = rec.MaxClaudeTurns
+						} else {
+							a.MaxClaudeTurns = 3
+						}
 						if rec.Concurrency > 0 {
 							a.Concurrency = rec.Concurrency
 						}
 					} else {
+						// Default auto-downgrade to true for worker/apply agents
+						if a.RoleType == "apply" || strings.Contains(strings.ToLower(a.AgentID), "apply") || strings.Contains(strings.ToLower(a.AgentID), "worker") {
+							a.AutoDowngrade = true
+						}
+						a.MaxClaudeTurns = 3
 						if a.PrimaryPool == "" {
 							if len(availablePools) > 0 {
 								a.PrimaryPool = availablePools[0]
@@ -723,24 +833,40 @@ func discoverUniverseAgents(universe string, savedMap map[string]analytics.Agent
 	home, _ := os.UserHomeDir()
 	var agentDirs []string
 
-	if universe == "gentle_ai" {
-		agentDirs = []string{
-			filepath.Join(home, ".gentle-shell", "agent", "agents"),
-			filepath.Join(home, ".pi", "gentle-ai", "agents"),
+	if universe == "gentle_ai" || universe == "gentle_shell" {
+		if gDir := getGentleRootDir(); gDir != "" {
+			agentDirs = append(agentDirs,
+				filepath.Join(gDir, "agent", "agents"),
+				filepath.Join(gDir, "agents"),
+			)
+		}
+		if home != "" {
+			agentDirs = append(agentDirs,
+				filepath.Join(home, ".gentle-shell", "agent", "agents"),
+				filepath.Join(home, ".pi", "gentle-ai", "agents"),
+			)
 		}
 	} else {
-		agentDirs = []string{
-			filepath.Join(home, ".pi", "agent-j0k3r", "subagents"),
-			filepath.Join(home, ".pi", "agent-j0k3r", "agents"),
-			".pi/subagents",
+		if jDir := getJok3rRootDir(); jDir != "" {
+			agentDirs = append(agentDirs,
+				filepath.Join(jDir, "subagents"),
+				filepath.Join(jDir, "agents"),
+			)
 		}
+		if home != "" {
+			agentDirs = append(agentDirs,
+				filepath.Join(home, ".pi", "agent-j0k3r", "subagents"),
+				filepath.Join(home, ".pi", "agent-j0k3r", "agents"),
+			)
+		}
+		agentDirs = append(agentDirs, ".pi/subagents")
 	}
 
 	// Start with Orquestador on the Throne
 	var list []AgentInfo
 	seenIDs := make(map[string]bool)
 
-	if universe == "gentle_ai" {
+	if universe == "gentle_ai" || universe == "gentle_shell" {
 		list = append(list, AgentInfo{
 			Universe:       "gentle_ai",
 			AgentID:        "orchestrator",
@@ -791,16 +917,30 @@ func discoverUniverseAgents(universe string, savedMap map[string]analytics.Agent
 
 			role, defPrimary, defFallback, defEffort, conc := deriveAgentDefaults(agentID)
 
+			autoDown := false
+			if role == "apply" || strings.Contains(strings.ToLower(agentID), "apply") || strings.Contains(strings.ToLower(agentID), "worker") {
+				autoDown = true
+			}
+			maxTurns := 3
+			if r, ok := savedMap[agentID]; ok {
+				autoDown = r.AutoDowngrade
+				if r.MaxClaudeTurns >= 0 {
+					maxTurns = r.MaxClaudeTurns
+				}
+			}
+
 			list = append(list, AgentInfo{
-				Universe:      universe,
-				AgentID:       agentID,
-				DisplayName:   dispName,
-				RoleType:      role,
-				PrimaryPool:   getVal(savedMap, agentID, "primary", defPrimary),
-				FallbackPool:  getVal(savedMap, agentID, "fallback", defFallback),
-				ThinkingLevel: getVal(savedMap, agentID, "thinking", defEffort),
-				Concurrency:   conc,
-				Description:   desc,
+				Universe:       universe,
+				AgentID:        agentID,
+				DisplayName:    dispName,
+				RoleType:       role,
+				PrimaryPool:    getVal(savedMap, agentID, "primary", defPrimary),
+				FallbackPool:   getVal(savedMap, agentID, "fallback", defFallback),
+				ThinkingLevel:  getVal(savedMap, agentID, "thinking", defEffort),
+				AutoDowngrade:  autoDown,
+				MaxClaudeTurns: maxTurns,
+				Concurrency:    conc,
+				Description:    desc,
 			})
 		}
 	}
@@ -813,6 +953,16 @@ func discoverUniverseAgents(universe string, savedMap map[string]analytics.Agent
 			def.PrimaryPool = getVal(savedMap, def.AgentID, "primary", def.PrimaryPool)
 			def.FallbackPool = getVal(savedMap, def.AgentID, "fallback", def.FallbackPool)
 			def.ThinkingLevel = getVal(savedMap, def.AgentID, "thinking", def.ThinkingLevel)
+			if r, ok := savedMap[def.AgentID]; ok {
+				def.AutoDowngrade = r.AutoDowngrade
+				if r.MaxClaudeTurns >= 0 {
+					def.MaxClaudeTurns = r.MaxClaudeTurns
+				} else {
+					def.MaxClaudeTurns = 3
+				}
+			} else {
+				def.MaxClaudeTurns = 3
+			}
 			list = append(list, def)
 		}
 	}
@@ -922,30 +1072,41 @@ func postAgentMatrixResponse(body []byte) ([]byte, error) {
 			effort = "none"
 		}
 
+		maxClaudeTurns := a.MaxClaudeTurns
+		if maxClaudeTurns < 0 {
+			maxClaudeTurns = 3
+		}
+
 		// 1. Persist to SQLite WAL
 		rec := analytics.AgentProfileRecord{
-			Universe:      a.Universe,
-			AgentID:       a.AgentID,
-			PrimaryPool:   a.PrimaryPool,
-			FallbackPool:  a.FallbackPool,
-			ThinkingLevel: effort,
-			Concurrency:   a.Concurrency,
-			UpdatedAtMs:   now,
+			Universe:       a.Universe,
+			AgentID:        a.AgentID,
+			PrimaryPool:    a.PrimaryPool,
+			FallbackPool:   a.FallbackPool,
+			ThinkingLevel:  effort,
+			AutoDowngrade:  a.AutoDowngrade,
+			MaxClaudeTurns: maxClaudeTurns,
+			Concurrency:    a.Concurrency,
+			UpdatedAtMs:    now,
 		}
 		_ = analytics.UpsertAgentProfile(rec)
 
 		// 2. Prepare file sync payloads
 		if a.Universe == "jok3r_pi" {
 			jok3rProfiles[a.AgentID] = map[string]any{
-				"model":    "cpamc/" + a.PrimaryPool,
-				"fallback": "cpamc/" + a.FallbackPool,
-				"effort":   effort,
+				"model":            "cpamc/" + a.PrimaryPool,
+				"fallback":         "cpamc/" + a.FallbackPool,
+				"effort":           effort,
+				"auto_downgrade":   a.AutoDowngrade,
+				"max_claude_turns": maxClaudeTurns,
 			}
 		} else if a.Universe == "gentle_shell" || a.Universe == "gentle_ai" {
 			gentleProfiles[a.AgentID] = map[string]any{
-				"model":    "cpamc/" + a.PrimaryPool,
-				"fallback": "cpamc/" + a.FallbackPool,
-				"effort":   effort,
+				"model":            "cpamc/" + a.PrimaryPool,
+				"fallback":         "cpamc/" + a.FallbackPool,
+				"effort":           effort,
+				"auto_downgrade":   a.AutoDowngrade,
+				"max_claude_turns": maxClaudeTurns,
 			}
 		}
 	}
@@ -983,34 +1144,49 @@ func syncDiskProfiles(jok3rProfiles, gentleProfiles map[string]any) {
 	matrixMu.Lock()
 	defer matrixMu.Unlock()
 
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return
+	// 1. Target jok3r-pi subagents.json
+	var jok3rTargets []string
+	if jDir := getJok3rRootDir(); jDir != "" {
+		jok3rTargets = append(jok3rTargets, filepath.Join(jDir, "subagents.json"))
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		jok3rTargets = append(jok3rTargets, filepath.Join(home, ".pi", "agent-j0k3r", "subagents.json"))
 	}
 
-	// Sync jok3r-pi subagents.json
-	jok3rPath := filepath.Join(home, ".pi", "agent-j0k3r", "subagents.json")
-	if data, err := os.ReadFile(jok3rPath); err == nil {
-		var parsed map[string]any
-		if err := json.Unmarshal(data, &parsed); err == nil {
-			parsed["model_profiles"] = jok3rProfiles
-			if out, err := json.MarshalIndent(parsed, "", "  "); err == nil {
-				if err := atomicWriteFile(jok3rPath, out, 0644); err == nil {
-					if info, err := os.Stat(jok3rPath); err == nil {
-						lastJok3rMtime = info.ModTime()
+	for _, jok3rPath := range jok3rTargets {
+		if data, err := os.ReadFile(jok3rPath); err == nil {
+			var parsed map[string]any
+			if err := json.Unmarshal(data, &parsed); err == nil {
+				parsed["model_profiles"] = jok3rProfiles
+				if out, err := json.MarshalIndent(parsed, "", "  "); err == nil {
+					if err := atomicWriteFile(jok3rPath, out, 0644); err == nil {
+						if info, err := os.Stat(jok3rPath); err == nil {
+							lastJok3rMtime = info.ModTime()
+						}
 					}
 				}
 			}
+			break
 		}
 	}
 
-	// Sync gentle-ai profiles.json
-	gentleDirs := []string{
-		filepath.Join(home, ".pi", "gentle-ai"),
-		filepath.Join(home, ".gentle-shell", "agent"),
+	// 2. Target gentle-shell / gentle-ai profiles.json
+	var gentleTargets []string
+	if gDir := getGentleRootDir(); gDir != "" {
+		gentleTargets = append(gentleTargets,
+			filepath.Join(gDir, "agent", "profiles.json"),
+			filepath.Join(gDir, "profiles.json"),
+		)
 	}
-	for _, dir := range gentleDirs {
-		pPath := filepath.Join(dir, "profiles.json")
+	if home, err := os.UserHomeDir(); err == nil {
+		gentleTargets = append(gentleTargets,
+			filepath.Join(home, ".gentle-shell", "agent", "profiles.json"),
+			filepath.Join(home, ".pi", "gentle-ai", "profiles.json"),
+		)
+	}
+
+	for _, pPath := range gentleTargets {
+		dir := filepath.Dir(pPath)
 		if _, err := os.Stat(dir); err == nil {
 			payload := map[string]any{
 				"kind":    "gentle-pi.agent_model_profiles",
@@ -1026,6 +1202,7 @@ func syncDiskProfiles(jok3rProfiles, gentleProfiles map[string]any) {
 					}
 				}
 			}
+			break
 		}
 	}
 }
