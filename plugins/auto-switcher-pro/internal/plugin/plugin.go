@@ -192,6 +192,11 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 					"Path":        agentMatrixPingRoutePath,
 					"Description": "Ejecuta una prueba de fuego (dry-run ping) verificando latencia y salud de una ruta de modelo",
 				},
+				{
+					"Method":      http.MethodPost,
+					"Path":        agentMatrixHeartbeatRoutePath,
+					"Description": "Registra el latido / presencia de un arnés de orquestación (Gentle-AI o j0k3r-pi)",
+				},
 			},
 			"resources": []map[string]any{
 				{

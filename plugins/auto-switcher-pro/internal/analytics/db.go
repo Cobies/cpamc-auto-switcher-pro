@@ -149,6 +149,14 @@ func InitDB() (*sql.DB, error) {
 			PRIMARY KEY (universe, agent_id)
 		);
 		CREATE INDEX IF NOT EXISTS idx_agent_profiles_univ ON agent_profiles(universe);
+
+		CREATE TABLE IF NOT EXISTS harness_registry (
+			harness_id TEXT PRIMARY KEY,
+			harness_name TEXT NOT NULL,
+			detected_at_ms INTEGER NOT NULL,
+			last_seen_ms INTEGER NOT NULL,
+			metadata_json TEXT DEFAULT '{}'
+		);
 		`
 		if _, err := db.Exec(schema); err != nil {
 			initErr = fmt.Errorf("failed to init schema: %w", err)
@@ -634,6 +642,53 @@ type AgentProfileRecord struct {
 	ThinkingLevel string `json:"thinking_level"`// "low", "medium", "high"
 	Concurrency   int    `json:"concurrency"`   // 1 to 5
 	UpdatedAtMs   int64  `json:"updated_at_ms"`
+}
+
+// RegisterHarness records or updates a detected harness in the persistent registry.
+func RegisterHarness(harnessID, harnessName, metadataJSON string) error {
+	db, err := InitDB()
+	if err != nil || db == nil {
+		return fmt.Errorf("db unavailable: %w", err)
+	}
+	if harnessID == "" {
+		return fmt.Errorf("harness_id cannot be empty")
+	}
+	if harnessName == "" {
+		harnessName = harnessID
+	}
+	if metadataJSON == "" {
+		metadataJSON = "{}"
+	}
+	now := time.Now().UnixMilli()
+	_, err = db.Exec(`INSERT INTO harness_registry (harness_id, harness_name, detected_at_ms, last_seen_ms, metadata_json)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(harness_id) DO UPDATE SET
+			harness_name = excluded.harness_name,
+			last_seen_ms = excluded.last_seen_ms,
+			metadata_json = excluded.metadata_json`,
+		harnessID, harnessName, now, now, metadataJSON)
+	return err
+}
+
+// IsHarnessDetected checks whether a specific harness has been registered and is detected.
+func IsHarnessDetected(harnessID string) bool {
+	db, err := InitDB()
+	if err != nil || db == nil {
+		return false
+	}
+	var count int
+	err = db.QueryRow(`SELECT COUNT(*) FROM harness_registry WHERE harness_id = ?`, harnessID).Scan(&count)
+	return err == nil && count > 0
+}
+
+// UnregisterHarness removes a harness from the detected registry.
+func UnregisterHarness(harnessID string) error {
+	db, err := InitDB()
+	if err != nil || db == nil {
+		return fmt.Errorf("db unavailable: %w", err)
+	}
+	_, err = db.Exec(`DELETE FROM harness_registry WHERE harness_id = ?`, harnessID)
+	return err
 }
 
 // UpsertAgentProfile stores or updates an agent profile assignment.

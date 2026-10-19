@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	agentMatrixRoutePath     = "/auto-switcher-pro/agent-matrix"
-	agentMatrixPingRoutePath = "/auto-switcher-pro/agent-matrix/ping"
+	agentMatrixRoutePath          = "/auto-switcher-pro/agent-matrix"
+	agentMatrixPingRoutePath      = "/auto-switcher-pro/agent-matrix/ping"
+	agentMatrixHeartbeatRoutePath = "/auto-switcher-pro/agent-matrix/heartbeat"
 )
 
 var (
@@ -31,6 +32,10 @@ func isAgentMatrixPath(path string) bool {
 
 func isAgentMatrixPingPath(path string) bool {
 	return strings.Contains(path, agentMatrixPingRoutePath)
+}
+
+func isAgentMatrixHeartbeatPath(path string) bool {
+	return strings.Contains(path, agentMatrixHeartbeatRoutePath)
 }
 
 // AgentInfo represents an agent's unified metadata across Gentle-AI and jok3r-pi.
@@ -70,6 +75,7 @@ type AgentMatrixPayload struct {
 	OK               bool                      `json:"ok"`
 	GentleAgents     []AgentInfo               `json:"gentle_agents"`
 	Jok3rAgents      []AgentInfo               `json:"jok3r_agents"`
+	Jok3rDetected    bool                      `json:"jok3r_detected"`
 	AvailablePools   []string                  `json:"available_pools"`
 	PoolCapabilities map[string]bool           `json:"pool_capabilities"` // pool_id -> supports_thinking
 	PoolDetails      map[string]PoolDetailInfo `json:"pool_details"`      // pool_id -> physical reality & model
@@ -77,9 +83,62 @@ type AgentMatrixPayload struct {
 	Message          string                    `json:"message,omitempty"`
 }
 
+// isJok3rDetected evaluates dynamically whether j0k3r-pi is actively running or signaled.
+func isJok3rDetected() bool {
+	if os.Getenv("FORCE_JOK3R_DETECTED") == "true" {
+		return true
+	}
+	if os.Getenv("FORCE_JOK3R_DETECTED") == "false" {
+		return false
+	}
+
+	// 1. Check if harness was registered in SQLite WAL (via active heartbeat or CLI /agent:matrix)
+	if analytics.IsHarnessDetected("jok3r_pi") {
+		return true
+	}
+
+	// 2. Check for active marker file in plugins directory (created dynamically when jok3r-pi session starts)
+	candidates := []string{
+		"/CLIProxyAPI/plugins/.jok3r_detected",
+		"/dev/shm/.jok3r_detected",
+		"./plugins/.jok3r_detected",
+		"./.jok3r_detected",
+	}
+
+	home, err := os.UserHomeDir()
+	if err == nil {
+		candidates = append(candidates,
+			filepath.Join(home, "services", "cliproxy", "plugins", ".jok3r_detected"),
+			filepath.Join(home, ".pi", "agent-j0k3r", ".jok3r_detected"),
+		)
+	}
+
+	for _, p := range candidates {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return true
+		}
+	}
+
+	return false
+}
+
 func handleAgentMatrixHTTP(req ManagementRequestPayload) ([]byte, error) {
 	if isAgentMatrixPingPath(req.Path) {
 		return handleAgentMatrixPingHTTP(req)
+	}
+	if isAgentMatrixHeartbeatPath(req.Path) {
+		return handleAgentMatrixHeartbeatHTTP(req)
+	}
+
+	// Header-based opportunistic detection
+	for k, v := range req.Headers {
+		if strings.EqualFold(k, "X-Client-Harness") {
+			for _, val := range v {
+				if strings.Contains(strings.ToLower(val), "jok3r") {
+					_ = analytics.RegisterHarness("jok3r_pi", "j0k3r-pi", "header")
+				}
+			}
+		}
 	}
 
 	method := strings.ToUpper(strings.TrimSpace(req.Method))
@@ -95,6 +154,28 @@ func handleAgentMatrixHTTP(req ManagementRequestPayload) ([]byte, error) {
 			"message": "only GET, HEAD, and POST methods are supported",
 		})
 	}
+}
+
+func handleAgentMatrixHeartbeatHTTP(req ManagementRequestPayload) ([]byte, error) {
+	method := strings.ToUpper(strings.TrimSpace(req.Method))
+	if method != http.MethodPost {
+		return jsonManagementResponse(http.StatusMethodNotAllowed, map[string]string{
+			"error":   "method_not_allowed",
+			"message": "heartbeat requires POST",
+		})
+	}
+	var body struct {
+		Harness  string `json:"harness"`
+		Name     string `json:"name"`
+		Metadata string `json:"metadata"`
+	}
+	if err := json.Unmarshal(req.Body, &body); err == nil && body.Harness != "" {
+		_ = analytics.RegisterHarness(body.Harness, body.Name, body.Metadata)
+	}
+	return jsonManagementResponse(http.StatusOK, map[string]any{
+		"ok":      true,
+		"message": "heartbeat registered",
+	})
 }
 
 // PingRequest represents a test ping for a specific pool / route.
@@ -379,8 +460,14 @@ func getAgentMatrixResponse() ([]byte, error) {
 	// 2. Discover Gentle-AI Universe agents (Gentle-Shell & OpenCode) dynamically
 	gentleAgents := discoverUniverseAgents("gentle_ai", gentleMap)
 
-	// 3. Discover j0k3r-pi Universe agents dynamically
-	jok3rAgents := discoverUniverseAgents("jok3r_pi", jok3rMap)
+	// 3. Discover j0k3r-pi Universe agents dynamically (strictly conditional on dynamic detection)
+	jok3rDetected := isJok3rDetected()
+	var jok3rAgents []AgentInfo
+	if jok3rDetected {
+		jok3rAgents = discoverUniverseAgents("jok3r_pi", jok3rMap)
+	} else {
+		jok3rAgents = []AgentInfo{}
+	}
 
 	// 4. Discover Upstream / Unassigned direct models from baseline & host auth files
 	upstreamModels := discoverUpstreamModels(availablePools)
@@ -389,6 +476,7 @@ func getAgentMatrixResponse() ([]byte, error) {
 		OK:               true,
 		GentleAgents:     gentleAgents,
 		Jok3rAgents:      jok3rAgents,
+		Jok3rDetected:    jok3rDetected,
 		AvailablePools:   availablePools,
 		PoolCapabilities: poolCapabilities,
 		PoolDetails:      poolDetails,
@@ -455,6 +543,10 @@ func poolSupportsThinking(poolName string, def PoolDefinition) bool {
 
 // Discovers agents by combining known canonical agents and scanning disk Markdown definitions.
 func discoverUniverseAgents(universe string, savedMap map[string]analytics.AgentProfileRecord) []AgentInfo {
+	if universe == "jok3r_pi" && !isJok3rDetected() {
+		return []AgentInfo{}
+	}
+
 	home, _ := os.UserHomeDir()
 	var agentDirs []string
 

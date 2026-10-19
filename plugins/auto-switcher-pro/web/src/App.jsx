@@ -28,35 +28,84 @@ export default function App() {
   const resolveTabFromLocation = () => {
     if (typeof window === 'undefined' || !window.location) return 'home';
 
-    const hash = (window.location.hash || '').toLowerCase();
+    // 1. Prioridad: Inspección de pathname exacto del documento (esencial para iframe de CPAMC)
+    const pathname = (window.location.pathname || '').toLowerCase();
+    if (pathname.includes('agent-matrix') || pathname.includes('matriz')) {
+      return 'agent-matrix';
+    }
+    if (pathname.includes('audit-log') || pathname.includes('bitacora') || pathname.includes('caja-negra')) {
+      return 'audit-log';
+    }
+    if (pathname.includes('create-prefixes')) {
+      return 'create-prefixes';
+    }
+    if (pathname.includes('create-groups') || pathname.includes('groups')) {
+      return 'create-groups';
+    }
+    if (pathname.includes('auto-auth-files') || pathname.includes('auth-files')) {
+      return 'auto-auth-files';
+    }
+    if (pathname.includes('control-switcher')) {
+      return 'switcher';
+    }
+    if (pathname.includes('pulse-tokens') || pathname.includes('tokens')) {
+      return 'tokens';
+    }
+    if (pathname.includes('maintenance')) {
+      return 'maintenance';
+    }
+    if (pathname.includes('quick-guide') || pathname.includes('guide')) {
+      return 'quick-guide';
+    }
+    if (pathname.includes('profiles')) {
+      return 'profiles';
+    }
+
+    // 2. Hash del documento local o de la consola padre CPAMC (si está dentro del iframe)
+    let hash = (window.location.hash || '').toLowerCase();
+    try {
+      if ((!hash || hash === '#home') && window.parent && window.parent !== window && window.parent.location.hash) {
+        hash = window.parent.location.hash.toLowerCase();
+      }
+    } catch (_) {}
+
     // CPAMC Native Menus index mapping:
-    // CPAMC exposes pages as #/plugin-pages/<plugin-name>/<index>
-    // 0: /create-groups
-    // 1: /auto-auth-files
-    // 2: /control-switcher
-    // 3: /profiles
-    // 4: /pulse-tokens
+    // CPAMC expone páginas como #/plugin-pages/<plugin-name>/<index>
+    // En CPAMC los menús se ordenan alfabéticamente por path:
+    // 0: /agent-matrix
+    // 1: /audit-log
+    // 2: /auto-auth-files
+    // 3: /control-switcher
+    // 4: /create-groups
     // 5: /create-prefixes
     // 6: /maintenance
-    // 7: /quick-guide
+    // 7: /profiles
+    // 8: /pulse-tokens
+    // 9: /quick-guide
     const numIndexMatch = hash.match(/\/(\d+)(?:\b|\?|$)/);
     if (numIndexMatch) {
       const idx = parseInt(numIndexMatch[1], 10);
       switch (idx) {
-        case 0: return 'create-groups';
-        case 1: return 'auto-auth-files';
-        case 2: return 'switcher';
-        case 3: return 'profiles';
-        case 4: return 'tokens';
+        case 0: return 'agent-matrix';
+        case 1: return 'audit-log';
+        case 2: return 'auto-auth-files';
+        case 3: return 'switcher';
+        case 4: return 'create-groups';
         case 5: return 'create-prefixes';
         case 6: return 'maintenance';
-        case 7: return 'quick-guide';
-        case 8: return 'audit-log';
-        case 9: return 'agent-matrix';
+        case 7: return 'profiles';
+        case 8: return 'tokens';
+        case 9: return 'quick-guide';
         default: break;
       }
     }
 
+    if (hash.includes('tab-agent-matrix') || hash.includes('agent-matrix') || hash.includes('matriz')) {
+      return 'agent-matrix';
+    }
+    if (hash.includes('tab-audit-log') || hash.includes('audit-log') || hash.includes('bitacora') || hash.includes('caja-negra')) {
+      return 'audit-log';
+    }
     if (hash.includes('tab-home') || hash.includes('tab=home') || hash === '#home') {
       return 'home';
     }
@@ -81,46 +130,12 @@ export default function App() {
     if (hash.includes('tab-quick-guide') || hash.includes('quick-guide') || hash.includes('guide')) {
       return 'quick-guide';
     }
-    if (hash.includes('tab-audit-log') || hash.includes('audit-log') || hash.includes('bitacora') || hash.includes('caja-negra')) {
-      return 'audit-log';
-    }
-    if (hash.includes('tab-agent-matrix') || hash.includes('agent-matrix') || hash.includes('matriz')) {
-      return 'agent-matrix';
-    }
     if (hash.includes('tab-profiles')) {
       return 'profiles';
     }
 
-    const pathname = (window.location.pathname || '').toLowerCase();
     if (pathname.includes('home') || pathname.includes('center') || pathname.endsWith('/')) {
       return 'home';
-    }
-    if (pathname.includes('create-prefixes')) {
-      return 'create-prefixes';
-    }
-    if (pathname.includes('create-groups') || pathname.includes('groups')) {
-      return 'create-groups';
-    }
-    if (pathname.includes('auto-auth-files') || pathname.includes('auth-files')) {
-      return 'auto-auth-files';
-    }
-    if (pathname.includes('control-switcher')) {
-      return 'switcher';
-    }
-    if (pathname.includes('pulse-tokens') || pathname.includes('tokens')) {
-      return 'tokens';
-    }
-    if (pathname.includes('maintenance')) {
-      return 'maintenance';
-    }
-    if (pathname.includes('quick-guide') || pathname.includes('guide')) {
-      return 'quick-guide';
-    }
-    if (pathname.includes('audit-log')) {
-      return 'audit-log';
-    }
-    if (pathname.includes('profiles')) {
-      return 'profiles';
     }
     return 'home';
   };
@@ -160,7 +175,22 @@ export default function App() {
       setActiveTab(nextTab);
     };
     window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
+    let parentListening = false;
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.addEventListener('hashchange', handleHashChange);
+        parentListening = true;
+      }
+    } catch (_) {}
+
+    return () => {
+      window.removeEventListener('hashchange', handleHashChange);
+      if (parentListening) {
+        try {
+          window.parent.removeEventListener('hashchange', handleHashChange);
+        } catch (_) {}
+      }
+    };
   }, []);
 
   const loadProfiles = useCallback(async () => {
@@ -745,6 +775,8 @@ export default function App() {
                 ? '/quick-guide'
                 : activeTab === 'audit-log'
                 ? '/audit-log'
+                : activeTab === 'agent-matrix'
+                ? '/agent-matrix'
                 : '/profiles'}
             </span>
           </div>

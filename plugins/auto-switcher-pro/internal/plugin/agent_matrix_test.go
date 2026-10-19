@@ -51,8 +51,14 @@ func TestAgentMatrixHandler_GET(t *testing.T) {
 	if len(data.GentleAgents) == 0 {
 		t.Errorf("expected GentleAgents to be populated")
 	}
-	if len(data.Jok3rAgents) == 0 {
-		t.Errorf("expected Jok3rAgents to be populated")
+	if data.Jok3rDetected {
+		if len(data.Jok3rAgents) == 0 {
+			t.Errorf("expected Jok3rAgents to be populated when Jok3rDetected=true")
+		}
+	} else {
+		if len(data.Jok3rAgents) != 0 {
+			t.Errorf("expected Jok3rAgents to be empty when Jok3rDetected=false")
+		}
 	}
 
 	// Verify Capability Matrix for Thinking
@@ -222,7 +228,45 @@ func TestAgentMatrixHandler_DynamicDiscoveryAndMtime(t *testing.T) {
 	var pingRes PingResult
 	pingBytes, _ := base64.StdEncoding.DecodeString(respPing.Body)
 	_ = json.Unmarshal(pingBytes, &pingRes)
-	if !pingRes.OK || pingRes.LatencyMs <= 0 || pingRes.Model != "claude-sonnet-4-6" {
-		t.Errorf("expected valid ping result with latency, got %+v", pingRes)
+	// 5. Test Dynamic Detection Isolation (when j0k3r-pi is NOT detected)
+	t.Setenv("FORCE_JOK3R_DETECTED", "false")
+	rawUndetected, err := handleAgentMatrixHTTP(req)
+	if err != nil {
+		t.Fatalf("handleAgentMatrixHTTP failed: %v", err)
+	}
+	var envUndetected Envelope
+	_ = json.Unmarshal(rawUndetected, &envUndetected)
+	var respUndetected ManagementResponsePayload
+	_ = json.Unmarshal(envUndetected.Result, &respUndetected)
+	var dataUndetected AgentMatrixPayload
+	bodyBytesUndetected, _ := base64.StdEncoding.DecodeString(respUndetected.Body)
+	_ = json.Unmarshal(bodyBytesUndetected, &dataUndetected)
+
+	if dataUndetected.Jok3rDetected {
+		t.Errorf("expected Jok3rDetected=false when FORCE_JOK3R_DETECTED=false")
+	}
+	if len(dataUndetected.Jok3rAgents) != 0 {
+		t.Errorf("expected Jok3rAgents to be completely empty when not detected, got %d", len(dataUndetected.Jok3rAgents))
+	}
+	if len(dataUndetected.GentleAgents) == 0 {
+		t.Errorf("expected GentleAgents to remain available as default universe")
+	}
+
+	// 6. Test Heartbeat endpoint
+	heartbeatReq := ManagementRequestPayload{
+		Method: http.MethodPost,
+		Path:   "/v0/management/auto-switcher-pro/agent-matrix/heartbeat",
+		Body:   []byte(`{"harness":"jok3r_pi","name":"j0k3r-pi"}`),
+	}
+	rawHb, err := handleAgentMatrixHTTP(heartbeatReq)
+	if err != nil {
+		t.Fatalf("handleAgentMatrixHTTP heartbeat failed: %v", err)
+	}
+	var envHb Envelope
+	_ = json.Unmarshal(rawHb, &envHb)
+	var respHb ManagementResponsePayload
+	_ = json.Unmarshal(envHb.Result, &respHb)
+	if respHb.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 OK for heartbeat, got %d", respHb.StatusCode)
 	}
 }

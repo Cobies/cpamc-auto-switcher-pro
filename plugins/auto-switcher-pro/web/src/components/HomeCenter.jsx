@@ -93,6 +93,20 @@ export default function HomeCenter({ onNavigateTab, onOpenLicenseModal }) {
       desc: 'Manual integrado con reglas recomendadas de balanceo, convenciones de prefijos y solución de dudas.',
       badge: 'Manual',
     },
+    {
+      id: 'audit-log',
+      icon: '📜',
+      title: 'Bitácora & Caja Negra',
+      desc: 'Historial forense de rotaciones, rescates 429 e incidentes en disco (SQLite WAL).',
+      badge: 'Forense',
+    },
+    {
+      id: 'agent-matrix',
+      icon: '🎛️',
+      title: 'Matriz de Agentes & Orquestación',
+      desc: 'Control unificado de orquestadores y subagentes para Gentle-AI (OpenCode) y j0k3r-pi.',
+      badge: 'Orquestación',
+    },
   ];
 
   return (

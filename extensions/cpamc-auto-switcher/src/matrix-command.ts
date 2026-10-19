@@ -22,7 +22,9 @@ export function registerAgentMatrixCommand(pi: ExtensionAPI): void {
 			}
 
 			try {
-				const headers: Record<string, string> = {};
+				const headers: Record<string, string> = {
+					"X-Client-Harness": "jok3r_pi",
+				};
 				const token = getManagementToken();
 				if (token) {
 					headers["Authorization"] = `Bearer ${token}`;

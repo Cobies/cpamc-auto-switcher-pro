@@ -14,6 +14,7 @@ export default function AgentMatrix() {
 
   const [gentleAgents, setGentleAgents] = useState([]);
   const [jok3rAgents, setJok3rAgents] = useState([]);
+  const [jok3rDetected, setJok3rDetected] = useState(false);
   const [availablePools, setAvailablePools] = useState([]);
   const [poolCapabilities, setPoolCapabilities] = useState({});
   const [poolDetails, setPoolDetails] = useState({});
@@ -36,11 +37,17 @@ export default function AgentMatrix() {
       const data = await fetchAgentMatrix();
       if (data?.ok) {
         setGentleAgents(data.gentle_agents || []);
-        setJok3rAgents(data.jok3r_agents || []);
+        const detected = Boolean(data.jok3r_detected && data.jok3r_agents && data.jok3r_agents.length > 0);
+        setJok3rDetected(detected);
+        setJok3rAgents(detected ? (data.jok3r_agents || []) : []);
         setAvailablePools(data.available_pools || []);
         setPoolCapabilities(data.pool_capabilities || {});
         setPoolDetails(data.pool_details || {});
         setUpstreamModels(data.upstream_models || []);
+
+        if (!detected) {
+          setActiveUniverse('gentle_ai');
+        }
       }
     } catch (err) {
       setFeedback({ text: `Error al cargar matriz: ${err.message}`, type: 'error' });
@@ -443,33 +450,53 @@ export default function AgentMatrix() {
         </div>
       </div>
 
-      {/* Universe Segmented Filter with Persistent Storage */}
-      <div className="matrix-tabs">
-        <button
-          type="button"
-          className={`matrix-tab-btn ${activeUniverse === 'all' ? 'active' : ''}`}
-          onClick={() => handleUniverseChange('all')}
-        >
-          <span>🌐</span>
-          <span>Vista Global Completa</span>
-        </button>
-        <button
-          type="button"
-          className={`matrix-tab-btn ${activeUniverse === 'gentle_ai' ? 'active' : ''}`}
-          onClick={() => handleUniverseChange('gentle_ai')}
-        >
-          <span>🅰️</span>
-          <span>Gentle-AI (OpenCode / Shell)</span>
-        </button>
-        <button
-          type="button"
-          className={`matrix-tab-btn ${activeUniverse === 'jok3r_pi' ? 'active' : ''}`}
-          onClick={() => handleUniverseChange('jok3r_pi')}
-        >
-          <span>🅱️</span>
-          <span>j0k3r-pi</span>
-        </button>
-      </div>
+      {/* Universe Segmented Filter with Persistent Storage (Solo si j0k3r-pi está detectado) */}
+      {jok3rDetected ? (
+        <div className="matrix-tabs">
+          <button
+            type="button"
+            className={`matrix-tab-btn ${activeUniverse === 'all' ? 'active' : ''}`}
+            onClick={() => handleUniverseChange('all')}
+          >
+            <span>🌐</span>
+            <span>Vista Global Completa</span>
+          </button>
+          <button
+            type="button"
+            className={`matrix-tab-btn ${activeUniverse === 'gentle_ai' ? 'active' : ''}`}
+            onClick={() => handleUniverseChange('gentle_ai')}
+          >
+            <span>🅰️</span>
+            <span>Gentle-AI (OpenCode / Shell)</span>
+          </button>
+          <button
+            type="button"
+            className={`matrix-tab-btn ${activeUniverse === 'jok3r_pi' ? 'active' : ''}`}
+            onClick={() => handleUniverseChange('jok3r_pi')}
+          >
+            <span>🅱️</span>
+            <span>j0k3r-pi</span>
+          </button>
+        </div>
+      ) : (
+        <div className="matrix-tabs" style={{ background: 'transparent', border: 'none', padding: 0 }}>
+          <div className="matrix-single-universe-badge" style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '6px 14px',
+            background: 'rgba(56, 189, 248, 0.1)',
+            border: '1px solid rgba(56, 189, 248, 0.25)',
+            borderRadius: '8px',
+            fontSize: '12px',
+            color: '#7dd3fc',
+            fontWeight: 600,
+          }}>
+            <span>💻 OpenCode Editor + 📟 Gentle-Shell CLI</span>
+            <span style={{ fontSize: '11px', color: '#94a3b8' }}>• (Universo Activo: Gentle-AI)</span>
+          </div>
+        </div>
+      )}
 
       {/* Universe A: Gentle-AI */}
       {(activeUniverse === 'all' || activeUniverse === 'gentle_ai') && (
@@ -499,8 +526,8 @@ export default function AgentMatrix() {
         </div>
       )}
 
-      {/* Universe B: j0k3r-pi */}
-      {(activeUniverse === 'all' || activeUniverse === 'jok3r_pi') && (
+      {/* Universe B: j0k3r-pi (Solo si está detectado dinámicamente) */}
+      {jok3rDetected && (activeUniverse === 'all' || activeUniverse === 'jok3r_pi') && (
         <div className="universe-section">
           <div className="universe-header">
             <div>
