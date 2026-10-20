@@ -473,6 +473,7 @@ async function fetchAccountPrefixesAndExclusions(baseUrl: string, signal?: Abort
     activeBareProviders: Set<string>;
     bareExclusions: Set<string>;
     registeredPoolBases: Set<string>;
+    confirmedActivePools: Set<string>;
 } | null> {
     const mgmtKey = resolveManagementKey();
     if (!mgmtKey) return null;
@@ -564,6 +565,7 @@ async function fetchAccountPrefixesAndExclusions(baseUrl: string, signal?: Abort
         const poolAssignedPrefixes = new Set<string>();
         const poolMemberFiles = new Set<string>();
         const registeredPoolBases = new Set<string>();
+        const confirmedActivePools = new Set<string>();
 
         const poolsRes = await fetch(`${baseUrl}/v0/management/auto-switcher-pro/pools`, {
             headers: {
@@ -575,8 +577,12 @@ async function fetchAccountPrefixesAndExclusions(baseUrl: string, signal?: Abort
         if (poolsRes.ok) {
             const poolsData = (await poolsRes.json()) as {
                 pools?: Array<{
+                    id?: string;
+                    name?: string;
+                    display_name?: string;
                     base_prefix?: string;
                     family?: string;
+                    enabled?: boolean;
                     leader_auth?: string;
                     reserves?: string[];
                     members?: string[];
@@ -589,6 +595,13 @@ async function fetchAccountPrefixesAndExclusions(baseUrl: string, signal?: Abort
             for (const pool of pools) {
                 const basePref = typeof pool.base_prefix === "string" ? pool.base_prefix.trim() : "";
                 if (!basePref) continue;
+
+                if (pool.enabled !== false) {
+                    const poolIdentifier = (pool.display_name || pool.id || pool.name || "").trim();
+                    if (poolIdentifier) {
+                        confirmedActivePools.add(poolIdentifier);
+                    }
+                }
 
                 registeredPoolBases.add(basePref.toLowerCase());
                 // Marcar el prefijo base del pool como asignado a un pool activo
@@ -656,6 +669,7 @@ async function fetchAccountPrefixesAndExclusions(baseUrl: string, signal?: Abort
             activeBareProviders,
             bareExclusions,
             registeredPoolBases,
+            confirmedActivePools,
         };
         cachedFilterData = result;
         lastKnownEpoch = currentEpoch || readCurrentSignalEpoch();
@@ -837,9 +851,11 @@ export async function fetchCLIProxyModels(signal?: AbortSignal) {
                     filterData ? [...filterData.validPrefixes] : included.map((m) => prefixOf(typeof m.slug === "string" ? m.slug : (m.id ?? ""))),
                     filterData?.registeredPoolBases
                 );
-                return included
+                const mappedModels = included
                     .map((m) => toPiModelFromCPA(m, poolLabels))
                     .filter((model): model is NonNullable<ReturnType<typeof toPiModelFromCPA>> => Boolean(model));
+
+                return reconcileActivePoolFacades(mappedModels, filterData?.confirmedActivePools);
             }
         }
     } catch {
@@ -866,9 +882,47 @@ export async function fetchCLIProxyModels(signal?: AbortSignal) {
         filterData ? [...filterData.validPrefixes] : includedFallback.map((m) => prefixOf(typeof m.id === "string" ? m.id : "")),
         filterData?.registeredPoolBases
     );
-    return includedFallback
+    const mappedFallback = includedFallback
         .map((m) => toPiModelFromOpenAI(m, poolLabelsFallback))
         .filter((model): model is NonNullable<ReturnType<typeof toPiModelFromOpenAI>> => Boolean(model));
+
+    return reconcileActivePoolFacades(mappedFallback, filterData?.confirmedActivePools);
+}
+
+/**
+ * Reconciliación resiliente de fachadas de pools confirmados:
+ * Si el servidor CPAMC por cualquier motivo (caché estática del host, falta de reinicio tras crear pools)
+ * no expone en /v1/models algún pool activo que sí confirmó el plugin en /auto-switcher-pro/pools,
+ * inyecta la fachada limpia (Pool-XX-<familia>) para garantizar disponibilidad inmediata en /model.
+ */
+export function reconcileActivePoolFacades<T extends { id: string }>(
+    models: T[],
+    confirmedActivePools?: Set<string>,
+): T[] {
+    if (!confirmedActivePools || confirmedActivePools.size === 0) {
+        return models;
+    }
+    const seenIds = new Set(models.map((m) => m.id.toLowerCase()));
+    const result = [...models];
+
+    for (const poolId of confirmedActivePools) {
+        if (!seenIds.has(poolId.toLowerCase())) {
+            seenIds.add(poolId.toLowerCase());
+            const synthetic = toPiModelFromCPA({
+                id: poolId,
+                slug: poolId,
+                object: "model",
+                owned_by: "antigravity",
+                display_name: poolId,
+            } as CPAModel);
+            if (synthetic) {
+                result.push(synthetic as unknown as T);
+            }
+        }
+    }
+
+    result.sort((a, b) => a.id.localeCompare(b.id));
+    return result;
 }
 
 export function initDynamicProvider(pi: ExtensionAPI): void {

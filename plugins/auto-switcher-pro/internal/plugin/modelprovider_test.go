@@ -13,6 +13,7 @@ import (
 
 func testModelProviderRegistry(t *testing.T) *PoolRegistry {
 	t.Helper()
+	GetPredictiveEngine().ResetForTest()
 	r := NewPoolRegistry(t.TempDir() + "/state.json")
 	_ = r.SavePool(PoolDefinition{
 		ID:         "pool-agy-1",

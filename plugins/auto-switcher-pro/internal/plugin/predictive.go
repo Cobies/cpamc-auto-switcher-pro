@@ -430,3 +430,13 @@ func (pe *PredictiveEngine) GetCacheTTLSeconds(accountEmail string) (remainingSe
 	return rem, rem > 0
 }
 
+// ResetForTest clears in-memory state for clean unit test isolation.
+func (pe *PredictiveEngine) ResetForTest() {
+	pe.mu.Lock()
+	defer pe.mu.Unlock()
+	pe.activity = make(map[string][]RequestRecord)
+	pe.cooling = make(map[string]time.Time)
+	pe.quotas = make(map[string]AccountQuotaTelemetry)
+	pe.lastActivity = make(map[string]time.Time)
+}
+

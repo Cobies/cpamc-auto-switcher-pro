@@ -28,7 +28,7 @@ export async function resolve(specifier, context, nextResolve) {
 
 register("data:text/javascript," + encodeURIComponent(loaderCode));
 
-const { isCleanIncludedModel, buildPoolLabelMap } = await import("./provider.js");
+const { isCleanIncludedModel, buildPoolLabelMap, reconcileActivePoolFacades } = await import("./provider.js");
 
 describe("Dynamic Provider Filtering & Granular Coexistence", () => {
     const mockFilterData = {
@@ -136,5 +136,19 @@ describe("Dynamic Provider Filtering & Granular Coexistence", () => {
         assert.equal(isCleanIncludedModel("agy_2/gemini-3.8-flash-high", allAdoptedFilterData), false);
         // Los modelos planos desaparecen de /model porque no hay cuentas libres
         assert.equal(isCleanIncludedModel("gemini-3.8-flash-high", allAdoptedFilterData), false);
+    });
+
+    it("reconciles missing pool facades when CPAMC host has not restarted", () => {
+        const rawServerModels = [
+            { id: "gemini-3.8-flash-high" },
+        ];
+        const confirmedPools = new Set(["Pool-01-gemini", "Pool-02-gemini"]);
+        const reconciled = reconcileActivePoolFacades(rawServerModels, confirmedPools);
+
+        const ids = reconciled.map((m) => m.id);
+        assert.ok(ids.includes("Pool-01-gemini"));
+        assert.ok(ids.includes("Pool-02-gemini"));
+        assert.ok(ids.includes("gemini-3.8-flash-high"));
+        assert.equal(reconciled.length, 3);
     });
 });

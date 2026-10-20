@@ -27,13 +27,35 @@ const (
 	defaultAuthDir = "/root/.cli-proxy-api"
 )
 
-// resolveAuthDir locates the native CPAMC credentials directory.
+// resolveAuthDir locates the native CPAMC credentials directory agnostically across platforms (Docker, Linux, Windows, macOS).
 func resolveAuthDir() string {
 	if env := os.Getenv("AUTO_SWITCHER_AUTH_DIR"); env != "" {
 		return env
 	}
 	if env := os.Getenv("CLI_PROXY_AUTH_DIR"); env != "" {
 		return env
+	}
+
+	// 1. Check container directory if running inside official Linux Docker
+	if fi, err := os.Stat(defaultAuthDir); err == nil && fi.IsDir() {
+		return defaultAuthDir
+	}
+
+	// 2. Multiplatform host fallback: inspect user home ~/.cli-proxy-api (Windows, Linux, macOS)
+	if uHome, err := os.UserHomeDir(); err == nil && uHome != "" {
+		hostCandidate := filepath.Join(uHome, ".cli-proxy-api")
+		if fi, err := os.Stat(hostCandidate); err == nil && fi.IsDir() {
+			return hostCandidate
+		}
+	}
+
+	// 3. Check relative to working directory
+	if fi, err := os.Stat(".cli-proxy-api"); err == nil && fi.IsDir() {
+		return ".cli-proxy-api"
+	}
+
+	if uHome, err := os.UserHomeDir(); err == nil && uHome != "" {
+		return filepath.Join(uHome, ".cli-proxy-api")
 	}
 	return defaultAuthDir
 }
@@ -260,7 +282,7 @@ var (
 	defaultRegistryOnce     sync.Once
 )
 
-// resolveStateFilePath determines the optimal persistent location for the state file.
+// resolveStateFilePath determines the optimal persistent location for the state file agnostically.
 func resolveStateFilePath(customPath string) string {
 	if customPath != "" {
 		return customPath
@@ -269,13 +291,29 @@ func resolveStateFilePath(customPath string) string {
 		return envPath
 	}
 
-	// Prefer the container plugins bind-mount if the directory exists and is writable
+	// 1. Prefer container plugins bind-mount if running in official Docker container
 	pluginsDir := "/CLIProxyAPI/plugins"
 	if fi, err := os.Stat(pluginsDir); err == nil && fi.IsDir() {
 		return defaultStatePath
 	}
 
-	// Local host fallback
+	// 2. Check local plugins/ directory (Windows native, local host installations)
+	for _, candidate := range []string{
+		filepath.Join("plugins", "auto-switcher-pro-state.json"),
+		filepath.Join("..", "plugins", "auto-switcher-pro-state.json"),
+		"auto-switcher-pro-state.json",
+	} {
+		if fi, err := os.Stat(candidate); err == nil && !fi.IsDir() {
+			return candidate
+		}
+	}
+
+	// 3. If plugins directory exists in current working directory, store state there
+	if fi, err := os.Stat("plugins"); err == nil && fi.IsDir() {
+		return filepath.Join("plugins", "auto-switcher-pro-state.json")
+	}
+
+	// 4. Local host fallback
 	return filepath.Join(fallbackStateDir, "auto-switcher-pro-state.json")
 }
 

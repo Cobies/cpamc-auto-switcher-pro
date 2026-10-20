@@ -531,6 +531,14 @@ func routeDecisionFor(registry *PoolRegistry, requestedModel string) modelRouteR
 		return modelRouteResponse{}
 	}
 
+	// Clean any provider namespace prefix (e.g. "cpamc/Pool-01-gemini", "cliproxy/...")
+	for _, ns := range []string{"cpamc/", "cliproxy/", "cliproxyapi/"} {
+		if strings.HasPrefix(strings.ToLower(trimmed), ns) {
+			trimmed = strings.TrimSpace(trimmed[len(ns):])
+			break
+		}
+	}
+
 	// 0. Deprecated model auto-fallback interceptor:
 	// If the requested model is a known retired or fuzzy-matched deprecated model (e.g. gemini-3.7-flash-high),
 	// route it directly to the active model to prevent upstream 404 and cascading cooldowns.
