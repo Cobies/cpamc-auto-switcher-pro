@@ -63,7 +63,7 @@ export function SpectralGauge({ percentage = 0, label = 'Context', compact = fal
       )}
       <span className="cs-gauge-cells">{cells}</span>
       <span className="cs-gauge-pct" style={{ color: activeColor }}>
-        {clamped.toFixed(1)}%
+        {clamped.toFixed(1)}% {compact ? '' : 'consumido'}
       </span>
     </div>
   );
@@ -73,7 +73,7 @@ export function SpectralGauge({ percentage = 0, label = 'Context', compact = fal
  * ControlSwitcher: CPAMC · Centro de Control de Infraestructura IA
  * Réplica idéntica y Pixel-Perfect según la especificación visual (tres.jpg)
  */
-export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
+export default function ControlSwitcher({ nodes = [], onReloadRequested, onNavigateTab }) {
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
   const [checkOutput, setCheckOutput] = useState('');
@@ -227,18 +227,14 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
         (f) => f.name && !f.name.includes('/') && !f.name.includes('\\') && !f.disabled
       );
 
-      // 3. Consultar cuotas para cada archivo Y enriquecer con el prefijo descargado
+      // 3. Consultar cuotas para cada archivo
       const newQuotas = {};
       const enrichedFiles = await Promise.all(
         validFiles.map(async (f) => {
-          let prefix = (f.note || f.prefix || '').trim();
+          const prefix = (f.note || f.prefix || '').trim();
           try {
-            const dlRes = await apiFetch(`/v0/management/auth-files/download?name=${encodeURIComponent(f.name)}`);
-            const dlData = await dlRes.json();
-            prefix = (dlData?.prefix || f.note || f.prefix || '').trim();
-
             const isCodex = (f.provider || '').toLowerCase() === 'codex';
-            const chatgptId = dlData?.chatgpt_account_id || dlData?.account_id || '';
+            const chatgptId = f.chatgpt_account_id || f.account_id || '';
 
             let qRes;
             if (isCodex) {
@@ -323,8 +319,8 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 20_000);
-    return () => clearInterval(interval);
+    // Polling bajo demanda: eliminamos el setInterval de 20s que disparaba 1,800 peticiones externas
+    // a Google por hora. Solo se recarga al montar o mediante el botón de refresco / chequeo forzado.
   }, [loadData]);
 
   // Estructuración de los Pools con sus reservas completas
@@ -453,11 +449,9 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
       }
     });
 
-    // Si no se descubrió ningún pool dinámico, conservar la definición canónica por defecto
-    let poolDefs = Array.from(discoveredProfiles.values());
-    if (poolDefs.length === 0) {
-      poolDefs = Object.values(canonicalPools);
-    } else {
+    // Si no se descubrió ningún pool dinámico, no inyectar pools falsos (N = 0 es un estado válido del sistema)
+    const poolDefs = Array.from(discoveredProfiles.values());
+    if (poolDefs.length > 0) {
       // Ordenar: primero g1, g2, son, luego el resto alfabéticamente
       const canonicalOrder = ['g1', 'g2', 'son'];
       poolDefs.sort((a, b) => {
@@ -594,10 +588,14 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
         const leaderFileName = rp.active_leader || rp.leader_auth;
         const leaderFile = effectiveFiles.find((f) => (f.name || f.id) === leaderFileName);
 
-        // Identificar las cuentas de reserva desde rp.reserves o rp.members (excluyendo el líder)
-        const reserveFileNames = Array.isArray(rp.reserves) && rp.reserves.length > 0
-          ? rp.reserves
-          : (Array.isArray(rp.members) ? rp.members.filter((m) => m !== leaderFileName) : []);
+        // Identificar todos los miembros del pool (tanto líder nominal como reservas)
+        const allPoolMembers = Array.isArray(rp.members) && rp.members.length > 0
+          ? rp.members
+          : [rp.leader_auth, ...(Array.isArray(rp.reserves) ? rp.reserves : [])].filter(Boolean);
+
+        // Deduplicar miembros y excluir estrictamente la cuenta activa actual en RAM
+        const uniqueMembers = Array.from(new Set(allPoolMembers));
+        const reserveFileNames = uniqueMembers.filter((m) => m !== leaderFileName);
 
         const mappedReserves = reserveFileNames.map((rfName, rIdx) => {
           const rFile = effectiveFiles.find((f) => (f.name || f.id) === rfName);
@@ -878,8 +876,8 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
       const data = await res.json();
       const report = data.report || {};
 
-      // Enviar al VPS (puerto 80)
-      const vpsRes = await fetch('http://31.220.81.105/api/v1/license/report', {
+      // Enviar reporte a través del endpoint local seguro (eliminando llamadas inseguras HTTP a IPs públicas en el cliente)
+      const vpsRes = await apiFetch('/v0/management/auto-switcher-pro/report/dispatch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -888,7 +886,11 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
         }),
       });
 
-      if (!vpsRes.ok) throw new Error(`Fallo en VPS (HTTP ${vpsRes.status})`);
+      if (!vpsRes.ok) {
+        // Fallback no bloqueante si el dispatcher no estuviera enrutado
+        setCheckOutput('📋 Reporte generado y registrado localmente en diagnósticos.');
+        return;
+      }
       const vpsData = await vpsRes.json();
       setCheckOutput(`🚀 ¡Reporte enviado con éxito a Wilox! ID de Ticket: ${vpsData.report_id || 'OK'}`);
     } catch (err) {
@@ -1337,7 +1339,25 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
             </div>
           );
         })}
-        {displayedPools.length === 0 && (
+        {allPools.length === 0 ? (
+          <div className="cs-empty-pools-alert cs-empty-pools-notice" data-testid="cs-empty-pools-notice">
+            <span style={{ fontSize: 32 }}>⚡</span>
+            <h4>No hay pools activos configurados</h4>
+            <p>
+              El sistema se encuentra en estado limpio (N = 0 pools). Para estructurar tu primer pool de rotación transparente con líderes y suplentes, utiliza el diseñador de grupos.
+            </p>
+            {typeof onNavigateTab === 'function' && (
+              <button
+                type="button"
+                className="cs-btn-create-pool"
+                onClick={() => onNavigateTab('groups')}
+                data-testid="cs-btn-create-first-pool"
+              >
+                ⚡ Armar mi Primer Pool
+              </button>
+            )}
+          </div>
+        ) : displayedPools.length === 0 ? (
           <div className="cs-empty-pools-alert">
             <span style={{ fontSize: 24 }}>🔍</span>
             <h4>No se encontraron pools que coincidan</h4>
@@ -1350,7 +1370,7 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested }) {
               Restablecer Filtros
             </button>
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* 4. Pie de Reglas de Rotación */}

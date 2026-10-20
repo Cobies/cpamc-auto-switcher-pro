@@ -442,7 +442,7 @@ export default function App() {
               data-testid="tab-create-groups"
             >
               <span>🛠️</span>
-              <span>Crear Group/Pefiles</span>
+              <span>Crear Group/Perfiles</span>
             </button>
 
             {/* 2. Auto Auth Files */}
@@ -834,7 +834,7 @@ export default function App() {
 
         {activeTab === 'switcher' && (
           <div style={{ width: '100%', height: '100%', overflowY: 'auto' }}>
-            <ControlSwitcher nodes={graphData.nodes} onReloadRequested={loadProfiles} />
+            <ControlSwitcher nodes={graphData.nodes} onReloadRequested={loadProfiles} onNavigateTab={setActiveTab} />
           </div>
         )}
 

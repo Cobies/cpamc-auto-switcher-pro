@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { readFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { resolveCpamcBaseUrl } from "./provider.js";
 
 function getManagementToken(): string {
 	try {
@@ -30,7 +31,7 @@ export function registerAgentMatrixCommand(pi: ExtensionAPI): void {
 					headers["Authorization"] = `Bearer ${token}`;
 				}
 
-				const res = await fetch("http://localhost:8317/v0/management/auto-switcher-pro/agent-matrix", {
+				const res = await fetch(`${resolveCpamcBaseUrl()}/v0/management/auto-switcher-pro/agent-matrix`, {
 					headers,
 					signal: AbortSignal.timeout(4000),
 				});
@@ -71,8 +72,9 @@ export function registerAgentMatrixCommand(pi: ExtensionAPI): void {
 				output += "\n\x1b[90m" + "─".repeat(78) + "\x1b[0m\n";
 				output += "\x1b[36m💡 Edición gráfica disponible en CPAMC Web Console -> [ 🎛️ Matriz de Agentes ]\x1b[0m\n";
 
-				if (ctx.hasUI && ctx.ui.terminal) {
-					ctx.ui.terminal.write?.(output);
+				const uiAny = ctx.hasUI ? (ctx.ui as any) : null;
+				if (uiAny?.terminal) {
+					uiAny.terminal.write?.(output);
 				} else {
 					console.log(output);
 				}

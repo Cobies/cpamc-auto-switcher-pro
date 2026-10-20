@@ -425,4 +425,31 @@ describe('ControlSwitcher Component - TDD Contract & Reserves List', () => {
     expect(screen.getByText('Claude Opus (agy_opus)')).toBeTruthy();
     expect(screen.getByText(/claude-opus-4-6-thinking|claude-opus-5-5-high/i)).toBeTruthy();
   });
+
+  it('renders dedicated empty-pools-notice when no registered or discovered pools exist (N = 0) and does not render placeholder cards', async () => {
+    vi.spyOn(managementClient, 'apiFetch').mockImplementation(() =>
+      Promise.resolve({ ok: true, json: async () => ({ files: [] }) })
+    );
+
+    const onNavigateTab = vi.fn();
+    const { fireEvent } = await import('@testing-library/react');
+    render(<ControlSwitcher nodes={[]} onNavigateTab={onNavigateTab} />);
+
+    // 1. Debe renderizar el contenedor de estado vacio dedicado
+    const emptyNotice = await screen.findByTestId('cs-empty-pools-notice');
+    expect(emptyNotice).toBeTruthy();
+    expect(screen.getByText('No hay pools activos configurados')).toBeTruthy();
+
+    // 2. NO debe renderizar tarjetas estaticas placeholder
+    expect(screen.queryByText('Gemini 1 (Subagentes & Velocidad)')).toBeNull();
+    expect(screen.queryByText('Gemini 2 (Chat & Interactivo)')).toBeNull();
+    expect(screen.queryByText('Claude Sonnet (agy_son)')).toBeNull();
+    expect(screen.queryByText('Sin cuenta activa')).toBeNull();
+
+    // 3. El boton de accion rapida debe invocar la navegacion al tab de creacion de grupos
+    const ctaBtn = screen.getByTestId('cs-btn-create-first-pool');
+    expect(ctaBtn).toBeTruthy();
+    fireEvent.click(ctaBtn);
+    expect(onNavigateTab).toHaveBeenCalledWith('groups');
+  });
 });

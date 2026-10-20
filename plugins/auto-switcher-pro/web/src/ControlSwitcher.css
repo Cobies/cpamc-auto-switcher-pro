@@ -424,6 +424,29 @@
   cursor: pointer;
 }
 
+.cs-btn-create-pool {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 20px;
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(168, 85, 247, 0.25));
+  border: 1px solid #38bdf8;
+  color: #f0f9ff;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-top: 8px;
+}
+
+.cs-btn-create-pool:hover {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.35), rgba(168, 85, 247, 0.4));
+  border-color: #a855f7;
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.3);
+  transform: translateY(-1px);
+}
+
 /* 3. POOLS GRID */
 .cs-pools-grid {
   display: grid;
