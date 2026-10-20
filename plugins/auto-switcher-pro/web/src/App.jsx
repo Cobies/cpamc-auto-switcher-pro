@@ -20,6 +20,7 @@ import {
   scanSystemHealth,
   updateManagementConsole,
   listPools,
+  sortPoolsByNumber,
 } from './api/managementClient';
 import './App.css';
 import './ControlSwitcher.css';
@@ -235,7 +236,7 @@ export default function App() {
         loadAuthFilesWithPrefixes({ key }),
         listPools().catch(() => ({ pools: [] })),
       ]);
-      const registeredPools = Array.isArray(poolsRes?.pools) ? poolsRes.pools : [];
+      const registeredPools = sortPoolsByNumber(Array.isArray(poolsRes?.pools) ? poolsRes.pools : []);
       const { nodes, edges } = buildGraphFromAuthFiles(authFiles, { registeredPools });
       setGraphData({ nodes, edges });
       setDatasetVersion((v) => v + 1);

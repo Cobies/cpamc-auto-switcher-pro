@@ -547,3 +547,49 @@ func TestPoolRegistry_ReleaseMemberAndSanitizeModels(t *testing.T) {
 	}
 }
 
+func TestPoolRegistry_DeterministicOrder(t *testing.T) {
+	stateFile := filepath.Join(t.TempDir(), "ordered_pools.json")
+	reg := NewPoolRegistry(stateFile)
+
+	// Save pools in disordered sequence
+	disordered := []PoolDefinition{
+		{ID: "Pool-04-claude", BasePrefix: "agy_clau", Family: "claude", LeaderAuth: "clau-leader.json"},
+		{ID: "Pool-02-gemini", BasePrefix: "agy2", Family: "gemini_pure", LeaderAuth: "gemini2-leader.json"},
+		{ID: "Pool-01-gemini", BasePrefix: "agy", Family: "gemini_pure", LeaderAuth: "gemini1-leader.json"},
+		{ID: "Pool-03-codex", BasePrefix: "codex", Family: "codex", LeaderAuth: "codex-leader.json"},
+	}
+
+	for _, p := range disordered {
+		if err := reg.SavePool(p); err != nil {
+			t.Fatalf("SavePool failed: %v", err)
+		}
+	}
+
+	// 1. Verify ListPools() returns deterministic numerical order across multiple calls
+	expectedIDs := []string{"Pool-01-gemini", "Pool-02-gemini", "Pool-03-codex", "Pool-04-claude"}
+	for run := 0; run < 10; run++ {
+		pools := reg.ListPools()
+		if len(pools) != 4 {
+			t.Fatalf("expected 4 pools, got %d", len(pools))
+		}
+		for i, expected := range expectedIDs {
+			if pools[i].ID != expected {
+				t.Fatalf("run %d index %d: expected pool ID %s, got %s", run, i, expected, pools[i].ID)
+			}
+		}
+	}
+
+	// 2. Verify state file on disk is also written in deterministic order
+	reloaded := NewPoolRegistry(stateFile)
+	if err := reloaded.Load(); err != nil {
+		t.Fatalf("failed to reload state file: %v", err)
+	}
+	reloadedPools := reloaded.ListPools()
+	for i, expected := range expectedIDs {
+		if reloadedPools[i].ID != expected {
+			t.Fatalf("disk reload index %d: expected %s, got %s", i, expected, reloadedPools[i].ID)
+		}
+	}
+}
+
+

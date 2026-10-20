@@ -1357,4 +1357,68 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
       );
     });
   });
+
+  it('renders pools in deterministic numerical order (Pool-01, Pool-02, Pool-04) in Dissolve tab regardless of backend map order', async () => {
+    const disorderedPools = [
+      {
+        id: 'Pool-04-claude',
+        display_name: 'Pool-04-claude',
+        base_prefix: 'agy_clau',
+        family: 'gemini_claude',
+        leader_auth: 'clau-leader.json',
+        reserves: ['clau-res.json'],
+        members: ['clau-leader.json', 'clau-res.json'],
+      },
+      {
+        id: 'Pool-02-gemini',
+        display_name: 'Pool-02-gemini',
+        base_prefix: 'agy2',
+        family: 'gemini_pure',
+        leader_auth: 'gem2-leader.json',
+        reserves: ['gem2-res.json'],
+        members: ['gem2-leader.json', 'gem2-res.json'],
+      },
+      {
+        id: 'Pool-01-gemini',
+        display_name: 'Pool-01-gemini',
+        base_prefix: 'agy',
+        family: 'gemini_pure',
+        leader_auth: 'gem1-leader.json',
+        reserves: ['gem1-res.json'],
+        members: ['gem1-leader.json', 'gem1-res.json'],
+      },
+    ];
+
+    vi.spyOn(managementClient, 'listPools').mockResolvedValue({
+      ok: true,
+      pools: disorderedPools,
+      count: 3,
+    });
+
+    const poolNodes = [
+      { id: 'gem1-leader.json', data: { fileName: 'gem1-leader.json', email: 'gem1@test.com', prefix: 'agy', provider: 'antigravity' } },
+      { id: 'gem1-res.json', data: { fileName: 'gem1-res.json', email: 'gem1-res@test.com', prefix: 'agy_1', provider: 'antigravity' } },
+      { id: 'gem2-leader.json', data: { fileName: 'gem2-leader.json', email: 'gem2@test.com', prefix: 'agy2', provider: 'antigravity' } },
+      { id: 'gem2-res.json', data: { fileName: 'gem2-res.json', email: 'gem2-res@test.com', prefix: 'agy2_1', provider: 'antigravity' } },
+      { id: 'clau-leader.json', data: { fileName: 'clau-leader.json', email: 'clau@test.com', prefix: 'agy_clau', provider: 'antigravity' } },
+      { id: 'clau-res.json', data: { fileName: 'clau-res.json', email: 'clau-res@test.com', prefix: 'agy_clau_1', provider: 'antigravity' } },
+    ];
+
+    render(<GroupManager nodes={poolNodes} />);
+
+    fireEvent.click(screen.getByTestId('tab-disolver-pools'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('pool-card-agy')).toBeTruthy();
+      expect(screen.getByTestId('pool-card-agy2')).toBeTruthy();
+      expect(screen.getByTestId('pool-card-agy_clau')).toBeTruthy();
+    });
+
+    // Check DOM order of the cards: agy (Pool-01) first, agy2 (Pool-02) second, agy_clau (Pool-04) third
+    const cards = document.querySelectorAll('.group-pool-card');
+    expect(cards).toHaveLength(3);
+    expect(cards[0].getAttribute('data-testid')).toBe('pool-card-agy');
+    expect(cards[1].getAttribute('data-testid')).toBe('pool-card-agy2');
+    expect(cards[2].getAttribute('data-testid')).toBe('pool-card-agy_clau');
+  });
 });

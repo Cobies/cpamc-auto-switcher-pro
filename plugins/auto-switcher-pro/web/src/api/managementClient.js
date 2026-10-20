@@ -1161,6 +1161,67 @@ export async function virtualizeAccount(input = {}, options = {}) {
 }
 
 /**
+ * Extrae el número canónico de un pool a partir de su ID, displayName o basePrefix.
+ * Ejemplos: "Pool-01-gemini" -> 1, "Pool-02-gemini" -> 2, "agy" -> 1, "agy2" -> 2
+ *
+ * @param {Object|string} pool
+ * @returns {number}
+ */
+export function extractPoolNumber(pool) {
+  if (!pool) return 999999;
+  const candidates = typeof pool === 'string'
+    ? [pool]
+    : [pool.id, pool.displayName, pool.display_name, pool.name, pool.basePrefix, pool.base_prefix, pool.routeSlug, pool.route_slug].filter(Boolean);
+
+  const poolNumRegex = /(?:pool[_-]?|agy|codex|clau|prefix[_-]?)(\d+)/i;
+  for (const c of candidates) {
+    const match = String(c).match(poolNumRegex);
+    if (match && match[1]) {
+      const parsed = parseInt(match[1], 10);
+      if (!Number.isNaN(parsed)) return parsed;
+    }
+  }
+
+  const digitRegex = /\d+/;
+  for (const c of candidates) {
+    const match = String(c).match(digitRegex);
+    if (match && match[0]) {
+      const parsed = parseInt(match[0], 10);
+      if (!Number.isNaN(parsed)) return parsed;
+    }
+  }
+
+  const basePrefix = typeof pool === 'string' ? pool : (pool.basePrefix || pool.base_prefix || '');
+  const lower = String(basePrefix).trim().toLowerCase();
+  if (lower === 'agy' || lower === 'codex' || lower === 'clau' || lower === 'agy_clau' || lower === 'agy_son' || lower === 'agy_opus') {
+    return 1;
+  }
+  return 999999;
+}
+
+/**
+ * Ordena de forma determinista y estable una lista de pools por su índice numérico soberano.
+ * Desempata por ID y luego por base_prefix.
+ *
+ * @param {Array<Object>} pools
+ * @returns {Array<Object>}
+ */
+export function sortPoolsByNumber(pools) {
+  if (!Array.isArray(pools)) return [];
+  return [...pools].sort((a, b) => {
+    const numA = extractPoolNumber(a);
+    const numB = extractPoolNumber(b);
+    if (numA !== numB) return numA - numB;
+    const idA = String(a.id || a.displayName || a.display_name || a.basePrefix || a.base_prefix || '').toLowerCase();
+    const idB = String(b.id || b.displayName || b.display_name || b.basePrefix || b.base_prefix || '').toLowerCase();
+    if (idA !== idB) return idA.localeCompare(idB);
+    const prefA = String(a.basePrefix || a.base_prefix || '').toLowerCase();
+    const prefB = String(b.basePrefix || b.base_prefix || '').toLowerCase();
+    return prefA.localeCompare(prefB);
+  });
+}
+
+/**
  * Fetches registered logical pools from the Auto Switcher Pro plugin registry.
  *
  * @param {Object} [options]
@@ -1173,10 +1234,12 @@ export async function listPools(options = {}) {
   });
 
   const data = await res.json();
+  const rawPools = Array.isArray(data?.pools) ? data.pools : [];
+  const sortedPools = sortPoolsByNumber(rawPools);
   return {
     ok: Boolean(data?.ok),
-    pools: Array.isArray(data?.pools) ? data.pools : [],
-    count: typeof data?.count === 'number' ? data.count : (data?.pools?.length || 0),
+    pools: sortedPools,
+    count: typeof data?.count === 'number' ? data.count : sortedPools.length,
   };
 }
 

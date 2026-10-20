@@ -8,6 +8,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -333,6 +336,59 @@ func (r *PoolRegistry) Load() error {
 	return nil
 }
 
+var (
+	poolNumRegex = regexp.MustCompile(`(?i)(?:pool[_-]?|agy|codex|clau|prefix[_-]?)(\d+)`)
+	digitRegex   = regexp.MustCompile(`\d+`)
+)
+
+// extractPoolNumber extracts the canonical sovereign pool integer for deterministic ordering.
+func extractPoolNumber(p PoolDefinition) int {
+	candidates := []string{p.ID, p.DisplayName, p.Name, p.BasePrefix, p.RouteSlug}
+	for _, c := range candidates {
+		if c == "" {
+			continue
+		}
+		if m := poolNumRegex.FindStringSubmatch(c); len(m) > 1 {
+			if n, err := strconv.Atoi(m[1]); err == nil {
+				return n
+			}
+		}
+	}
+	for _, c := range candidates {
+		if c == "" {
+			continue
+		}
+		if m := digitRegex.FindString(c); m != "" {
+			if n, err := strconv.Atoi(m); err == nil {
+				return n
+			}
+		}
+	}
+	lowerBase := strings.ToLower(strings.TrimSpace(p.BasePrefix))
+	if lowerBase == "agy" || lowerBase == "codex" || lowerBase == "clau" || lowerBase == "agy_clau" || lowerBase == "agy_son" || lowerBase == "agy_opus" {
+		return 1
+	}
+	return 999999
+}
+
+// sortPoolDefinitions enforces deterministic numerical ordering by sovereign pool number (ascending),
+// tie-broken by ID and then BasePrefix.
+func sortPoolDefinitions(pools []PoolDefinition) {
+	sort.SliceStable(pools, func(i, j int) bool {
+		numI := extractPoolNumber(pools[i])
+		numJ := extractPoolNumber(pools[j])
+		if numI != numJ {
+			return numI < numJ
+		}
+		idI := strings.ToLower(pools[i].ID)
+		idJ := strings.ToLower(pools[j].ID)
+		if idI != idJ {
+			return idI < idJ
+		}
+		return strings.ToLower(pools[i].BasePrefix) < strings.ToLower(pools[j].BasePrefix)
+	})
+}
+
 // Save atomically writes the current state to disk.
 func (r *PoolRegistry) Save() error {
 	r.mu.RLock()
@@ -341,6 +397,8 @@ func (r *PoolRegistry) Save() error {
 		poolsList = append(poolsList, p)
 	}
 	r.mu.RUnlock()
+
+	sortPoolDefinitions(poolsList)
 
 	state := RegistryState{
 		Version:   1,
@@ -406,6 +464,7 @@ func (r *PoolRegistry) ListPools() []PoolDefinition {
 		}
 		res = append(res, p)
 	}
+	sortPoolDefinitions(res)
 	return res
 }
 

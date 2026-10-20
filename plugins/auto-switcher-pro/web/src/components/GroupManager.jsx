@@ -11,6 +11,8 @@ import {
   dissolvePool,
   resolveInheritedCardModels,
   CANONICAL_PROVIDER_MODELS,
+  extractPoolNumber,
+  sortPoolsByNumber,
 } from '../api/managementClient';
 import '../GroupManager.css';
 
@@ -243,7 +245,7 @@ export default function GroupManager({
     let cancelled = false;
     listPools()
       .then((res) => {
-        if (!cancelled) setRegisteredPools(Array.isArray(res?.pools) ? res.pools : []);
+        if (!cancelled) setRegisteredPools(sortPoolsByNumber(Array.isArray(res?.pools) ? res.pools : []));
       })
       .catch(() => {
         // Registro no disponible: degradar a pools derivados de prefijos en disco
@@ -539,7 +541,8 @@ export default function GroupManager({
     const poolsMap = new Map();
 
     // 1) Pools registrados en el plugin (GroupManager = único generador)
-    registeredPools.forEach((pool) => {
+    const sortedRegistered = sortPoolsByNumber(registeredPools);
+    sortedRegistered.forEach((pool) => {
       const basePrefix = (pool.base_prefix || '').trim();
       if (!basePrefix || poolsMap.has(basePrefix)) return;
 
@@ -565,7 +568,8 @@ export default function GroupManager({
       const activeLeaderAuth = pool.active_leader || pool.leader_auth || '';
       const targetModel =
         (Array.isArray(pool.policy?.target_models) && pool.policy.target_models[0]) || 'gemini-3.8-flash-high';
-      const poolIndex = poolsMap.size + 1;
+      const extractedNum = extractPoolNumber(pool);
+      const poolIndex = extractedNum < 999999 ? extractedNum : (poolsMap.size + 1);
       const famStr = (pool.family || basePrefix || '').toLowerCase();
       const famSuffix = famStr.includes('codex')
         ? 'codex'
@@ -643,8 +647,9 @@ export default function GroupManager({
       }
     });
 
-    // Ordenar reservas por índice de cascada
-    return Array.from(poolsMap.values()).map((p) => {
+    // Ordenar pools por índice numérico soberano determinista y reservas por cascada
+    const sortedPools = sortPoolsByNumber(Array.from(poolsMap.values()));
+    return sortedPools.map((p) => {
       p.reserves.sort((a, b) => a.reserveIndex - b.reserveIndex);
       return p;
     });
@@ -1347,10 +1352,10 @@ export default function GroupManager({
 
       setRegisteredPools((prev) => {
         const exists = prev.some((p) => p.base_prefix === targetPoolBase);
-        if (exists) {
-          return prev.map((p) => (p.base_prefix === targetPoolBase ? poolPayload : p));
-        }
-        return [...prev, poolPayload];
+        const next = exists
+          ? prev.map((p) => (p.base_prefix === targetPoolBase ? poolPayload : p))
+          : [...prev, poolPayload];
+        return sortPoolsByNumber(next);
       });
 
       setSuccessFeedback(
@@ -1429,7 +1434,7 @@ export default function GroupManager({
           console.warn('savePool error on release reserve:', poolErr);
         }
         setRegisteredPools((prev) =>
-          prev.map((p) => (p.base_prefix === targetPoolBase ? updatedPayload : p))
+          sortPoolsByNumber(prev.map((p) => (p.base_prefix === targetPoolBase ? updatedPayload : p)))
         );
       }
 
@@ -1525,10 +1530,10 @@ export default function GroupManager({
 
       setRegisteredPools((prev) => {
         const exists = prev.some((p) => p.base_prefix === targetPoolBase);
-        if (exists) {
-          return prev.map((p) => (p.base_prefix === targetPoolBase ? updatedPayload : p));
-        }
-        return [...prev, updatedPayload];
+        const next = exists
+          ? prev.map((p) => (p.base_prefix === targetPoolBase ? updatedPayload : p))
+          : [...prev, updatedPayload];
+        return sortPoolsByNumber(next);
       });
 
       setSuccessFeedback(`✓ Cuenta líder "${email}" liberada del pool "${targetPoolBase}". "${nextLeaderNode?.data?.email || nextLeaderFile}" promovida a líder.`);

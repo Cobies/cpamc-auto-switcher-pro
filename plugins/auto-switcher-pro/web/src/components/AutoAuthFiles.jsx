@@ -15,6 +15,7 @@ import {
   classifyCooldowns,
   formatRemainingDuration,
   CANONICAL_PROVIDER_MODELS,
+  sortPoolsByNumber,
 } from '../api/managementClient';
 import SpecialistModal from './SpecialistModal';
 import QuotaClock from './QuotaClock';
@@ -147,7 +148,7 @@ export default function AutoAuthFiles({
     let cancelled = false;
     listPools()
       .then((res) => {
-        if (!cancelled) setRegisteredPools(Array.isArray(res?.pools) ? res.pools : []);
+        if (!cancelled) setRegisteredPools(sortPoolsByNumber(Array.isArray(res?.pools) ? res.pools : []));
       })
       .catch(() => {
         // Registro no disponible (sin key / plugin cargando): estrictamente 0 tarjetas

@@ -8,6 +8,7 @@ import {
   rotatePool,
   fetchCardQuota,
   adaptCardQuotaResult,
+  sortPoolsByNumber,
 } from '../api/managementClient';
 
 /**
@@ -259,7 +260,7 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested, onNavig
       try {
         const poolRes = await listPools();
         if (poolRes && Array.isArray(poolRes.pools)) {
-          setRegisteredPools(poolRes.pools);
+          setRegisteredPools(sortPoolsByNumber(poolRes.pools));
         }
       } catch {
         // Fallback a pools descubiertos dinámicamente si no hay backend activo

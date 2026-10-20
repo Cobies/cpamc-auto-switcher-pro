@@ -32,6 +32,8 @@ import {
   computeAccountTelemetry,
   classifyCooldowns,
   formatRemainingDuration,
+  extractPoolNumber,
+  sortPoolsByNumber,
 } from './managementClient';
 
 describe('Management API Client - Auth & Security Invariants', () => {
@@ -1955,4 +1957,53 @@ describe('Specialist Engine - computeSpecialistExclusions, resolveInheritedCardM
     });
   });
 });
+
+describe('Deterministic Pool Sorting Contract (extractPoolNumber & sortPoolsByNumber)', () => {
+  it('extractPoolNumber accurately extracts integer indexes from various pool formats', () => {
+    expect(extractPoolNumber('Pool-01-gemini')).toBe(1);
+    expect(extractPoolNumber('Pool-02-gemini')).toBe(2);
+    expect(extractPoolNumber('Pool-04-claude')).toBe(4);
+    expect(extractPoolNumber('Pool-12-codex')).toBe(12);
+    expect(extractPoolNumber({ id: 'Pool-03-codex' })).toBe(3);
+    expect(extractPoolNumber({ base_prefix: 'agy' })).toBe(1);
+    expect(extractPoolNumber({ base_prefix: 'agy2' })).toBe(2);
+    expect(extractPoolNumber({ base_prefix: 'agy3' })).toBe(3);
+    expect(extractPoolNumber({ base_prefix: 'agy_clau' })).toBe(1);
+    expect(extractPoolNumber({ base_prefix: 'codex' })).toBe(1);
+    expect(extractPoolNumber({ base_prefix: 'custom_pool_5' })).toBe(5);
+  });
+
+  it('sortPoolsByNumber stably sorts out-of-order pools by sovereign numerical index', () => {
+    const disordered = [
+      { id: 'Pool-04-claude', base_prefix: 'agy_clau' },
+      { id: 'Pool-02-gemini', base_prefix: 'agy2' },
+      { id: 'Pool-01-gemini', base_prefix: 'agy' },
+      { id: 'Pool-03-codex', base_prefix: 'codex' },
+    ];
+
+    const sorted = sortPoolsByNumber(disordered);
+    expect(sorted.map((p) => p.id)).toEqual([
+      'Pool-01-gemini',
+      'Pool-02-gemini',
+      'Pool-03-codex',
+      'Pool-04-claude',
+    ]);
+  });
+
+  it('sortPoolsByNumber breaks ties predictably using pool ID and base_prefix', () => {
+    const tied = [
+      { id: 'Pool-02-b', base_prefix: 'prefix_b' },
+      { id: 'Pool-02-a', base_prefix: 'prefix_a' },
+      { id: 'Pool-01-gemini', base_prefix: 'agy' },
+    ];
+
+    const sorted = sortPoolsByNumber(tied);
+    expect(sorted.map((p) => p.id)).toEqual([
+      'Pool-01-gemini',
+      'Pool-02-a',
+      'Pool-02-b',
+    ]);
+  });
+});
+
 
