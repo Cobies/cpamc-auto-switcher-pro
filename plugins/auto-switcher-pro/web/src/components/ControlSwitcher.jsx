@@ -1,5 +1,14 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { apiFetch, patchAuthFilePrefix, getPredictiveState, updatePredictiveConfig, listPools, rotatePool } from '../api/managementClient';
+import {
+  apiFetch,
+  patchAuthFilePrefix,
+  getPredictiveState,
+  updatePredictiveConfig,
+  listPools,
+  rotatePool,
+  fetchCardQuota,
+  adaptCardQuotaResult,
+} from '../api/managementClient';
 
 /**
  * Paleta de 8 colores del Espectro TrueColor (24-bit RGB)
@@ -111,103 +120,33 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested, onNavig
     return `${user.slice(0, 3)}...${user.slice(-3)}${domain}`;
   };
 
-  // Parser dinámico de cuotas con aislamiento de familias g* vs son*
-  const parseQuotaPayload = (rawEnvelope, provider, prefix) => {
-    let payload = rawEnvelope;
-    if (rawEnvelope && rawEnvelope.body) {
-      if (typeof rawEnvelope.body === 'string') {
-        try {
-          payload = JSON.parse(rawEnvelope.body);
-        } catch {
-          payload = rawEnvelope.body;
-        }
-      } else {
-        payload = rawEnvelope.body;
-      }
-    }
-
-    const prov = (provider || '').toLowerCase();
-    const prof = (prefix || '').replace(/^(agy|codex)_?/, '').toLowerCase();
-
-    let worstFiveHour = null;
-    let worstWeekly = null;
-
-    if (prov === 'codex') {
-      const rl = payload?.rate_limit;
-      if (rl?.primary_window?.used_percent !== undefined && rl.primary_window.used_percent !== null) {
-        worstFiveHour = Math.max(0, Math.min(100, Number(rl.primary_window.used_percent)));
-      }
-      if (rl?.secondary_window?.used_percent !== undefined && rl.secondary_window.used_percent !== null) {
-        worstWeekly = Math.max(0, Math.min(100, Number(rl.secondary_window.used_percent)));
-      }
-    } else {
-      // Antigravity (Google Cloud Code): Aislar cuotas por convención de familia
-      // - agy, agy2, agy_1, g1, g2... -> Solo vigila "Gemini Models"
-      // - agy_clau, agy_son, agy_opus, son, clau... -> Solo vigila "Claude and GPT models"
-      const cleanPrefix = (prefix || '').trim().toLowerCase();
-      const isClaudeFamily =
-        cleanPrefix.startsWith('agy_clau') ||
-        cleanPrefix.startsWith('agy_son') ||
-        cleanPrefix.startsWith('agy_opus') ||
-        cleanPrefix.startsWith('clau') ||
-        cleanPrefix.startsWith('son') ||
-        cleanPrefix.startsWith('opus') ||
-        prof.startsWith('clau') ||
-        prof.startsWith('son') ||
-        prof.startsWith('opus');
-      const isGeminiFamily = !isClaudeFamily && (/^agy\d*(_\d+)?$/.test(cleanPrefix) || prof.startsWith('g') || prof === 'default');
-
-      const groups = payload?.groups || [];
-      for (const group of groups) {
-        const grpName = (group.displayName || '').toLowerCase();
-        if (isGeminiFamily && !grpName.includes('gemini')) continue;
-        if (isClaudeFamily && !grpName.includes('claude') && !grpName.includes('gpt')) continue;
-
-        const buckets = group.buckets || [];
-        for (const b of buckets) {
-          const name = (b.displayName || b.label || b.window || '').toLowerCase();
-          const remPct = (b.remainingFraction !== undefined ? b.remainingFraction : 1.0) * 100;
-          const consPct = Math.max(0, Math.min(100, 100 - remPct));
-
-          if (name.includes('5') || name.includes('five')) {
-            if (worstFiveHour === null || consPct > worstFiveHour) {
-              worstFiveHour = consPct;
-            }
-          } else if (name.includes('week')) {
-            if (worstWeekly === null || consPct > worstWeekly) {
-              worstWeekly = consPct;
-            }
-          }
-        }
-      }
-    }
-
-    const five = worstFiveHour !== null ? worstFiveHour : 0;
-    const weekly = worstWeekly !== null ? worstWeekly : 0;
-    const minAvailable = Math.max(0, 100 - Math.max(five, weekly));
-
-    return {
-      fiveHourConsumed: worstFiveHour !== null ? Math.round(worstFiveHour * 10) / 10 : null,
-      weeklyConsumed: worstWeekly !== null ? Math.round(worstWeekly * 10) / 10 : null,
-      minAvailable: Math.round(minAvailable * 10) / 10,
-    };
-  };
+  // Parser dinámico de cuotas (delega en adaptCardQuotaResult)
+  const parseQuotaPayload = useCallback((rawEnvelope, provider, prefix) => {
+    return adaptCardQuotaResult(rawEnvelope, provider, prefix);
+  }, []);
 
   // Cuentas unificadas: usa `nodes` si están disponibles (fuente de verdad en App.jsx),
   // o cae en `rawFiles` enriquecidos con su prefijo descargado.
   const effectiveFiles = useMemo(() => {
     if (Array.isArray(nodes) && nodes.length > 0) {
       return nodes
-        .filter((n) => n?.data?.prefix && !n.data.prefix.startsWith('unlinked_'))
-        .map((n) => ({
-          name: n.data?.fileName || n.id,
-          id: n.id,
-          prefix: (n.data?.prefix || '').trim(),
-          note: (n.data?.prefix || '').trim(),
-          email: n.data?.email || n.data?.account || n.data?.fileName || n.id,
-          provider: (n.data?.provider || n.data?.accountType || 'antigravity').toLowerCase(),
-          disabled: false,
-        }));
+        .filter((n) => {
+          const pref = (n?.data?.prefix || n?.data?.virtualPrefix || '').trim();
+          if (pref.startsWith('unlinked_')) return false;
+          return Boolean(pref || n?.data?.poolId || n?.data?.assignedPool || n?.data?.fileName || n?.id);
+        })
+        .map((n) => {
+          const effectivePref = (n.data?.prefix || n.data?.virtualPrefix || '').trim();
+          return {
+            name: n.data?.fileName || n.id,
+            id: n.id,
+            prefix: effectivePref,
+            note: effectivePref,
+            email: n.data?.email || n.data?.account || n.data?.fileName || n.id,
+            provider: (n.data?.provider || n.data?.accountType || 'antigravity').toLowerCase(),
+            disabled: false,
+          };
+        });
     }
     return rawFiles;
   }, [nodes, rawFiles]);
@@ -227,22 +166,20 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested, onNavig
         (f) => f.name && !f.name.includes('/') && !f.name.includes('\\') && !f.disabled
       );
 
-      // 3. Consultar cuotas para cada archivo
+      // 3. Consultar cuotas para cada archivo mediante la función canónica fetchCardQuota
       const newQuotas = {};
       const enrichedFiles = await Promise.all(
         validFiles.map(async (f) => {
           const prefix = (f.note || f.prefix || '').trim();
           try {
             const isCodex = (f.provider || '').toLowerCase() === 'codex';
-            const chatgptId = f.chatgpt_account_id || f.account_id || '';
-
-            let qRes;
             if (isCodex) {
-              qRes = await apiFetch('/v0/management/api-call', {
+              const chatgptId = f.chatgpt_account_id || f.account_id || '';
+              const qRes = await apiFetch('/v0/management/api-call', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  authIndex: f.auth_index,
+                  authIndex: f.auth_index || f.name,
                   method: 'GET',
                   url: 'https://chatgpt.com/backend-api/wham/usage',
                   header: {
@@ -254,27 +191,55 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested, onNavig
                   },
                 }),
               });
+              if (qRes && qRes.ok) {
+                const qRaw = await qRes.json();
+                const adapted = adaptCardQuotaResult(qRaw, f.provider, prefix);
+                newQuotas[f.name] = adapted;
+                if (f.id) newQuotas[f.id] = adapted;
+              }
             } else {
-              qRes = await apiFetch('/v0/management/api-call', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  authIndex: f.auth_index,
-                  method: 'POST',
-                  url: 'https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary',
-                  header: {
-                    Authorization: 'Bearer $TOKEN$',
-                    'Content-Type': 'application/json',
-                    'User-Agent': 'antigravity/cli/1.0.13 (aidev_client; os_type=darwin; arch=arm64)',
-                  },
-                  data: f.project_id ? JSON.stringify({ project: f.project_id }) : '{}',
-                }),
-              });
-            }
+              // Antigravity: consultar cuotas respetando tanto fetchCardQuota como raw envelopes
+              let qResult = null;
+              try {
+                qResult = await fetchCardQuota({
+                  fileName: f.name,
+                  authIndex: f.auth_index ?? f.name,
+                  projectId: f.project_id || '',
+                  prefix,
+                });
+              } catch {
+                // fallback a api-call directo si fetchCardQuota fallara
+              }
 
-            if (qRes && qRes.ok) {
-              const qRaw = await qRes.json();
-              newQuotas[f.name] = parseQuotaPayload(qRaw, f.provider, prefix);
+              // Si fetchCardQuota retornó grupos válidos, adaptamos
+              if (qResult && Array.isArray(qResult.groups) && qResult.groups.length > 0) {
+                const adapted = adaptCardQuotaResult(qResult, f.provider, prefix);
+                newQuotas[f.name] = adapted;
+                if (f.id) newQuotas[f.id] = adapted;
+              } else {
+                // Fallback directo con URL de cuotas de Antigravity (para tests y mocks de apiFetch con /v0/management/api-call)
+                const qRes = await apiFetch('/v0/management/api-call', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    authIndex: f.auth_index ?? f.name,
+                    method: 'POST',
+                    url: 'https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary',
+                    header: {
+                      Authorization: 'Bearer $TOKEN$',
+                      'Content-Type': 'application/json',
+                      'User-Agent': 'antigravity/hub/2.23.0 darwin/arm64',
+                    },
+                    data: f.project_id ? JSON.stringify({ project: f.project_id }) : '{}',
+                  }),
+                });
+                if (qRes && qRes.ok) {
+                  const qRaw = await qRes.json();
+                  const adapted = adaptCardQuotaResult(qRaw, f.provider, prefix);
+                  newQuotas[f.name] = adapted;
+                  if (f.id) newQuotas[f.id] = adapted;
+                }
+              }
             }
           } catch {
             // Continúa con las demás

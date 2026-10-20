@@ -2635,6 +2635,127 @@ export async function fetchCardQuota(cardOrNode, options = {}) {
 }
 
 /**
+ * Adapta el resultado de cuotas (sea sobre raw de api-call, respuesta de fetchCardQuota
+ * o estructura normalizada) a { fiveHourConsumed, weeklyConsumed, minAvailable }.
+ *
+ * @param {Object} rawEnvelopeOrQuotaResult
+ * @param {string} [provider='antigravity']
+ * @param {string} [prefix='']
+ * @returns {{ fiveHourConsumed: number|null, weeklyConsumed: number|null, minAvailable: number }}
+ */
+export function adaptCardQuotaResult(rawEnvelopeOrQuotaResult, provider = 'antigravity', prefix = '') {
+  if (!rawEnvelopeOrQuotaResult) {
+    return { fiveHourConsumed: null, weeklyConsumed: null, minAvailable: 100 };
+  }
+
+  // 1. Si ya viene previamente normalizado con minAvailable
+  if (
+    typeof rawEnvelopeOrQuotaResult.minAvailable === 'number' &&
+    (rawEnvelopeOrQuotaResult.fiveHourConsumed !== undefined || rawEnvelopeOrQuotaResult.weeklyConsumed !== undefined)
+  ) {
+    return {
+      fiveHourConsumed: rawEnvelopeOrQuotaResult.fiveHourConsumed,
+      weeklyConsumed: rawEnvelopeOrQuotaResult.weeklyConsumed,
+      minAvailable: rawEnvelopeOrQuotaResult.minAvailable,
+    };
+  }
+
+  let payload = rawEnvelopeOrQuotaResult;
+  if (rawEnvelopeOrQuotaResult && rawEnvelopeOrQuotaResult.body) {
+    if (typeof rawEnvelopeOrQuotaResult.body === 'string') {
+      try {
+        payload = JSON.parse(rawEnvelopeOrQuotaResult.body);
+      } catch {
+        payload = rawEnvelopeOrQuotaResult.body;
+      }
+    } else {
+      payload = rawEnvelopeOrQuotaResult.body;
+    }
+  }
+
+  const prov = (provider || '').toLowerCase();
+  const prof = (prefix || '').replace(/^(agy|codex)_?/, '').toLowerCase();
+
+  let worstFiveHour = null;
+  let worstWeekly = null;
+
+  if (prov === 'codex') {
+    const rl = payload?.rate_limit;
+    if (rl?.primary_window?.used_percent !== undefined && rl.primary_window.used_percent !== null) {
+      worstFiveHour = Math.max(0, Math.min(100, Number(rl.primary_window.used_percent)));
+    }
+    if (rl?.secondary_window?.used_percent !== undefined && rl.secondary_window.used_percent !== null) {
+      worstWeekly = Math.max(0, Math.min(100, Number(rl.secondary_window.used_percent)));
+    }
+  } else {
+    // Antigravity (Google Cloud Code): Aislar cuotas por convención de familia
+    const cleanPrefix = (prefix || '').trim().toLowerCase();
+    const isClaudeFamily =
+      cleanPrefix.startsWith('agy_clau') ||
+      cleanPrefix.startsWith('agy_son') ||
+      cleanPrefix.startsWith('agy_opus') ||
+      cleanPrefix.startsWith('clau') ||
+      cleanPrefix.startsWith('son') ||
+      cleanPrefix.startsWith('opus') ||
+      prof.startsWith('clau') ||
+      prof.startsWith('son') ||
+      prof.startsWith('opus');
+    const isGeminiFamily =
+      !isClaudeFamily && (/^agy\d*(_\d+)?$/.test(cleanPrefix) || prof.startsWith('g') || prof === 'default');
+
+    const groups = payload?.groups || [];
+    for (const group of groups) {
+      const grpName = (group.displayName || group.title || '').toLowerCase();
+      if (isGeminiFamily && !grpName.includes('gemini')) continue;
+      if (isClaudeFamily && !grpName.includes('claude') && !grpName.includes('gpt')) continue;
+
+      if (Array.isArray(group.rows)) {
+        for (const r of group.rows) {
+          const l = (r.label || '').toLowerCase();
+          // r.percent representa el porcentaje DISPONIBLE (remaining), por lo que consumido = 100 - r.percent
+          const consPct = typeof r.percent === 'number' ? Math.max(0, Math.min(100, 100 - r.percent)) : null;
+          if (consPct !== null) {
+            if (l.includes('5') || l.includes('five')) {
+              if (worstFiveHour === null || consPct > worstFiveHour) worstFiveHour = consPct;
+            } else if (l.includes('week')) {
+              if (worstWeekly === null || consPct > worstWeekly) worstWeekly = consPct;
+            }
+          }
+        }
+      }
+
+      if (Array.isArray(group.buckets)) {
+        for (const b of group.buckets) {
+          const name = (b.displayName || b.label || b.window || '').toLowerCase();
+          const remPct = (b.remainingFraction !== undefined ? b.remainingFraction : 1.0) * 100;
+          const consPct = Math.max(0, Math.min(100, 100 - remPct));
+
+          if (name.includes('5') || name.includes('five')) {
+            if (worstFiveHour === null || consPct > worstFiveHour) {
+              worstFiveHour = consPct;
+            }
+          } else if (name.includes('week')) {
+            if (worstWeekly === null || consPct > worstWeekly) {
+              worstWeekly = consPct;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const five = worstFiveHour !== null ? worstFiveHour : 0;
+  const weekly = worstWeekly !== null ? worstWeekly : 0;
+  const minAvailable = Math.max(0, 100 - Math.max(five, weekly));
+
+  return {
+    fiveHourConsumed: worstFiveHour !== null ? Math.round(worstFiveHour * 10) / 10 : null,
+    weeklyConsumed: worstWeekly !== null ? Math.round(worstWeekly * 10) / 10 : null,
+    minAvailable: Math.round(minAvailable * 10) / 10,
+  };
+}
+
+/**
  * Maintenance Engine API Functions
  */
 export async function scanSystemHealth(options = {}) {
