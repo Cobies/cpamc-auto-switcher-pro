@@ -21,10 +21,35 @@ Write-Host "⚡ AUTO SWITCHER PRO — Instalador Universal para Windows" -Foregr
 Write-Host "   Compatible con Gentle-Shell, Pi y CLIProxyAPI (CPAMC)" -ForegroundColor DarkCyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
-$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$repoRoot = Split-Path -Parent $scriptRoot
-$extSource = Join-Path $repoRoot "extensions\cpamc-auto-switcher"
-$binSource = Join-Path $repoRoot "bin\auto-switcher-pro-windows-amd64.dll"
+# Detección de ejecución local vs tubería web (iex)
+$isLocalExecution = $false
+$extSource = $null
+$binSource = $null
+
+if ($MyInvocation.MyCommand.Path -and (Test-Path $MyInvocation.MyCommand.Path)) {
+    $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+    $repoRoot = Split-Path -Parent $scriptRoot
+    $localExt = Join-Path $repoRoot "extensions\cpamc-auto-switcher"
+    $localBin = Join-Path $repoRoot "bin\auto-switcher-pro-windows-amd64.dll"
+    if (Test-Path $localExt) {
+        $isLocalExecution = $true
+        $extSource = $localExt
+        $binSource = $localBin
+    }
+}
+
+# Si se ejecuta directamente vía web (irm ... | iex), preparar descarga temporal
+$tempWorkDir = $null
+if (-not $isLocalExecution) {
+    Write-Host "Obteniendo paquete oficial desde GitHub..." -ForegroundColor Gray
+    $tempWorkDir = Join-Path $env:TEMP "cpamc-install-$([guid]::NewGuid().ToString('N').Substring(0,8))"
+    New-Item -ItemType Directory -Force -Path $tempWorkDir | Out-Null
+    $tempZip = Join-Path $tempWorkDir "bundle.zip"
+    Invoke-WebRequest -Uri "https://github.com/WiloxDev/cpamc-auto-switcher-pro/archive/refs/heads/main.zip" -OutFile $tempZip
+    Expand-Archive -Path $tempZip -DestinationPath $tempWorkDir -Force
+    $extSource = Join-Path $tempWorkDir "cpamc-auto-switcher-pro-main\extensions\cpamc-auto-switcher"
+    $binSource = Join-Path $tempWorkDir "cpamc-auto-switcher-pro-main\bin\auto-switcher-pro-windows-amd64.dll"
+}
 
 # ------------------------------------------------------------------------------
 # 1. INSTALACIÓN DE LA EXTENSIÓN (Gentle-Shell & Pi)
@@ -52,21 +77,7 @@ foreach ($baseDir in $targets) {
                 Remove-Item -Recurse -Force -Path $dest
             }
 
-            if (Test-Path $extSource) {
-                Copy-Item -Recurse -Force -Path $extSource -Destination $dest
-            } else {
-                # Fallback: descargar desde GitHub si se ejecuta standalone
-                Write-Host "Descargando extensión desde GitHub..." -ForegroundColor Gray
-                $tempZip = Join-Path $env:TEMP "cpamc-ext.zip"
-                $tempExtract = Join-Path $env:TEMP "cpamc-ext-temp"
-                Invoke-WebRequest -Uri "https://github.com/WiloxDev/cpamc-auto-switcher-pro/archive/refs/heads/main.zip" -OutFile $tempZip
-                Expand-Archive -Path $tempZip -DestinationPath $tempExtract -Force
-                $extractedExt = Join-Path $tempExtract "cpamc-auto-switcher-pro-main\extensions\cpamc-auto-switcher"
-                Copy-Item -Recurse -Force -Path $extractedExt -Destination $dest
-                Remove-Item -Force $tempZip -ErrorAction SilentlyContinue
-                Remove-Item -Recurse -Force $tempExtract -ErrorAction SilentlyContinue
-            }
-
+            Copy-Item -Recurse -Force -Path $extSource -Destination $dest
             Write-Host "  ✓ Extensión instalada en: $dest" -ForegroundColor Green
             $installedCount++
         }
@@ -154,3 +165,8 @@ Write-Host "==========================================================" -Foregro
 Write-Host "Para comenzar, abre una nueva terminal y ejecuta:"
 Write-Host "  gentle-shell" -ForegroundColor Yellow
 Write-Host "Los pools aparecerán automáticamente en tu sesión."
+
+# Limpieza de temporales si se ejecutó vía web
+if ($tempWorkDir -and (Test-Path $tempWorkDir)) {
+    Remove-Item -Recurse -Force -Path $tempWorkDir -ErrorAction SilentlyContinue
+}
