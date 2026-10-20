@@ -1230,4 +1230,131 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
       );
     });
   });
+
+  it('allows releasing an individual reserve account from a pool in the Dissolve tab', async () => {
+    const existingPoolsData = [
+      {
+        id: 'pool-agy-1',
+        family: 'gemini_pure',
+        base_prefix: 'agy',
+        leader_auth: 'acc-leader.json',
+        reserves: ['acc-res1.json', 'acc-res2.json'],
+        members: ['acc-leader.json', 'acc-res1.json', 'acc-res2.json'],
+        member_models: {
+          'acc-leader.json': 'gemini-3.8-flash-high',
+          'acc-res1.json': 'gemini-3.7-flash-high',
+          'acc-res2.json': 'gemini-2.5-flash',
+        },
+      },
+    ];
+    vi.spyOn(managementClient, 'listPools').mockResolvedValue({
+      ok: true,
+      pools: existingPoolsData,
+      count: 1,
+    });
+    const savePoolSpy = vi.spyOn(managementClient, 'savePool').mockResolvedValue({ ok: true });
+    const patchSpy = vi.spyOn(managementClient, 'saveAuthFilePrefixes').mockResolvedValue({
+      successful: [{ name: 'acc-res1.json', prefix: '' }],
+      failed: [],
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    const poolNodes = [
+      { id: 'acc-leader.json', data: { fileName: 'acc-leader.json', email: 'leader@test.com', prefix: 'agy', provider: 'antigravity' } },
+      { id: 'acc-res1.json', data: { fileName: 'acc-res1.json', email: 'res1@test.com', prefix: 'agy_1', provider: 'antigravity' } },
+      { id: 'acc-res2.json', data: { fileName: 'acc-res2.json', email: 'res2@test.com', prefix: 'agy_2', provider: 'antigravity' } },
+    ];
+
+    render(<GroupManager nodes={poolNodes} />);
+
+    fireEvent.click(screen.getByTestId('tab-disolver-pools'));
+    await waitFor(() => {
+      expect(screen.getByTestId('pool-card-agy')).toBeTruthy();
+    });
+
+    const releaseBtn = screen.getByTestId('btn-release-reserve-agy-acc-res1.json');
+    expect(releaseBtn).toBeTruthy();
+    fireEvent.click(releaseBtn);
+
+    await waitFor(() => {
+      expect(patchSpy).toHaveBeenCalledWith([{ name: 'acc-res1.json', prefix: '' }]);
+      expect(savePoolSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          base_prefix: 'agy',
+          reserves: ['acc-res2.json'],
+          members: ['acc-leader.json', 'acc-res2.json'],
+          member_models: expect.not.objectContaining({
+            'acc-res1.json': expect.anything(),
+          }),
+        })
+      );
+    });
+  });
+
+  it('allows releasing the leader account and promotes first reserve to leader', async () => {
+    const existingPoolsData = [
+      {
+        id: 'pool-agy-1',
+        family: 'gemini_pure',
+        base_prefix: 'agy',
+        leader_auth: 'acc-leader.json',
+        reserves: ['acc-res1.json', 'acc-res2.json'],
+        members: ['acc-leader.json', 'acc-res1.json', 'acc-res2.json'],
+        member_models: {
+          'acc-leader.json': 'gemini-3.8-flash-high',
+          'acc-res1.json': 'gemini-3.7-flash-high',
+          'acc-res2.json': 'gemini-2.5-flash',
+        },
+      },
+    ];
+    vi.spyOn(managementClient, 'listPools').mockResolvedValue({
+      ok: true,
+      pools: existingPoolsData,
+      count: 1,
+    });
+    const savePoolSpy = vi.spyOn(managementClient, 'savePool').mockResolvedValue({ ok: true });
+    const patchSpy = vi.spyOn(managementClient, 'saveAuthFilePrefixes').mockResolvedValue({
+      successful: [],
+      failed: [],
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    const poolNodes = [
+      { id: 'acc-leader.json', data: { fileName: 'acc-leader.json', email: 'leader@test.com', prefix: 'agy', provider: 'antigravity' } },
+      { id: 'acc-res1.json', data: { fileName: 'acc-res1.json', email: 'res1@test.com', prefix: 'agy_1', provider: 'antigravity' } },
+      { id: 'acc-res2.json', data: { fileName: 'acc-res2.json', email: 'res2@test.com', prefix: 'agy_2', provider: 'antigravity' } },
+    ];
+
+    render(<GroupManager nodes={poolNodes} />);
+
+    fireEvent.click(screen.getByTestId('tab-disolver-pools'));
+    await waitFor(() => {
+      expect(screen.getByTestId('pool-card-agy')).toBeTruthy();
+    });
+
+    const releaseLeaderBtn = screen.getByTestId('btn-release-leader-agy');
+    expect(releaseLeaderBtn).toBeTruthy();
+    fireEvent.click(releaseLeaderBtn);
+
+    await waitFor(() => {
+      // Leader becomes free, res1 promoted to agy, res2 remains agy_1
+      expect(patchSpy).toHaveBeenCalledWith([
+        { name: 'acc-leader.json', prefix: '' },
+        { name: 'acc-res1.json', prefix: 'agy' },
+        { name: 'acc-res2.json', prefix: 'agy_1' },
+      ]);
+      expect(savePoolSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          base_prefix: 'agy',
+          leader_auth: 'acc-res1.json',
+          active_leader: 'acc-res1.json',
+          members: ['acc-res1.json', 'acc-res2.json'],
+          reserves: ['acc-res2.json'],
+          member_models: expect.not.objectContaining({
+            'acc-leader.json': expect.anything(),
+          }),
+        })
+      );
+    });
+  });
 });

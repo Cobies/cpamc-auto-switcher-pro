@@ -121,7 +121,8 @@ func (p PoolDefinition) IsEnabled() bool {
 }
 
 // AllMembers returns the ordered, deduplicated list of all physical auth files
-// belonging to this pool.
+// belonging to this pool. When LeaderAuth or Reserves are explicitly provided,
+// they take precedence as authoritative over stale entries in Members.
 func (p PoolDefinition) AllMembers() []string {
 	seen := make(map[string]struct{})
 	out := make([]string, 0, len(p.Members)+1+len(p.Reserves))
@@ -136,12 +137,23 @@ func (p PoolDefinition) AllMembers() []string {
 			out = append(out, trimmed)
 		}
 	}
+
+	trimmedLeader := strings.TrimSpace(p.LeaderAuth)
+	// If LeaderAuth or Reserves are specified, treat them as authoritative.
+	if trimmedLeader != "" || len(p.Reserves) > 0 {
+		if trimmedLeader != "" {
+			add(trimmedLeader)
+		}
+		for _, r := range p.Reserves {
+			add(r)
+		}
+		// If Members was populated, only keep items that match leader or reserves
+		// (avoiding resuscitation of released members).
+		return out
+	}
+
 	for _, m := range p.Members {
 		add(m)
-	}
-	add(p.LeaderAuth)
-	for _, r := range p.Reserves {
-		add(r)
 	}
 	return out
 }
@@ -206,7 +218,18 @@ func normalizePoolDefinition(pool *PoolDefinition) {
 		} else {
 			pool.Reserves = []string{}
 		}
-		if strings.TrimSpace(pool.ActiveLeader) == "" {
+		// If ActiveLeader is empty or points to an account no longer in the pool,
+		// resync ActiveLeader to the authoritative LeaderAuth.
+		activeLeaderFound := false
+		if strings.TrimSpace(pool.ActiveLeader) != "" {
+			for _, m := range all {
+				if strings.EqualFold(m, strings.TrimSpace(pool.ActiveLeader)) {
+					activeLeaderFound = true
+					break
+				}
+			}
+		}
+		if !activeLeaderFound {
 			pool.ActiveLeader = pool.LeaderAuth
 		}
 	}
@@ -656,21 +679,19 @@ func (r *PoolRegistry) SavePool(pool PoolDefinition) error {
 		if pool.DisplayName == "" {
 			pool.DisplayName = existing.DisplayName
 		}
-		// Fusión defensiva (merge) de MemberModels: preservar asignaciones per-cuenta previas
-		// si el payload entrante solo contiene un subconjunto o actualización parcial.
-		if len(existing.MemberModels) > 0 {
-			merged := make(map[string]string)
-			for k, v := range existing.MemberModels {
-				if strings.TrimSpace(v) != "" {
-					merged[k] = strings.TrimSpace(v)
-				}
-			}
+		// Saneamiento de MemberModels: purgar cuentas liberadas que ya no pertenecen al pool
+		memberSet := make(map[string]struct{}, len(pool.Members))
+		for _, m := range pool.Members {
+			memberSet[strings.ToLower(strings.TrimSpace(m))] = struct{}{}
+		}
+		if len(pool.MemberModels) > 0 {
+			cleanedModels := make(map[string]string)
 			for k, v := range pool.MemberModels {
-				if strings.TrimSpace(v) != "" {
-					merged[k] = strings.TrimSpace(v)
+				if _, exists := memberSet[strings.ToLower(strings.TrimSpace(k))]; exists {
+					cleanedModels[k] = v
 				}
 			}
-			pool.MemberModels = merged
+			pool.MemberModels = cleanedModels
 		}
 		if oldKeyToRemove != "" {
 			delete(r.pools, oldKeyToRemove)

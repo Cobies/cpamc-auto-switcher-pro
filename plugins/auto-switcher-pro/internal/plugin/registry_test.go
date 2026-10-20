@@ -449,3 +449,98 @@ func TestPoolRegistry_RotatePoolLeader(t *testing.T) {
 		t.Fatalf("expected forced rotation to res2, got: %s", string(bodyBytesForced))
 	}
 }
+
+func TestPoolRegistry_ReleaseMemberAndSanitizeModels(t *testing.T) {
+	tempDir := t.TempDir()
+	stateFile := filepath.Join(tempDir, "release-test.json")
+	reg := NewPoolRegistry(stateFile)
+
+	initialPool := PoolDefinition{
+		Family:     "gemini_pure",
+		BasePrefix: "agy",
+		LeaderAuth: "acc1.json",
+		Reserves:   []string{"acc2.json", "acc3.json"},
+		Members:    []string{"acc1.json", "acc2.json", "acc3.json"},
+		MemberModels: map[string]string{
+			"acc1.json": "gemini-3.8-flash-high",
+			"acc2.json": "gemini-3.7-flash-high",
+			"acc3.json": "gemini-2.5-flash",
+		},
+	}
+	if err := reg.SavePool(initialPool); err != nil {
+		t.Fatalf("failed to save initial pool: %v", err)
+	}
+
+	// 1. Release acc2 from pool (new reserves: ["acc3.json"])
+	updatedPool := PoolDefinition{
+		Family:     "gemini_pure",
+		BasePrefix: "agy",
+		LeaderAuth: "acc1.json",
+		Reserves:   []string{"acc3.json"},
+		Members:    []string{"acc1.json", "acc3.json"},
+		MemberModels: map[string]string{
+			"acc1.json": "gemini-3.8-flash-high",
+			"acc3.json": "gemini-2.5-flash",
+		},
+	}
+	if err := reg.SavePool(updatedPool); err != nil {
+		t.Fatalf("failed to save updated pool: %v", err)
+	}
+
+	saved, ok := reg.GetPool("agy")
+	if !ok {
+		t.Fatal("expected pool to exist")
+	}
+
+	// Verify acc2 is NOT resuscitated
+	members := saved.AllMembers()
+	if len(members) != 2 {
+		t.Fatalf("expected 2 members after release, got %d: %v", len(members), members)
+	}
+	for _, m := range members {
+		if m == "acc2.json" {
+			t.Fatal("acc2.json was resuscitated into members!")
+		}
+	}
+	if len(saved.Reserves) != 1 || saved.Reserves[0] != "acc3.json" {
+		t.Fatalf("expected reserves to be [acc3.json], got %v", saved.Reserves)
+	}
+
+	// Verify MemberModels was sanitized
+	if _, exists := saved.MemberModels["acc2.json"]; exists {
+		t.Fatal("acc2.json stale model assignment was not sanitized!")
+	}
+	if saved.MemberModels["acc1.json"] != "gemini-3.8-flash-high" || saved.MemberModels["acc3.json"] != "gemini-2.5-flash" {
+		t.Fatalf("unexpected member models: %v", saved.MemberModels)
+	}
+
+	// 2. Release leader acc1: acc3 becomes the new leader, ActiveLeader resyncs
+	leaderReleasedPool := PoolDefinition{
+		Family:     "gemini_pure",
+		BasePrefix: "agy",
+		LeaderAuth: "acc3.json",
+		Reserves:   []string{},
+		Members:    []string{"acc3.json"},
+		MemberModels: map[string]string{
+			"acc3.json": "gemini-2.5-flash",
+		},
+	}
+	if err := reg.SavePool(leaderReleasedPool); err != nil {
+		t.Fatalf("failed to release leader: %v", err)
+	}
+
+	savedLeader, _ := reg.GetPool("agy")
+	if savedLeader.LeaderAuth != "acc3.json" {
+		t.Fatalf("expected leader to be acc3.json, got %s", savedLeader.LeaderAuth)
+	}
+	if savedLeader.ActiveLeader != "acc3.json" {
+		t.Fatalf("expected active_leader to resync to acc3.json, got %s", savedLeader.ActiveLeader)
+	}
+	if len(savedLeader.AllMembers()) != 1 {
+		t.Fatalf("expected 1 member left, got %d", len(savedLeader.AllMembers()))
+	}
+	if _, exists := savedLeader.MemberModels["acc1.json"]; exists {
+		t.Fatal("acc1.json stale model assignment was not sanitized!")
+	}
+}
+

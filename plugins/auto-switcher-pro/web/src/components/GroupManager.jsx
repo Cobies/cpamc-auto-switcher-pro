@@ -1407,9 +1407,21 @@ export default function GroupManager({
       const poolDef = registeredPools.find((p) => p.base_prefix === targetPoolBase);
       if (poolDef) {
         const updatedReserves = (poolDef.reserves || []).filter((f) => f !== fileName);
+        const updatedMembers = (poolDef.members || []).filter((f) => f !== fileName);
+        const updatedMemberModels = { ...(poolDef.member_models || {}) };
+        delete updatedMemberModels[fileName];
+
+        let updatedActiveLeader = poolDef.active_leader;
+        if (updatedActiveLeader === fileName) {
+          updatedActiveLeader = poolDef.leader_auth || (updatedReserves.length > 0 ? updatedReserves[0] : '');
+        }
+
         const updatedPayload = {
           ...poolDef,
+          members: updatedMembers,
           reserves: updatedReserves,
+          member_models: updatedMemberModels,
+          active_leader: updatedActiveLeader,
         };
         try {
           await savePool(updatedPayload);
@@ -1434,6 +1446,104 @@ export default function GroupManager({
       setIsSubmitting(false);
     }
   }, [registeredPools, existingPools, onReloadRequested]);
+
+  // Liberar el líder actual de un pool: promueve la primera reserva a líder y re-indexa los prefijos
+  const handleReleaseLeader = useCallback(async (targetPoolBase, leaderNode) => {
+    if (!targetPoolBase || !leaderNode) return;
+    const fileName = leaderNode.data?.fileName || leaderNode.name || leaderNode.id || '';
+    const email = leaderNode.data?.email || fileName;
+    if (!fileName) return;
+
+    const existingPool = existingPools.find((p) => p.basePrefix === targetPoolBase);
+    const reserves = existingPool?.reserves || [];
+
+    if (reserves.length === 0) {
+      if (
+        !window.confirm(
+          `⚠️ Esta cuenta es el único miembro del pool "${targetPoolBase}". Para liberarla se disolverá el pool completo. ¿Deseas disolver el pool?`
+        )
+      ) {
+        return;
+      }
+      return handleDissolvePool(existingPool);
+    }
+
+    if (
+      !window.confirm(
+        `¿Liberar la cuenta líder "${email}" del pool "${targetPoolBase}"? Se promoverá la primera reserva a nuevo líder del pool.`
+      )
+    ) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setErrorMessage('');
+    try {
+      const nextLeaderNode = reserves[0].node;
+      const nextLeaderFile = nextLeaderNode?.data?.fileName || nextLeaderNode?.name || nextLeaderNode?.id || '';
+      const remainingReserves = reserves.slice(1);
+
+      // Parchear prefijos en disco
+      const prefixUpdates = [
+        { name: fileName, prefix: '' },
+        { name: nextLeaderFile, prefix: targetPoolBase },
+        ...remainingReserves.map((r, idx) => ({
+          name: r.node?.data?.fileName || r.node?.name || r.node?.id || '',
+          prefix: `${targetPoolBase}_${idx + 1}`,
+        })),
+      ].filter((u) => Boolean(u.name));
+
+      try {
+        await saveAuthFilePrefixes(prefixUpdates);
+      } catch (patchErr) {
+        console.warn('saveAuthFilePrefixes warning on release leader:', patchErr);
+      }
+
+      const poolDef = registeredPools.find((p) => p.base_prefix === targetPoolBase);
+      const remainingReserveFiles = remainingReserves.map((r) => r.node?.data?.fileName || r.node?.name || r.node?.id).filter(Boolean);
+      const newMembers = [nextLeaderFile, ...remainingReserveFiles];
+
+      const updatedMemberModels = { ...(poolDef?.member_models || existingPool?.memberModels || {}) };
+      delete updatedMemberModels[fileName];
+
+      const updatedPayload = {
+        ...(poolDef || {}),
+        base_prefix: targetPoolBase,
+        leader_auth: nextLeaderFile,
+        leader_email: nextLeaderNode?.data?.email || nextLeaderFile,
+        active_leader: nextLeaderFile,
+        members: newMembers,
+        reserves: remainingReserveFiles,
+        member_models: updatedMemberModels,
+      };
+
+      try {
+        await savePool(updatedPayload);
+      } catch (poolErr) {
+        console.warn('savePool error on release leader:', poolErr);
+      }
+
+      setRegisteredPools((prev) => {
+        const exists = prev.some((p) => p.base_prefix === targetPoolBase);
+        if (exists) {
+          return prev.map((p) => (p.base_prefix === targetPoolBase ? updatedPayload : p));
+        }
+        return [...prev, updatedPayload];
+      });
+
+      setSuccessFeedback(`✓ Cuenta líder "${email}" liberada del pool "${targetPoolBase}". "${nextLeaderNode?.data?.email || nextLeaderFile}" promovida a líder.`);
+      if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
+      feedbackTimeoutRef.current = setTimeout(() => setSuccessFeedback(''), 5000);
+
+      if (typeof onReloadRequested === 'function') {
+        await onReloadRequested();
+      }
+    } catch (err) {
+      setErrorMessage(`Error al liberar líder: ${err.message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [registeredPools, existingPools, handleDissolvePool, onReloadRequested]);
 
   const providerAuraClass = family ? `provider-${family}` : 'provider-neutral';
 
@@ -2263,6 +2373,26 @@ export default function GroupManager({
                           }}>
                             🔄 DINÁMICO
                           </span>
+                          <button
+                            type="button"
+                            onClick={() => handleReleaseLeader(pool.basePrefix, pool.root)}
+                            disabled={isSubmitting}
+                            title="Liberar líder del pool y promover primera reserva"
+                            data-testid={`btn-release-leader-${pool.basePrefix}`}
+                            style={{
+                              background: 'rgba(239, 68, 68, 0.12)',
+                              border: '1px solid rgba(239, 68, 68, 0.3)',
+                              color: '#fca5a5',
+                              borderRadius: 4,
+                              padding: '1px 6px',
+                              fontSize: 10,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              marginLeft: 2,
+                            }}
+                          >
+                            ✕
+                          </button>
                         </div>
                       </div>
                       <div className="group-pool-member-bottom">
