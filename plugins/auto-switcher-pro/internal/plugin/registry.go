@@ -879,6 +879,41 @@ func handlePoolsHTTP(req ManagementRequestPayload) ([]byte, error) {
 
 					return jsonManagementResponse(http.StatusOK, resp)
 				}
+
+				// Pilar 2, Sección 6 de AGENTS.md: Si el líder necesita enfriamiento preventivo,
+				// solo se rota si existe al menos una reserva sana con cuota disponible (hasHealthyReserve).
+				members := pool.AllMembers()
+				hasHealthyReserve := false
+				for _, m := range members {
+					if strings.EqualFold(m, currentLeader) {
+						continue
+					}
+					resEmail := strings.TrimSuffix(strings.TrimPrefix(m, "antigravity-"), ".json")
+					if !predEngine.ShouldPreventiveCool(resEmail) {
+						if q, hasQ := predEngine.GetLiveQuota(resEmail); hasQ {
+							if q.Window5hPct >= 15.0 && (q.WeeklyPct == 0 || q.WeeklyPct >= 15.0) {
+								hasHealthyReserve = true
+								break
+							}
+						} else {
+							hasHealthyReserve = true
+							break
+						}
+					}
+				}
+
+				if !hasHealthyReserve {
+					resp := map[string]any{
+						"ok":             true,
+						"rotated":        false,
+						"pool_id":        pool.ID,
+						"prefix":         pool.BasePrefix,
+						"current_leader": currentLeader,
+						"reason":         "no_healthy_reserves",
+						"message":        fmt.Sprintf("Pool %s leader %s reached preventive fatigue but no healthy reserves exist; keeping leader to maximize throughput", pool.BasePrefix, currentLeader),
+					}
+					return jsonManagementResponse(http.StatusOK, resp)
+				}
 			}
 
 			p, oldLeader, newLeader, err := registry.RotatePoolLeader(target)

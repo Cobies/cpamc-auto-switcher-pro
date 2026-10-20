@@ -274,6 +274,9 @@ func (s *Switcher) fetchAccountsConcurrently(ctx context.Context, targetProvider
 			// Fetch quota asynchronously if not disabled
 			if !f.Disabled {
 				accountOrProjectID := f.ProjectID
+				if meta.ProjectID != "" {
+					accountOrProjectID = meta.ProjectID
+				}
 				if strings.EqualFold(f.Provider, "codex") && meta.ChatGPTAccountID != "" {
 					accountOrProjectID = meta.ChatGPTAccountID
 				}
@@ -291,6 +294,16 @@ func (s *Switcher) fetchAccountsConcurrently(ctx context.Context, targetProvider
 						state.QuotaErr = errParse
 					} else {
 						state.Quota = parsedQuota
+						if s.client != nil {
+							var win5h, weekly float64 = 100.0, 100.0
+							if parsedQuota.WorstFiveHour != nil {
+								win5h = parsedQuota.WorstFiveHour.RemainingPercentage
+							}
+							if parsedQuota.WorstWeekly != nil {
+								weekly = parsedQuota.WorstWeekly.RemainingPercentage
+							}
+							_ = s.client.PushLiveQuotaTelemetry(ctx, f.Name, win5h, weekly, 0, 0)
+						}
 					}
 				}
 			}

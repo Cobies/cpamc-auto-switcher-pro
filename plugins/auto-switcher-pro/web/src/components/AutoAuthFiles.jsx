@@ -290,6 +290,8 @@ export default function AutoAuthFiles({
           fileName: masterKey,
           auth_index: telemetry.authIndex || '',
           project_id: telemetry.projectId || '',
+          prefix: telemetry.prefix || '',
+          familyRole: telemetry.familyRole || '',
         });
         if (isMountedRef.current) {
           setQuotasMap((prev) => ({
@@ -646,10 +648,10 @@ export default function AutoAuthFiles({
   // 1b. Auto-fetch live quota/tier once per physical master on mount so cards
   // show real Google values when reachable (never fabricated defaults).
   useEffect(() => {
-    const geminiCards = managedCards.filter(
-      (c) => c.familyRole === 'gemini' && c.masterFileName
+    const antigravityCards = managedCards.filter(
+      (c) => (c.familyRole === 'gemini' || c.familyRole === 'claude') && c.masterFileName
     );
-    geminiCards.forEach((card) => {
+    antigravityCards.forEach((card) => {
       const key = card.masterFileName;
       if (autoFetchedMastersRef.current.has(key)) return;
       autoFetchedMastersRef.current.add(key);
@@ -658,6 +660,8 @@ export default function AutoAuthFiles({
         fileName: key,
         auth_index: card.authIndex || '',
         project_id: card.projectId || '',
+        prefix: card.prefix || '',
+        familyRole: card.familyRole || '',
       })
         .then((result) => {
           if (isMountedRef.current) {
@@ -756,7 +760,7 @@ export default function AutoAuthFiles({
       const safeName = maskDisplayIdentifier(fileName);
       if (
         !window.confirm(
-          `¿Seguro que deseas disolver y eliminar la cuenta virtual "${safeName}"? Se borrará físicamente de CPAMC dejando intacta la cuenta maestra física.`
+          `¿Liberar réplica virtual "${safeName}"? Tu cuenta física OAuth y credenciales maestras permanecen 100% intactas en Google/Anthropic.`
         )
       ) {
         return;
@@ -766,13 +770,13 @@ export default function AutoAuthFiles({
       setErrorMessage('');
       try {
         await deleteAuthFile(fileName);
-        setSuccessMessage(`💥 Cuenta virtual "${safeName}" eliminada exitosamente.`);
+        setSuccessMessage(`🧹 Réplica virtual "${safeName}" liberada exitosamente (credencial maestra intacta).`);
         if (typeof onReloadRequested === 'function') {
           await onReloadRequested();
         }
         setTimeout(() => setSuccessMessage(''), 4000);
       } catch (err) {
-        setErrorMessage(`Error al eliminar cuenta virtual: ${err.message}`);
+        setErrorMessage(`Error al liberar réplica virtual: ${err.message}`);
       } finally {
         setIsProcessing(false);
       }
@@ -990,7 +994,7 @@ export default function AutoAuthFiles({
             </h4>
             <p style={{ margin: 0, color: '#94a3b8', fontSize: '13px', maxWidth: '540px', display: 'inline-block' }}>
               Las tarjetas de pool deben generarse a través de{' '}
-              <strong>"🛠️ Crear Group/Pefiles"</strong>. Una vez estructurados los pools de Gemini o Claude, sus tarjetas se reflejarán aquí automáticamente.
+              <strong>"🛠️ Crear Group/Perfiles"</strong>. Una vez estructurados los pools de Gemini o Claude, sus tarjetas se reflejarán aquí automáticamente.
             </p>
           </div>
         ) : (
@@ -1241,9 +1245,10 @@ export default function AutoAuthFiles({
                                 onClick={() => handleDeleteVirtual(virtualFileToDelete)}
                                 disabled={isProcessing}
                                 data-testid={`btn-delete-virtual-${virtualFileToDelete}`}
+                                title="Liberar réplica virtual de disco (la cuenta maestra física OAuth permanece intacta)"
                               >
-                                <span>💥</span>
-                                <span>Disolver / Eliminar Clon</span>
+                                <span>🧹</span>
+                                <span>Liberar Réplica Virtual</span>
                               </button>
                             </div>
                           )}

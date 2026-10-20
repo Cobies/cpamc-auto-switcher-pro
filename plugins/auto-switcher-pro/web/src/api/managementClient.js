@@ -338,6 +338,16 @@ export function assertSafeSameOrigin(endpoint) {
   }
 }
 
+let serverTimeOffsetMs = 0;
+
+/**
+ * Returns current server time offset in milliseconds relative to local clock.
+ * Guarded against jitter: only non-zero when drift exceeds 2 seconds.
+ */
+export function getServerTimeOffsetMs() {
+  return serverTimeOffsetMs;
+}
+
 /**
  * Executes an authenticated API fetch against the Management API.
  * Fails closed if management key is missing.
@@ -407,6 +417,20 @@ export async function apiFetch(endpoint, options = {}) {
   } catch {
     // Sanitize network errors so no tokens or sensitive connection details leak
     throw new Error('Management API network request failed');
+  }
+
+  // Sincronización client-server con HTTP Date header y Drift Guard (2s)
+  const dateHeader = res?.headers?.get?.('date');
+  if (dateHeader) {
+    try {
+      const serverTime = new Date(dateHeader).getTime();
+      if (!Number.isNaN(serverTime)) {
+        const delta = serverTime - Date.now();
+        if (Math.abs(delta) > 2000) {
+          serverTimeOffsetMs = delta;
+        }
+      }
+    } catch {}
   }
 
   if (!res.ok) {
@@ -2219,15 +2243,15 @@ export const ANTIGRAVITY_SUBSCRIPTION_URL =
   'https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist';
 
 export const ANTIGRAVITY_QUOTA_URLS = [
-  'https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary',
   'https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary',
+  'https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary',
   'https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:retrieveUserQuotaSummary',
 ];
 
 export const ANTIGRAVITY_HEADERS = {
   Authorization: 'Bearer $TOKEN$',
   'Content-Type': 'application/json',
-  'User-Agent': 'antigravity/cli/1.0.13 (aidev_client; os_type=darwin; arch=arm64)',
+  'User-Agent': 'antigravity/hub/2.23.0 darwin/arm64',
 };
 
 export const ANTIGRAVITY_PLAN_BY_TIER_ID = {
@@ -2527,21 +2551,44 @@ export async function fetchCardQuota(cardOrNode, options = {}) {
   // el motor predictivo en Go sin demorar la respuesta de la UI.
   if (groups.length > 0) {
     try {
-      let win5h = 100.0;
-      let winWeekly = 100.0;
+      const cleanPref = (cardOrNode?.prefix || cardOrNode?.note || '').trim().toLowerCase();
+      const famRole = (cardOrNode?.familyRole || '').trim().toLowerCase();
+      const isClaude =
+        famRole === 'claude' ||
+        cleanPref.startsWith('agy_clau') ||
+        cleanPref.startsWith('agy_son') ||
+        cleanPref.startsWith('agy_opus') ||
+        cleanPref.startsWith('clau') ||
+        cleanPref.startsWith('son') ||
+        cleanPref.startsWith('opus');
+      const isGemini =
+        famRole === 'gemini' ||
+        (!isClaude && (/^agy\d*(_\d+)?$/.test(cleanPref) || cleanPref.startsWith('g') || cleanPref === 'default'));
+
+      let win5h = null;
+      let winWeekly = null;
       let win5hResetIn = 0;
       let winWeeklyResetIn = 0;
 
       for (const g of groups) {
+        const titleLower = (g.title || '').toLowerCase();
+        // Aislamiento de familias: no cruzar grupos de Claude y Gemini
+        if (isGemini && !titleLower.includes('gemini')) continue;
+        if (isClaude && !titleLower.includes('claude') && !titleLower.includes('gpt')) continue;
+
         for (const r of g.rows || []) {
           const l = (r.label || '').toLowerCase();
           if (l.includes('5') || l.includes('five')) {
-            win5h = typeof r.percent === 'number' ? r.percent : 100.0;
+            if (typeof r.percent === 'number') {
+              win5h = win5h === null ? r.percent : Math.min(win5h, r.percent);
+            }
             if (r.resetMs) {
               win5hResetIn = Math.max(0, Math.round((r.resetMs - Date.now()) / 1000));
             }
           } else if (l.includes('week')) {
-            winWeekly = typeof r.percent === 'number' ? r.percent : 100.0;
+            if (typeof r.percent === 'number') {
+              winWeekly = winWeekly === null ? r.percent : Math.min(winWeekly, r.percent);
+            }
             if (r.resetMs) {
               winWeeklyResetIn = Math.max(0, Math.round((r.resetMs - Date.now()) / 1000));
             }
@@ -2557,15 +2604,16 @@ export async function fetchCardQuota(cardOrNode, options = {}) {
         cardOrNode?.auth_index ||
         '';
 
-      if (accKey) {
+      // Solo empujar telemetría si se obtuvieron cuotas reales para la familia (evita falso 100%)
+      if (accKey && (win5h !== null || winWeekly !== null)) {
         // Fire-and-forget background push to Go CGO plugin
         apiFetch('/v0/management/auto-switcher-pro/predictive/telemetry', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             account_key: accKey,
-            window_5h_pct: win5h,
-            weekly_pct: winWeekly,
+            window_5h_pct: win5h !== null ? win5h : 100.0,
+            weekly_pct: winWeekly !== null ? winWeekly : 100.0,
             window_5h_reset_in: win5hResetIn,
             weekly_reset_in: winWeeklyResetIn,
             plan: plan || 'Unknown',

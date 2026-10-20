@@ -9,13 +9,16 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
+const AntigravityUserAgent = "antigravity/hub/2.23.0 darwin/arm64"
+
 // Antigravity quota endpoints in fallback priority order
 var AntigravityQuotaEndpoints = []string{
-	"https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
 	"https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
+	"https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
 	"https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:retrieveUserQuotaSummary",
 }
 
@@ -32,9 +35,10 @@ var CodexHeaders = map[string]string{
 
 // Client interacts with the CLIProxyAPI Management API.
 type Client struct {
-	baseURL    string
-	mgmtKey    string
-	httpClient *http.Client
+	baseURL        string
+	mgmtKey        string
+	httpClient     *http.Client
+	projectIDCache sync.Map
 }
 
 // New creates a new Management API client.
@@ -109,6 +113,7 @@ func (c *Client) ListAuthFiles(ctx context.Context) ([]AuthFileEntry, error) {
 type AuthFileMetadata struct {
 	Prefix           string
 	ChatGPTAccountID string
+	ProjectID        string
 }
 
 // GetAuthFileDetails downloads the raw credential JSON and extracts prefix and optional chatgpt_account_id.
@@ -143,6 +148,36 @@ func (c *Client) GetAuthFileDetails(ctx context.Context, name string) (AuthFileM
 		if prefixStr, isStr := prefixVal.(string); isStr {
 			meta.Prefix = strings.TrimSpace(prefixStr)
 		}
+	}
+
+	// Extract project_id if present (direct, quota_project_id, or nested in installed / web)
+	for _, key := range []string{"project_id", "projectId", "quota_project_id"} {
+		if val, ok := rawMap[key]; ok && val != nil {
+			if strVal, isStr := val.(string); isStr && strings.TrimSpace(strVal) != "" {
+				meta.ProjectID = strings.TrimSpace(strVal)
+				break
+			}
+		}
+	}
+	if meta.ProjectID == "" {
+		for _, parentKey := range []string{"installed", "web"} {
+			if nested, ok := rawMap[parentKey].(map[string]any); ok && nested != nil {
+				for _, key := range []string{"project_id", "projectId", "quota_project_id"} {
+					if val, ok := nested[key]; ok && val != nil {
+						if strVal, isStr := val.(string); isStr && strings.TrimSpace(strVal) != "" {
+							meta.ProjectID = strings.TrimSpace(strVal)
+							break
+						}
+					}
+				}
+				if meta.ProjectID != "" {
+					break
+				}
+			}
+		}
+	}
+	if meta.ProjectID != "" {
+		c.projectIDCache.Store(name, meta.ProjectID)
 	}
 
 	// Extract ChatGPT account ID if present
@@ -241,14 +276,97 @@ func (c *Client) doAPICall(ctx context.Context, apiReq APICallRequest) ([]byte, 
 	}
 }
 
+// DiscoverAntigravityProjectID discovers project_id dynamically via loadCodeAssist if not present in credentials.
+func (c *Client) DiscoverAntigravityProjectID(ctx context.Context, authIndex string) (string, error) {
+	if cached, ok := c.projectIDCache.Load(authIndex); ok {
+		if str, isStr := cached.(string); isStr && str != "" {
+			return str, nil
+		}
+	}
+
+	apiReq := APICallRequest{
+		AuthIndex: authIndex,
+		Method:    http.MethodPost,
+		URL:       "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
+		Header: map[string]string{
+			"Authorization": "Bearer $TOKEN$",
+			"Content-Type":  "application/json",
+			"User-Agent":    AntigravityUserAgent,
+		},
+		Data: `{"metadata":{"ideType":"ANTIGRAVITY"}}`,
+	}
+
+	respBytes, err := c.doAPICall(ctx, apiReq)
+	if err != nil {
+		return "", err
+	}
+
+	var res struct {
+		CloudaicompanionProject string `json:"cloudaicompanionProject"`
+		Project                 string `json:"project"`
+	}
+	if err := json.Unmarshal(respBytes, &res); err == nil {
+		pID := strings.TrimSpace(res.CloudaicompanionProject)
+		if pID == "" {
+			pID = strings.TrimSpace(res.Project)
+		}
+		if pID != "" {
+			c.projectIDCache.Store(authIndex, pID)
+			return pID, nil
+		}
+	}
+
+	return "", fmt.Errorf("project_id not found in loadCodeAssist response")
+}
+
+// PushLiveQuotaTelemetry sends evaluated live quota from headless / CLI directly to the Auto Switcher Pro predictive engine.
+func (c *Client) PushLiveQuotaTelemetry(ctx context.Context, accountKey string, win5hPct, weeklyPct float64, win5hResetIn, weeklyResetIn int64) error {
+	payload := map[string]any{
+		"account_key":        accountKey,
+		"window_5h_pct":      win5hPct,
+		"weekly_pct":         weeklyPct,
+		"window_5h_reset_in": win5hResetIn,
+		"weekly_reset_in":    weeklyResetIn,
+		"source":             "headless_cli",
+	}
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	reqURL := fmt.Sprintf("%s/v0/management/auto-switcher-pro/predictive/telemetry", c.baseURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c.setHeaders(req)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return nil
+}
+
 // GetQuotaSummary calls Antigravity's retrieveUserQuotaSummary via the management api-call proxy.
 func (c *Client) GetQuotaSummary(ctx context.Context, authIndex, projectID string) ([]byte, error) {
+	cleanPID := strings.TrimSpace(projectID)
+	if cleanPID == "" {
+		if cachedPID, ok := c.projectIDCache.Load(authIndex); ok {
+			cleanPID = cachedPID.(string)
+		} else {
+			if discPID, err := c.DiscoverAntigravityProjectID(ctx, authIndex); err == nil && discPID != "" {
+				cleanPID = discPID
+			}
+		}
+	}
+
 	var lastErr error
 
 	for _, endpoint := range AntigravityQuotaEndpoints {
 		payloadData := "{}"
-		if strings.TrimSpace(projectID) != "" {
-			payloadData = fmt.Sprintf(`{"project":%q}`, strings.TrimSpace(projectID))
+		if cleanPID != "" {
+			payloadData = fmt.Sprintf(`{"project":%q}`, cleanPID)
 		}
 
 		apiReq := APICallRequest{
@@ -258,7 +376,7 @@ func (c *Client) GetQuotaSummary(ctx context.Context, authIndex, projectID strin
 			Header: map[string]string{
 				"Authorization": "Bearer $TOKEN$",
 				"Content-Type":  "application/json",
-				"User-Agent":    "antigravity/cli/1.0.13 (aidev_client; os_type=darwin; arch=arm64)",
+				"User-Agent":    AntigravityUserAgent,
 			},
 			Data: payloadData,
 		}
