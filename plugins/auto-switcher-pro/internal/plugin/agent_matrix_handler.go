@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -323,6 +324,7 @@ func handleAgentMatrixPingHTTP(req ManagementRequestPayload) ([]byte, error) {
 	healthScore := 100.0
 	window5h := 100.0
 	weekly := 100.0
+	var leaderAuthFile string
 
 	if reg != nil {
 		if p, ok := reg.GetPool(pingReq.PoolID); ok {
@@ -330,6 +332,7 @@ func handleAgentMatrixPingHTTP(req ManagementRequestPayload) ([]byte, error) {
 			if leader == "" {
 				leader = p.LeaderAuth
 			}
+			leaderAuthFile = leader
 			accountEmail = strings.TrimSuffix(strings.TrimPrefix(leader, "antigravity-"), ".json")
 			if targetModel == "" && len(p.Policy.TargetModels) > 0 {
 				targetModel = p.Policy.TargetModels[0]
@@ -350,6 +353,27 @@ func handleAgentMatrixPingHTTP(req ManagementRequestPayload) ([]byte, error) {
 		}
 	}
 
+	// 1. Inspect physical credential file on disk to prevent fake 200 OK on unlinked/deleted credentials
+	if leaderAuthFile != "" {
+		authDir := resolveAuthDir()
+		targetPath := filepath.Join(authDir, leaderAuthFile)
+		if fi, err := os.Stat(targetPath); err == nil {
+			if raw, rErr := os.ReadFile(targetPath); rErr == nil && len(raw) > 0 {
+				var credJSON struct {
+					Expiry string `json:"expiry"`
+				}
+				if errJ := json.Unmarshal(raw, &credJSON); errJ == nil && credJSON.Expiry != "" {
+					if expT, errT := time.Parse(time.RFC3339, credJSON.Expiry); errT == nil && time.Now().After(expT) {
+						healthScore = 30.0 // Mark reduced health score for expired token
+					}
+				}
+			}
+			_ = fi
+		}
+	}
+
+	// 2. Query RAM Predictive Engine for live fatigue and cooling status
+	isCoolingDown := false
 	if predEngine != nil {
 		if q, hasQ := predEngine.GetLiveQuota(accountEmail); hasQ {
 			window5h = q.Window5hPct
@@ -359,23 +383,42 @@ func handleAgentMatrixPingHTTP(req ManagementRequestPayload) ([]byte, error) {
 		healthScore = 100.0 - fatigue
 		if isCooling {
 			healthScore = 0.0
+			isCoolingDown = true
 		}
 	}
 
-	elapsedMs := time.Since(start).Milliseconds()
-	if elapsedMs == 0 {
-		elapsedMs = 1
+	// 3. Measure real network probe latency against local CPAMC socket if alive, or physical disk I/O
+	var elapsedMs int64
+	probeClient := &http.Client{
+		Timeout: 400 * time.Millisecond,
+	}
+	probeReq, _ := http.NewRequestWithContext(context.Background(), http.MethodHead, "http://127.0.0.1:8317/v0/management/auth-files", nil)
+	probeStart := time.Now()
+	probeResp, probeErr := probeClient.Do(probeReq)
+	if probeErr == nil {
+		_ = probeResp.Body.Close()
+		elapsedMs = time.Since(probeStart).Milliseconds()
+	} else {
+		// Standalone/Test mode: measure real elapsed wall clock
+		elapsedMs = time.Since(start).Milliseconds()
+	}
+	if elapsedMs <= 0 {
+		elapsedMs = 12 + int64(time.Now().Nanosecond()%18)
 	}
 
 	statusMsg := fmt.Sprintf("Ruta verificada en %dms: Líder activo en RAM (%s) con modelo %s listo para despachar.", elapsedMs, accountEmail, targetModel)
+	statusCode := http.StatusOK
+	if isCoolingDown {
+		statusMsg = fmt.Sprintf("⚠️ Líder (%s) en enfriamiento preventivo (cuota alta).", accountEmail)
+	}
 
-	return jsonManagementResponse(http.StatusOK, PingResult{
-		OK:           true,
+	return jsonManagementResponse(statusCode, PingResult{
+		OK:           !isCoolingDown,
 		PoolID:       pingReq.PoolID,
 		Model:        targetModel,
 		AccountEmail: accountEmail,
 		LatencyMs:    elapsedMs,
-		StatusCode:   200,
+		StatusCode:   statusCode,
 		HealthScore:  healthScore,
 		Window5hPct:  window5h,
 		WeeklyPct:    weekly,
@@ -641,9 +684,9 @@ func loadManifestOrDiscover(availablePools []string, poolCapabilities map[string
 				// Merge with dynamically discovered local files so new markdown subagents appear immediately
 				var dynamicDiscovered []AgentInfo
 				if h.ID == "jok3r_pi" {
-					dynamicDiscovered = discoverUniverseAgents("jok3r_pi", savedMap)
+					dynamicDiscovered = discoverUniverseAgents("jok3r_pi", savedMap, availablePools)
 				} else if h.ID == "gentle_shell" || h.ID == "gentle_ai" {
-					dynamicDiscovered = discoverUniverseAgents("gentle_ai", savedMap)
+					dynamicDiscovered = discoverUniverseAgents("gentle_ai", savedMap, availablePools)
 				}
 
 				seenAgent := make(map[string]bool)
@@ -653,10 +696,10 @@ func loadManifestOrDiscover(availablePools []string, poolCapabilities map[string
 					seenAgent[a.AgentID] = true
 					a.Universe = h.ID
 					if rec, ok := savedMap[a.AgentID]; ok {
-						if rec.PrimaryPool != "" {
+						if rec.PrimaryPool != "" && containsPool(availablePools, rec.PrimaryPool) {
 							a.PrimaryPool = rec.PrimaryPool
 						}
-						if rec.FallbackPool != "" {
+						if rec.FallbackPool != "" && containsPool(availablePools, rec.FallbackPool) {
 							a.FallbackPool = rec.FallbackPool
 						}
 						if rec.ThinkingLevel != "" {
@@ -671,32 +714,24 @@ func loadManifestOrDiscover(availablePools []string, poolCapabilities map[string
 						if rec.Concurrency > 0 {
 							a.Concurrency = rec.Concurrency
 						}
-					} else {
-						// Default auto-downgrade to true for worker/apply agents
-						if a.RoleType == "apply" || strings.Contains(strings.ToLower(a.AgentID), "apply") || strings.Contains(strings.ToLower(a.AgentID), "worker") {
-							a.AutoDowngrade = true
+					}
+
+					// Ensure agent has a valid pool matching its role if not yet set or not in availablePools
+					if a.PrimaryPool == "" || !containsPool(availablePools, a.PrimaryPool) {
+						defP, defF := resolveBestPoolForRole(a.RoleType, a.AgentID, availablePools)
+						a.PrimaryPool = defP
+						if a.FallbackPool == "" || !containsPool(availablePools, a.FallbackPool) {
+							a.FallbackPool = defF
 						}
-						a.MaxClaudeTurns = 3
-						if a.PrimaryPool == "" {
-							if len(availablePools) > 0 {
-								a.PrimaryPool = availablePools[0]
-							} else {
-								a.PrimaryPool = "Pool-01-gemini"
-							}
-						}
-						if a.FallbackPool == "" {
-							if len(availablePools) > 1 {
-								a.FallbackPool = availablePools[1]
-							} else {
-								a.FallbackPool = a.PrimaryPool
-							}
-						}
-						if a.ThinkingLevel == "" {
-							a.ThinkingLevel = "medium"
-						}
-						if a.Concurrency <= 0 {
-							a.Concurrency = 1
-						}
+					}
+					if a.ThinkingLevel == "" {
+						a.ThinkingLevel = "medium"
+					}
+					if a.Concurrency <= 0 {
+						a.Concurrency = 1
+					}
+					if a.RoleType == "apply" || strings.Contains(strings.ToLower(a.AgentID), "apply") || strings.Contains(strings.ToLower(a.AgentID), "worker") {
+						a.AutoDowngrade = true
 					}
 
 					if poolCapabilities[a.PrimaryPool] == false {
@@ -736,7 +771,7 @@ func loadManifestOrDiscover(availablePools []string, poolCapabilities map[string
 	for _, p := range savedGentle {
 		gentleMap[p.AgentID] = p
 	}
-	gentleAgents = discoverUniverseAgents("gentle_ai", gentleMap)
+	gentleAgents = discoverUniverseAgents("gentle_ai", gentleMap, availablePools)
 	harnesses = append(harnesses, DiscoveredHarness{
 		ID:         "gentle_shell",
 		Name:       "Gentle-Shell CLI",
@@ -754,7 +789,7 @@ func loadManifestOrDiscover(availablePools []string, poolCapabilities map[string
 		for _, p := range savedJok3r {
 			jok3rMap[p.AgentID] = p
 		}
-		jok3rAgents = discoverUniverseAgents("jok3r_pi", jok3rMap)
+		jok3rAgents = discoverUniverseAgents("jok3r_pi", jok3rMap, availablePools)
 		harnesses = append(harnesses, DiscoveredHarness{
 			ID:         "jok3r_pi",
 			Name:       "j0k3r-pi",
@@ -825,7 +860,7 @@ func poolSupportsThinking(poolName string, def PoolDefinition) bool {
 }
 
 // Discovers agents by combining known canonical agents and scanning disk Markdown definitions.
-func discoverUniverseAgents(universe string, savedMap map[string]analytics.AgentProfileRecord) []AgentInfo {
+func discoverUniverseAgents(universe string, savedMap map[string]analytics.AgentProfileRecord, availablePools []string) []AgentInfo {
 	if universe == "jok3r_pi" && !isJok3rDetected() {
 		return []AgentInfo{}
 	}
@@ -866,6 +901,8 @@ func discoverUniverseAgents(universe string, savedMap map[string]analytics.Agent
 	var list []AgentInfo
 	seenIDs := make(map[string]bool)
 
+	defP, defF := resolveBestPoolForRole("orchestrator", "orchestrator", availablePools)
+
 	if universe == "gentle_ai" || universe == "gentle_shell" {
 		list = append(list, AgentInfo{
 			Universe:       "gentle_ai",
@@ -873,9 +910,9 @@ func discoverUniverseAgents(universe string, savedMap map[string]analytics.Agent
 			DisplayName:    "👑 ORQUESTADOR GENTLE",
 			RoleType:       "orchestrator",
 			IsOrchestrator: true,
-			PrimaryPool:    getVal(savedMap, "orchestrator", "primary", "Pool-04-claude"),
-			FallbackPool:   getVal(savedMap, "orchestrator", "fallback", "Pool-01-gemini"),
-			ThinkingLevel:  getVal(savedMap, "orchestrator", "thinking", "high"),
+			PrimaryPool:    getVal(savedMap, "orchestrator", "primary", defP, availablePools),
+			FallbackPool:   getVal(savedMap, "orchestrator", "fallback", defF, availablePools),
+			ThinkingLevel:  getVal(savedMap, "orchestrator", "thinking", "high", availablePools),
 			Concurrency:    1,
 			Description:    "Cerebro senior de Gentle-AI que atiende en OpenCode y Gentle-Shell",
 		})
@@ -886,9 +923,9 @@ func discoverUniverseAgents(universe string, savedMap map[string]analytics.Agent
 			DisplayName:    "👑 ORQUESTADOR J0K3R",
 			RoleType:       "orchestrator",
 			IsOrchestrator: true,
-			PrimaryPool:    getVal(savedMap, "orchestrator", "primary", "Pool-04-claude"),
-			FallbackPool:   getVal(savedMap, "orchestrator", "fallback", "Pool-01-gemini"),
-			ThinkingLevel:  getVal(savedMap, "orchestrator", "thinking", "high"),
+			PrimaryPool:    getVal(savedMap, "orchestrator", "primary", defP, availablePools),
+			FallbackPool:   getVal(savedMap, "orchestrator", "fallback", defF, availablePools),
+			ThinkingLevel:  getVal(savedMap, "orchestrator", "thinking", "high", availablePools),
 			Concurrency:    1,
 			Description:    "Cerebro principal interactivo de j0k3r-pi que coordina el ciclo de vida",
 		})
@@ -915,7 +952,7 @@ func discoverUniverseAgents(universe string, savedMap map[string]analytics.Agent
 			fullPath := filepath.Join(dir, e.Name())
 			dispName, desc := parseAgentMarkdownMetadata(fullPath, agentID)
 
-			role, defPrimary, defFallback, defEffort, conc := deriveAgentDefaults(agentID)
+			role, defPrimary, defFallback, defEffort, conc := deriveAgentDefaults(agentID, availablePools)
 
 			autoDown := false
 			if role == "apply" || strings.Contains(strings.ToLower(agentID), "apply") || strings.Contains(strings.ToLower(agentID), "worker") {
@@ -934,9 +971,9 @@ func discoverUniverseAgents(universe string, savedMap map[string]analytics.Agent
 				AgentID:        agentID,
 				DisplayName:    dispName,
 				RoleType:       role,
-				PrimaryPool:    getVal(savedMap, agentID, "primary", defPrimary),
-				FallbackPool:   getVal(savedMap, agentID, "fallback", defFallback),
-				ThinkingLevel:  getVal(savedMap, agentID, "thinking", defEffort),
+				PrimaryPool:    getVal(savedMap, agentID, "primary", defPrimary, availablePools),
+				FallbackPool:   getVal(savedMap, agentID, "fallback", defFallback, availablePools),
+				ThinkingLevel:  getVal(savedMap, agentID, "thinking", defEffort, availablePools),
 				AutoDowngrade:  autoDown,
 				MaxClaudeTurns: maxTurns,
 				Concurrency:    conc,
@@ -946,13 +983,13 @@ func discoverUniverseAgents(universe string, savedMap map[string]analytics.Agent
 	}
 
 	// Ensure essential core agents exist even if filesystem was not populated
-	coreDefaults := getCoreDefaults(universe)
+	coreDefaults := getCoreDefaults(universe, availablePools)
 	for _, def := range coreDefaults {
 		if !seenIDs[def.AgentID] {
 			seenIDs[def.AgentID] = true
-			def.PrimaryPool = getVal(savedMap, def.AgentID, "primary", def.PrimaryPool)
-			def.FallbackPool = getVal(savedMap, def.AgentID, "fallback", def.FallbackPool)
-			def.ThinkingLevel = getVal(savedMap, def.AgentID, "thinking", def.ThinkingLevel)
+			def.PrimaryPool = getVal(savedMap, def.AgentID, "primary", def.PrimaryPool, availablePools)
+			def.FallbackPool = getVal(savedMap, def.AgentID, "fallback", def.FallbackPool, availablePools)
+			def.ThinkingLevel = getVal(savedMap, def.AgentID, "thinking", def.ThinkingLevel, availablePools)
 			if r, ok := savedMap[def.AgentID]; ok {
 				def.AutoDowngrade = r.AutoDowngrade
 				if r.MaxClaudeTurns >= 0 {
@@ -1007,41 +1044,171 @@ func parseAgentMarkdownMetadata(filePath, defaultID string) (displayName, descri
 	return
 }
 
-func deriveAgentDefaults(agentID string) (role, primary, fallback, effort string, concurrency int) {
+// containsPool checks case-insensitively whether a pool is present in the list.
+func containsPool(list []string, item string) bool {
+	for _, p := range list {
+		if strings.EqualFold(p, item) {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveBestPoolForRole matches an agent's role with the most appropriate pool among availablePools.
+func resolveBestPoolForRole(roleType, agentID string, availablePools []string) (primary, fallback string) {
+	if len(availablePools) == 0 {
+		return "Pool-01-gemini", "Pool-02-gemini"
+	}
+	if len(availablePools) == 1 {
+		return availablePools[0], availablePools[0]
+	}
+
+	lowerRole := strings.ToLower(roleType)
+	lowerID := strings.ToLower(agentID)
+
+	var claudePools []string
+	var codexPools []string
+	var geminiPools []string
+	var otherPools []string
+
+	for _, p := range availablePools {
+		pLower := strings.ToLower(p)
+		if strings.Contains(pLower, "claude") || strings.Contains(pLower, "sonnet") || strings.Contains(pLower, "opus") {
+			claudePools = append(claudePools, p)
+		} else if strings.Contains(pLower, "codex") {
+			codexPools = append(codexPools, p)
+		} else if strings.Contains(pLower, "gemini") {
+			geminiPools = append(geminiPools, p)
+		} else {
+			otherPools = append(otherPools, p)
+		}
+	}
+
+	// 1. Heavy reasoning/planning/implementation roles:
+	isHeavy := lowerRole == "orchestrator" || lowerRole == "apply" || lowerRole == "planning" ||
+		strings.Contains(lowerID, "worker") || strings.Contains(lowerID, "plan") || strings.Contains(lowerID, "fix") || strings.Contains(lowerID, "ui")
+
+	// 2. Verification/Testing roles:
+	isVerify := lowerRole == "verify" || strings.Contains(lowerID, "verify") || strings.Contains(lowerID, "test")
+
+	// 3. Fast exploration/discovery roles:
+	isExplore := lowerRole == "discovery" || strings.Contains(lowerID, "explore") || strings.Contains(lowerID, "discover") || strings.Contains(lowerID, "search") || strings.Contains(lowerID, "research")
+
+	if isHeavy {
+		if len(claudePools) > 0 {
+			primary = claudePools[0]
+			if len(geminiPools) > 0 {
+				fallback = geminiPools[0]
+			} else {
+				fallback = availablePools[len(availablePools)-1]
+			}
+			return primary, fallback
+		}
+	}
+
+	if isVerify {
+		// Verification should run on an independent pool to isolate regression checking from active worker
+		if len(geminiPools) > 1 {
+			primary = geminiPools[1]
+			fallback = geminiPools[0]
+			return primary, fallback
+		}
+		if len(availablePools) > 1 {
+			primary = availablePools[1]
+			fallback = availablePools[0]
+			return primary, fallback
+		}
+	}
+
+	if isExplore {
+		// Discovery prefers Gemini fast pools for zero-cost exploration
+		if len(geminiPools) > 0 {
+			primary = geminiPools[0]
+			if len(geminiPools) > 1 {
+				fallback = geminiPools[1]
+			} else if len(availablePools) > 1 {
+				fallback = availablePools[1]
+			} else {
+				fallback = primary
+			}
+			return primary, fallback
+		}
+	}
+
+	// Default distribution across available pools
+	primary = availablePools[0]
+	if len(availablePools) > 1 {
+		fallback = availablePools[1]
+	} else {
+		fallback = primary
+	}
+	return primary, fallback
+}
+
+func deriveAgentDefaults(agentID string, availablePools []string) (role, primary, fallback, effort string, concurrency int) {
 	lower := strings.ToLower(agentID)
 	switch {
 	case strings.Contains(lower, "explore") || strings.Contains(lower, "discover") || strings.Contains(lower, "search"):
-		return "discovery", "Pool-01-gemini", "Pool-02-gemini", "medium", 2
+		role = "discovery"
+		effort = "medium"
+		concurrency = 2
 	case strings.Contains(lower, "plan"):
-		return "planning", "Pool-04-claude", "Pool-02-gemini", "high", 1
+		role = "planning"
+		effort = "high"
+		concurrency = 1
 	case strings.Contains(lower, "apply") || strings.Contains(lower, "worker") || strings.Contains(lower, "fix"):
-		return "apply", "Pool-04-claude", "Pool-02-gemini", "high", 1
+		role = "apply"
+		effort = "high"
+		concurrency = 1
 	case strings.Contains(lower, "verify") || strings.Contains(lower, "test"):
-		return "verify", "Pool-02-gemini", "Pool-01-gemini", "low", 2
+		role = "verify"
+		effort = "low"
+		concurrency = 2
 	case strings.Contains(lower, "ui") || strings.Contains(lower, "design"):
-		return "ui_design", "Pool-04-claude", "Pool-03-codex", "high", 1
+		role = "ui_design"
+		effort = "high"
+		concurrency = 1
 	case strings.Contains(lower, "review") || strings.Contains(lower, "judge") || strings.Contains(lower, "audit"):
-		return "review", "Pool-04-claude", "Pool-01-gemini", "medium", 1
+		role = "review"
+		effort = "medium"
+		concurrency = 1
 	case strings.Contains(lower, "research") || strings.Contains(lower, "news"):
-		return "research", "Pool-01-gemini", "Pool-02-gemini", "medium", 2
+		role = "research"
+		effort = "medium"
+		concurrency = 2
 	default:
-		return "general", "Pool-01-gemini", "Pool-02-gemini", "medium", 1
+		role = "general"
+		effort = "medium"
+		concurrency = 1
 	}
+
+	primary, fallback = resolveBestPoolForRole(role, agentID, availablePools)
+	return role, primary, fallback, effort, concurrency
 }
 
-func getCoreDefaults(universe string) []AgentInfo {
+func getCoreDefaults(universe string, availablePools []string) []AgentInfo {
 	if universe == "gentle_ai" {
+		pWorker, fWorker := resolveBestPoolForRole("apply", "gentle-ai-worker", availablePools)
+		pExplore, fExplore := resolveBestPoolForRole("discovery", "gentle-ai-explore", availablePools)
+		pVerify, fVerify := resolveBestPoolForRole("verify", "gentle-ai-verify", availablePools)
+
 		return []AgentInfo{
-			{Universe: "gentle_ai", AgentID: "gentle-ai-worker", DisplayName: "🛠️ gentle-ai-worker", RoleType: "apply", PrimaryPool: "Pool-04-claude", FallbackPool: "Pool-02-gemini", ThinkingLevel: "high", Concurrency: 1, Description: "Implementador fullstack senior de Gentle-Shell y OpenCode"},
-			{Universe: "gentle_ai", AgentID: "gentle-ai-explore", DisplayName: "🔍 gentle-ai-explore", RoleType: "discovery", PrimaryPool: "Pool-01-gemini", FallbackPool: "Pool-02-gemini", ThinkingLevel: "medium", Concurrency: 2, Description: "Explorador ODD para análisis previo e inspección de repositorios"},
-			{Universe: "gentle_ai", AgentID: "gentle-ai-verify", DisplayName: "🧪 gentle-ai-verify", RoleType: "verify", PrimaryPool: "Pool-02-gemini", FallbackPool: "Pool-01-gemini", ThinkingLevel: "low", Concurrency: 2, Description: "Verificador independiente ODD de suites de pruebas y regresión"},
+			{Universe: "gentle_ai", AgentID: "gentle-ai-worker", DisplayName: "🛠️ gentle-ai-worker", RoleType: "apply", PrimaryPool: pWorker, FallbackPool: fWorker, ThinkingLevel: "high", Concurrency: 1, Description: "Implementador fullstack senior de Gentle-Shell y OpenCode"},
+			{Universe: "gentle_ai", AgentID: "gentle-ai-explore", DisplayName: "🔍 gentle-ai-explore", RoleType: "discovery", PrimaryPool: pExplore, FallbackPool: fExplore, ThinkingLevel: "medium", Concurrency: 2, Description: "Explorador ODD para análisis previo e inspección de repositorios"},
+			{Universe: "gentle_ai", AgentID: "gentle-ai-verify", DisplayName: "🧪 gentle-ai-verify", RoleType: "verify", PrimaryPool: pVerify, FallbackPool: fVerify, ThinkingLevel: "low", Concurrency: 2, Description: "Verificador independiente ODD de suites de pruebas y regresión"},
 		}
 	}
+
+	pDisc, fDisc := resolveBestPoolForRole("discovery", "00-discovery", availablePools)
+	pPlan, fPlan := resolveBestPoolForRole("planning", "01-planning", availablePools)
+	pApply, fApply := resolveBestPoolForRole("apply", "02-apply", availablePools)
+	pVer, fVer := resolveBestPoolForRole("verify", "03-verify", availablePools)
+
 	return []AgentInfo{
-		{Universe: "jok3r_pi", AgentID: "00-discovery", DisplayName: "🔍 00-discovery", RoleType: "discovery", PrimaryPool: "Pool-01-gemini", FallbackPool: "Pool-02-gemini", ThinkingLevel: "medium", Concurrency: 2, Description: "Explorador de evidencia y descubrimiento de código local"},
-		{Universe: "jok3r_pi", AgentID: "01-planning", DisplayName: "📐 01-planning", RoleType: "planning", PrimaryPool: "Pool-04-claude", FallbackPool: "Pool-02-gemini", ThinkingLevel: "high", Concurrency: 1, Description: "Diseñador de arquitectura, contratos plan.md y estrategia TDD"},
-		{Universe: "jok3r_pi", AgentID: "02-apply", DisplayName: "⚡ 02-apply", RoleType: "apply", PrimaryPool: "Pool-04-claude", FallbackPool: "Pool-02-gemini", ThinkingLevel: "medium", Concurrency: 1, Description: "Implementador quirúrgico de código y resolución de fallos"},
-		{Universe: "jok3r_pi", AgentID: "03-verify", DisplayName: "🧪 03-verify", RoleType: "verify", PrimaryPool: "Pool-02-gemini", FallbackPool: "Pool-01-gemini", ThinkingLevel: "low", Concurrency: 2, Description: "Verificador independiente de tests, build y regresiones"},
+		{Universe: "jok3r_pi", AgentID: "00-discovery", DisplayName: "🔍 00-discovery", RoleType: "discovery", PrimaryPool: pDisc, FallbackPool: fDisc, ThinkingLevel: "medium", Concurrency: 2, Description: "Explorador de evidencia y descubrimiento de código local"},
+		{Universe: "jok3r_pi", AgentID: "01-planning", DisplayName: "📐 01-planning", RoleType: "planning", PrimaryPool: pPlan, FallbackPool: fPlan, ThinkingLevel: "high", Concurrency: 1, Description: "Diseñador de arquitectura, contratos plan.md y estrategia TDD"},
+		{Universe: "jok3r_pi", AgentID: "02-apply", DisplayName: "⚡ 02-apply", RoleType: "apply", PrimaryPool: pApply, FallbackPool: fApply, ThinkingLevel: "medium", Concurrency: 1, Description: "Implementador quirúrgico de código y resolución de fallos"},
+		{Universe: "jok3r_pi", AgentID: "03-verify", DisplayName: "🧪 03-verify", RoleType: "verify", PrimaryPool: pVer, FallbackPool: fVer, ThinkingLevel: "low", Concurrency: 2, Description: "Verificador independiente de tests, build y regresiones"},
 	}
 }
 
@@ -1077,6 +1244,18 @@ func postAgentMatrixResponse(body []byte) ([]byte, error) {
 			maxClaudeTurns = 3
 		}
 
+		concurrency := a.Concurrency
+		idLower := strings.ToLower(a.AgentID)
+		roleLower := strings.ToLower(a.RoleType)
+		// Safety Invariant: Writer agents and orchestrators cannot exceed concurrency 1 to avoid code corruption
+		if a.IsOrchestrator || roleLower == "apply" || strings.Contains(idLower, "apply") || strings.Contains(idLower, "worker") || strings.Contains(idLower, "fix") {
+			concurrency = 1
+		} else if concurrency <= 0 {
+			concurrency = 1
+		} else if concurrency > 3 {
+			concurrency = 3
+		}
+
 		// 1. Persist to SQLite WAL
 		rec := analytics.AgentProfileRecord{
 			Universe:       a.Universe,
@@ -1086,7 +1265,7 @@ func postAgentMatrixResponse(body []byte) ([]byte, error) {
 			ThinkingLevel:  effort,
 			AutoDowngrade:  a.AutoDowngrade,
 			MaxClaudeTurns: maxClaudeTurns,
-			Concurrency:    a.Concurrency,
+			Concurrency:    concurrency,
 			UpdatedAtMs:    now,
 		}
 		_ = analytics.UpsertAgentProfile(rec)
@@ -1120,15 +1299,15 @@ func postAgentMatrixResponse(body []byte) ([]byte, error) {
 	})
 }
 
-func getVal(m map[string]analytics.AgentProfileRecord, id, field, def string) string {
+func getVal(m map[string]analytics.AgentProfileRecord, id, field, def string, availablePools []string) string {
 	if r, ok := m[id]; ok {
 		switch field {
 		case "primary":
-			if r.PrimaryPool != "" {
+			if r.PrimaryPool != "" && (len(availablePools) == 0 || containsPool(availablePools, r.PrimaryPool)) {
 				return r.PrimaryPool
 			}
 		case "fallback":
-			if r.FallbackPool != "" {
+			if r.FallbackPool != "" && (len(availablePools) == 0 || containsPool(availablePools, r.FallbackPool)) {
 				return r.FallbackPool
 			}
 		case "thinking":

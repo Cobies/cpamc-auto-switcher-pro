@@ -115,7 +115,9 @@ func cliproxyPluginFree(ptr unsafe.Pointer, len C.size_t) {
 }
 
 //export cliproxyPluginShutdown
-func cliproxyPluginShutdown() {}
+func cliproxyPluginShutdown() {
+	plugin.GetAutonomousQuotaPoller().Stop()
+}
 
 // hostCall bridges a Go host-callback invocation to the C ABI exposed by the host.
 // It decodes the standard {ok, result, error} envelope returned by CLIProxyAPI.

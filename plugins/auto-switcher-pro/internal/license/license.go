@@ -150,6 +150,15 @@ func saveLicenseFileLocked(path string, lf *LicenseFile) error {
 
 // VerifyActivationKey validates an Ed25519 signature against current machine ID.
 func VerifyActivationKey(keyStr string, currentMachineID string) (*LicenseClaims, error) {
+	pubBytes, err := hex.DecodeString(MasterPublicKeyHex)
+	if err != nil || len(pubBytes) != ed25519.PublicKeySize {
+		return nil, errors.New("error en clave pública del sistema")
+	}
+	return verifyActivationKeyWithPub(keyStr, currentMachineID, pubBytes)
+}
+
+// verifyActivationKeyWithPub es el núcleo de verificación inyectable (usado por tests con pares efímeros).
+func verifyActivationKeyWithPub(keyStr string, currentMachineID string, pubBytes []byte) (*LicenseClaims, error) {
 	keyStr = strings.TrimSpace(keyStr)
 	parts := strings.Split(keyStr, ".")
 	if len(parts) != 2 {
@@ -164,11 +173,6 @@ func VerifyActivationKey(keyStr string, currentMachineID string) (*LicenseClaims
 	sigBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
 		return nil, fmt.Errorf("error al decodificar firma: %w", err)
-	}
-
-	pubBytes, err := hex.DecodeString(MasterPublicKeyHex)
-	if err != nil || len(pubBytes) != ed25519.PublicKeySize {
-		return nil, errors.New("error en clave pública del sistema")
 	}
 
 	// Verify Ed25519 signature

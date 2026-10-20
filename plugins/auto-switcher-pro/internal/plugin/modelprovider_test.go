@@ -3,6 +3,7 @@ package plugin
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -847,9 +848,9 @@ func TestSchedulerPickTaskAwareRouting(t *testing.T) {
 }
 
 func TestSchedulerPickTaskAutoDowngradeAndTriageWarmup(t *testing.T) {
-	_, err := analytics.InitDB()
+	_, err := analytics.ResetDBForTest(filepath.Join(t.TempDir(), "test_rotations.db"))
 	if err != nil {
-		t.Fatalf("InitDB failed: %v", err)
+		t.Fatalf("ResetDBForTest failed: %v", err)
 	}
 
 	registry := testModelProviderRegistry(t)
@@ -858,7 +859,7 @@ func TestSchedulerPickTaskAutoDowngradeAndTriageWarmup(t *testing.T) {
 	t.Cleanup(func() { activeRegistry = previous })
 
 	// Turn 1: Normal initialization with session ID and orchestrator role
-	sessionID := "task-session-downgrade-123"
+	sessionID := fmt.Sprintf("task-session-downgrade-%d", time.Now().UnixNano())
 	reqTurn1 := schedulerPickRequest{
 		Provider: "antigravity",
 		Model:    "claude-sonnet-4-6",
@@ -907,20 +908,24 @@ func TestSchedulerPickTaskAutoDowngradeAndTriageWarmup(t *testing.T) {
 		t.Fatalf("expected handled turn 2, got %+v", respTurn2)
 	}
 
-	// Wait for async SQLite worker queue to commit turn 2 audit event
-	time.Sleep(150 * time.Millisecond)
-
-	// Verify AUTO_DOWNGRADE audit event was recorded
-	events, err := analytics.QueryAuditEvents(10)
-	if err != nil {
-		t.Fatalf("QueryAuditEvents failed: %v", err)
-	}
+	// Wait for async SQLite worker queue to commit turn 2 audit event (polling robusto con deadline)
 	foundDowngrade := false
-	for _, e := range events {
-		if e.EventType == "AUTO_DOWNGRADE" {
-			foundDowngrade = true
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		events, err := analytics.QueryAuditEvents(50)
+		if err != nil {
+			t.Fatalf("QueryAuditEvents failed: %v", err)
+		}
+		for _, e := range events {
+			if e.EventType == "AUTO_DOWNGRADE" {
+				foundDowngrade = true
+				break
+			}
+		}
+		if foundDowngrade {
 			break
 		}
+		time.Sleep(100 * time.Millisecond)
 	}
 	if !foundDowngrade {
 		t.Errorf("expected AUTO_DOWNGRADE event recorded for turn 2")

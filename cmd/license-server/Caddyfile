@@ -1,0 +1,22 @@
+# ============================================================
+# Caddyfile · Reverse Proxy con HTTPS Automático (Let's Encrypt)
+# ============================================================
+# Instrucciones:
+#   1. Reemplaza hub.tudominio.com por tu dominio real (registro DNS A -> IP del VPS).
+#   2. Caddy obtiene y renueva los certificados TLS automáticamente.
+#   3. Redirección HTTP -> HTTPS forzosa incluida por defecto.
+# ============================================================
+
+hub.tudominio.com {
+	# Seguridad: ocultar información del servidor
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+	}
+
+	# Proxy inverso hacia el License Hub (red interna Docker)
+	reverse_proxy license-hub:8444
+}

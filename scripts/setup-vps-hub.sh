@@ -11,24 +11,69 @@ EOF
 
 cat << 'EOF' > docker-compose.yaml
 services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy-proxy
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - web_gateway
+
   license-hub:
     image: alpine:latest
     container_name: cpamc-license-hub
     restart: unless-stopped
-    ports:
-      - '8444:8444'
+    expose:
+      - '8444'
+    env_file:
+      - .env
     environment:
       - PORT=8444
       - DB_PATH=/data/licenses.json
-      - ADMIN_TOKEN=wilox-admin-secret-2026
     volumes:
       - ./license-server:/app/license-server
       - license_data:/data
     entrypoint: ['/app/license-server']
+    networks:
+      - web_gateway
 
 volumes:
   license_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  web_gateway:
+    driver: bridge
 EOF
+
+cat << 'EOF' > Caddyfile
+# Reemplaza hub.tudominio.com por tu dominio real (DNS A -> IP de este VPS)
+hub.tudominio.com {
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+	}
+	reverse_proxy license-hub:8444
+}
+EOF
+
+cat << 'EOF' > .env
+# SECRETS GENERADOS AUTOMÁTICAMENTE - NO COMITEAR
+PORT=8444
+DB_PATH=/data/licenses.json
+ADMIN_TOKEN=$(openssl rand -hex 24)
+PRIVATE_SEED_HEX=$(openssl rand -hex 32)
+EOF
+chmod 600 .env
 
 echo '=== Guardando Logo Oficial ==='
 base64 -d << 'LOGO_EOF' > assets/logo.png
@@ -57,9 +102,9 @@ import (
 	"time"
 )
 
-// Private seed known ONLY to Wilox for signing commercial licenses
-const defaultPrivateSeedHex = "3144b5a27ebff1ca566dd9c31afb5e8761d3590cb0b106caab0ccbca2fafae91"
-const defaultAdminToken = "wilox-admin-secret-2026"
+// Secretos de alta seguridad: NUNCA en código fuente.
+// ADMIN_TOKEN y PRIVATE_SEED_HEX se inyectan obligatoriamente vía entorno (.env).
+// Si faltan, el servidor aborta el arranque de inmediato.
 
 type LicenseClaims struct {
 	MachineID string `json:"machine_id"`
@@ -742,12 +787,12 @@ func main() {
 	}
 	adminToken := os.Getenv("ADMIN_TOKEN")
 	if adminToken == "" {
-		adminToken = defaultAdminToken
+		log.Fatalf("FATAL: ADMIN_TOKEN environment variable is required. Genera uno con: openssl rand -hex 24")
 	}
 
 	seedHex := os.Getenv("PRIVATE_SEED_HEX")
 	if seedHex == "" {
-		seedHex = defaultPrivateSeedHex
+		log.Fatalf("FATAL: PRIVATE_SEED_HEX environment variable is required. Genera una con: openssl rand -hex 32")
 	}
 	seed, err := hex.DecodeString(seedHex)
 	if err != nil || len(seed) != ed25519.SeedSize {
@@ -1343,7 +1388,7 @@ func (s *Server) handleDashboardUI(w http.ResponseWriter, r *http.Request) {
           <div class="nav-title">Centro de Mando de Licencias</div>
           <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Contabo Cloud Hub · Controles Comerciales</div>
         </div>
-        <span class="nav-badge-host">31.220.81.105:8444</span>
+        <span class="nav-badge-host">LICENSE-HUB</span>
       </div>
       <div class="nav-actions">
         <button onclick="openApproveModal()" class="btn-action btn-create-modal">

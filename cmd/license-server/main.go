@@ -19,9 +19,9 @@ import (
 	"time"
 )
 
-// Private seed known ONLY to Wilox for signing commercial licenses
-const defaultPrivateSeedHex = "3144b5a27ebff1ca566dd9c31afb5e8761d3590cb0b106caab0ccbca2fafae91"
-const defaultAdminToken = "wilox-admin-secret-2026"
+// Secretos de alta seguridad: NUNCA en código fuente.
+// ADMIN_TOKEN y PRIVATE_SEED_HEX se inyectan obligatoriamente vía entorno (.env).
+// Si faltan, el servidor aborta el arranque de inmediato.
 
 type LicenseClaims struct {
 	MachineID string `json:"machine_id"`
@@ -913,12 +913,14 @@ func main() {
 	}
 	adminToken := os.Getenv("ADMIN_TOKEN")
 	if adminToken == "" {
-		adminToken = defaultAdminToken
+		log.Fatalf("FATAL: ADMIN_TOKEN environment variable is required. " +
+			"Genera uno con: openssl rand -hex 24 y colócalo en tu .env")
 	}
 
 	seedHex := os.Getenv("PRIVATE_SEED_HEX")
 	if seedHex == "" {
-		seedHex = defaultPrivateSeedHex
+		log.Fatalf("FATAL: PRIVATE_SEED_HEX environment variable is required. " +
+			"Genera una con: openssl rand -hex 32 y colócala en tu .env")
 	}
 	seed, err := hex.DecodeString(seedHex)
 	if err != nil || len(seed) != ed25519.SeedSize {

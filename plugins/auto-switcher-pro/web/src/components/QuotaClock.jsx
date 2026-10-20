@@ -188,7 +188,7 @@ export function QuotaClock({
     // evaluar el estado honestamente basándonos en el nivel de consumo absoluto,
     // evitando falsos positivos de "Vas muy rápido" cuando la cuenta está al 75% disponible.
     if (tPct === null) {
-      if (effectiveConsumedPct <= 50) {
+      if (effectiveConsumedPct <= 60) {
         return {
           state: 'easy',
           statusText: 'Ritmo holgado',
@@ -197,21 +197,21 @@ export function QuotaClock({
           ringColor: '#22c55e',
         };
       }
-      if (effectiveConsumedPct <= 80) {
+      if (effectiveConsumedPct <= 90) {
         return {
           state: 'moderate',
-          statusText: 'Ritmo ajustado',
-          secondaryText: translateQuotaText(percentLabel) || 'Consumo al límite',
-          statusColor: '#f59e0b',
-          ringColor: '#f59e0b',
+          statusText: 'Ritmo activo',
+          secondaryText: translateQuotaText(percentLabel) || 'Uso habitual',
+          statusColor: '#38bdf8',
+          ringColor: '#38bdf8',
         };
       }
       return {
         state: 'fast',
-        statusText: 'Vas muy rápido',
+        statusText: 'Cuota al límite',
         secondaryText: translateQuotaText(percentLabel) || 'Riesgo de agotamiento',
-        statusColor: '#ef4444',
-        ringColor: '#ef4444',
+        statusColor: '#f59e0b',
+        ringColor: '#f59e0b',
       };
     }
 

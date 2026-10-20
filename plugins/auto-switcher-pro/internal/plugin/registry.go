@@ -901,10 +901,29 @@ func handlePoolsHTTP(req ManagementRequestPayload) ([]byte, error) {
 					return jsonManagementResponse(http.StatusOK, resp)
 				}
 
-				// Pilar 2, Sección 6 de AGENTS.md: Si el líder necesita enfriamiento preventivo,
-				// solo se rota si existe al menos una reserva sana con cuota disponible (hasHealthyReserve).
+				// Pilar 2, Sección 6 de AGENTS.md & Histeresis Matemática:
+				// Si el líder necesita enfriamiento preventivo:
+				// 1) Enforce sticky leader if no leader quota is available in RAM (!hasLeaderQuota).
+				// 2) Exigir que el líder esté en zona de peligro (< 20%) y que la mejor reserva
+				//    tenga al menos +35% (Δ >= 35%) de ventaja en ventana de 5h antes de rotar.
+				leaderEmail := strings.TrimSuffix(strings.TrimPrefix(currentLeader, "antigravity-"), ".json")
+				leaderQuota, hasLeaderQuota := predEngine.GetLiveQuota(leaderEmail)
+
+				if !hasLeaderQuota {
+					resp := map[string]any{
+						"ok":             true,
+						"rotated":        false,
+						"pool_id":        pool.ID,
+						"prefix":         pool.BasePrefix,
+						"current_leader": currentLeader,
+						"reason":         "unknown_leader_quota",
+						"message":        fmt.Sprintf("Pool %s leader %s quota is unknown; rotation skipped to enforce sticky leader", pool.BasePrefix, currentLeader),
+					}
+					return jsonManagementResponse(http.StatusOK, resp)
+				}
+
 				members := pool.AllMembers()
-				hasHealthyReserve := false
+				hasHealthyReserveWithAdvantage := false
 				for _, m := range members {
 					if strings.EqualFold(m, currentLeader) {
 						continue
@@ -912,26 +931,23 @@ func handlePoolsHTTP(req ManagementRequestPayload) ([]byte, error) {
 					resEmail := strings.TrimSuffix(strings.TrimPrefix(m, "antigravity-"), ".json")
 					if !predEngine.ShouldPreventiveCool(resEmail) {
 						if q, hasQ := predEngine.GetLiveQuota(resEmail); hasQ {
-							if q.Window5hPct >= 15.0 && (q.WeeklyPct == 0 || q.WeeklyPct >= 15.0) {
-								hasHealthyReserve = true
+							if leaderQuota.Window5hPct < 20.0 && (q.Window5hPct-leaderQuota.Window5hPct) >= 35.0 {
+								hasHealthyReserveWithAdvantage = true
 								break
 							}
-						} else {
-							hasHealthyReserve = true
-							break
 						}
 					}
 				}
 
-				if !hasHealthyReserve {
+				if !hasHealthyReserveWithAdvantage {
 					resp := map[string]any{
 						"ok":             true,
 						"rotated":        false,
 						"pool_id":        pool.ID,
 						"prefix":         pool.BasePrefix,
 						"current_leader": currentLeader,
-						"reason":         "no_healthy_reserves",
-						"message":        fmt.Sprintf("Pool %s leader %s reached preventive fatigue but no healthy reserves exist; keeping leader to maximize throughput", pool.BasePrefix, currentLeader),
+						"reason":         "hysteresis_margin_not_met",
+						"message":        fmt.Sprintf("Pool %s leader %s maintained; reserve quota advantage (+35%%) or danger threshold (<20%%) not met", pool.BasePrefix, currentLeader),
 					}
 					return jsonManagementResponse(http.StatusOK, resp)
 				}

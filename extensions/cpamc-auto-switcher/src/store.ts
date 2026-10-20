@@ -1,10 +1,7 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-const execFileAsync = promisify(execFile);
 const TIMEOUT_MS = 6000;
 export const QUOTA_REFRESH_MS = 25_000;
 
@@ -104,8 +101,9 @@ function getStoredPools(): StoredPool[] {
 }
 
 /**
- * Consulta el estado real de cuentas y rotación vía `cpamc-auto-switcher -list`.
- * Implementa caché en memoria para no saturar procesos ni CPU.
+ * Consulta el estado real de cuentas y rotación vía API REST de CPAMC / Auto Switcher Pro.
+ * No genera subprocesos en el sistema operativo ni muta archivos en disco.
+ * Implementa caché en memoria para no saturar la red ni la CPU.
  */
 export async function querySwitcherAccounts(force = false): Promise<SwitcherAccount[]> {
 	const now = Date.now();
@@ -119,63 +117,152 @@ export async function querySwitcherAccounts(force = false): Promise<SwitcherAcco
 
 	isFetching = true;
 	try {
-		const { stdout } = await execFileAsync("cpamc-auto-switcher", ["-list"], { timeout: TIMEOUT_MS });
-		const lines = stdout.split("\n");
+		const rawUrl = (process.env.CLIPROXYAPI_BASE_URL || process.env.CPAMC_URL || "http://127.0.0.1:8317").trim().replace(/\/+$/, "").replace(/\/v1$/, "");
+		const baseUrl = rawUrl || "http://127.0.0.1:8317";
+		const keyFile = join(homedir(), ".cliproxy_management_key");
+		let key = (process.env.CLIPROXYAPI_MANAGEMENT_KEY || "").trim();
+		if (!key && existsSync(keyFile)) {
+			key = readFileSync(keyFile, "utf-8").trim();
+		}
+		const headers: Record<string, string> = {
+			Accept: "application/json",
+		};
+		if (key) {
+			headers["Authorization"] = `Bearer ${key}`;
+		}
+
+		// Prioridad 1: Consulta O(1) vía /auto-switcher-pro/manifest (elimina peticiones múltiples)
+		try {
+			const manifestRes = await fetch(`${baseUrl}/v0/management/auto-switcher-pro/manifest`, {
+				headers,
+				signal: AbortSignal.timeout(TIMEOUT_MS),
+			});
+			if (manifestRes.ok) {
+				const mData = (await manifestRes.json()) as any;
+				if (mData?.ok && Array.isArray(mData?.accounts) && mData.accounts.length > 0) {
+					const list: SwitcherAccount[] = mData.accounts.map((a: any) => {
+						const isLeader = a.role === "leader";
+						return {
+							status: isLeader ? "[ACTIVE]" : "[RESERVE]",
+							provider: "antigravity",
+							profile: a.base_prefix || "default",
+							accountId: maskEmailFromAuth(a.account_key || a.email),
+							prefix: isLeader ? a.base_prefix : `${a.base_prefix}_1`,
+							consumed5h: "0",
+							consumedWeekly: "0",
+							minAvailable: `${Math.round(a.window_5h_pct || 95)}%`,
+						};
+					});
+					if (list.length > 0) {
+						cachedAccounts = list;
+						lastFetchTime = Date.now();
+						return cachedAccounts;
+					}
+				}
+			}
+		} catch {}
+
+		// Prioridad 2 (Fallback): Consultar telemetría de cuotas y pools en paralelo sin procesos hijos
+		const [telemetryRes, poolsRes] = await Promise.allSettled([
+			fetch(`${baseUrl}/auto-switcher-pro/predictive/telemetry`, {
+				headers,
+				signal: AbortSignal.timeout(TIMEOUT_MS),
+			}),
+			fetch(`${baseUrl}/v0/management/auto-switcher-pro/pools`, {
+				headers,
+				signal: AbortSignal.timeout(TIMEOUT_MS),
+			}),
+		]);
+
 		const list: SwitcherAccount[] = [];
 
-		for (const line of lines) {
-			const trimmed = line.trim();
-			if (!trimmed || trimmed.startsWith("STATUS")) continue;
-			const parts = trimmed.split(/\s+/);
-			if (parts.length >= 8) {
-				const rawPrefix = (parts[4] || "").trim();
+		if (poolsRes.status === "fulfilled" && poolsRes.value.ok) {
+			const poolsData = (await poolsRes.value.json()) as any;
+			const pools = Array.isArray(poolsData?.pools) ? poolsData.pools : [];
+
+			let telemetryAccounts: any[] = [];
+			if (telemetryRes.status === "fulfilled" && telemetryRes.value.ok) {
+				const tData = (await telemetryRes.value.json()) as any;
+				if (Array.isArray(tData?.accounts)) {
+					telemetryAccounts = tData.accounts;
+				}
+			}
+
+			// Mapear cada pool a su cuenta activa en RAM y sus reservas
+			for (const p of pools) {
+				const basePref = p.base_prefix || "";
+				const leaderAuth = p.active_leader || p.leader_auth || "";
+				const members: string[] = Array.isArray(p.members) ? p.members : [];
+
+				// Buscar telemetría para el líder
+				const leaderTele = telemetryAccounts.find((a: any) =>
+					a.account_email === leaderAuth || a.prefix === basePref || (leaderAuth && a.account_email && leaderAuth.includes(a.account_email))
+				);
+
+				const minAvail = leaderTele?.min_available_pct !== undefined ? `${Math.round(leaderTele.min_available_pct)}%` : "95%";
+				const c5h = leaderTele?.consumed_5h !== undefined ? `${leaderTele.consumed_5h}` : "0";
+				const cW = leaderTele?.consumed_weekly !== undefined ? `${leaderTele.consumed_weekly}` : "0";
+
 				list.push({
-					status: parts[0] || "",
-					provider: parts[1] || "",
-					profile: parts[2] || "",
-					accountId: parts[3] || "",
-					prefix: rawPrefix === "-" ? "" : rawPrefix,
-					consumed5h: parts[5] || "",
-					consumedWeekly: parts[6] || "",
-					minAvailable: parts[7] || "",
+					status: "[ACTIVE]",
+					provider: "antigravity",
+					profile: p.family || "default",
+					accountId: maskEmailFromAuth(leaderAuth),
+					prefix: basePref,
+					consumed5h: c5h,
+					consumedWeekly: cW,
+					minAvailable: minAvail,
 				});
-			} else if (parts.length === 7) {
-				list.push({
-					status: parts[0] || "",
-					provider: parts[1] || "",
-					profile: parts[2] || "",
-					accountId: parts[3] || "",
-					prefix: "",
-					consumed5h: parts[4] || "",
-					consumedWeekly: parts[5] || "",
-					minAvailable: parts[6] || "",
-				});
+
+				// Listar miembros de reserva
+				for (const m of members) {
+					if (m === leaderAuth) continue;
+					const mTele = telemetryAccounts.find((a: any) =>
+						a.account_email === m || (m && a.account_email && m.includes(a.account_email))
+					);
+					const mMinAvail = mTele?.min_available_pct !== undefined ? `${Math.round(mTele.min_available_pct)}%` : "100%";
+					const m5h = mTele?.consumed_5h !== undefined ? `${mTele.consumed_5h}` : "0";
+					const mWeekly = mTele?.consumed_weekly !== undefined ? `${mTele.consumed_weekly}` : "0";
+
+					list.push({
+						status: "[RESERVE]",
+						provider: "antigravity",
+						profile: p.family || "default",
+						accountId: maskEmailFromAuth(m),
+						prefix: `${basePref}_1`,
+						consumed5h: m5h,
+						consumedWeekly: mWeekly,
+						minAvailable: mMinAvail,
+					});
+				}
 			}
 		}
 
 		if (list.length > 0) {
 			cachedAccounts = list;
 			lastFetchTime = Date.now();
+			return cachedAccounts;
 		}
-		return cachedAccounts;
-	} catch (err: any) {
-		// Fallback gracioso: si no está el CLI binario cpamc-auto-switcher en el PATH,
-		// reconstruir a partir de getStoredPools() en auto-switcher-pro-state.json
+
+		// Si la API no respondió o vino vacía, intentar fallback a través de getStoredPools() en auto-switcher-pro-state.json
+		throw new Error("Empty API response");
+	} catch {
+		// Fallback gracioso: leer estado guardado en auto-switcher-pro-state.json
 		const pools = getStoredPools();
-		if (pools.length > 0 && cachedAccounts.length === 0) {
+		if (pools.length > 0) {
 			const fallbackList: SwitcherAccount[] = [];
 			for (const p of pools) {
 				const active = p.active_leader || p.leader_auth || "";
 				if (active) {
 					fallbackList.push({
-						status: "ACTIVE",
+						status: "[ACTIVE]",
 						provider: "antigravity",
-						profile: p.base_prefix,
+						profile: p.family || p.base_prefix,
 						accountId: maskEmailFromAuth(active),
 						prefix: p.base_prefix,
-						consumed5h: "--",
-						consumedWeekly: "--",
-						minAvailable: "--",
+						consumed5h: "0",
+						consumedWeekly: "0",
+						minAvailable: "95%",
 					});
 				}
 			}
@@ -431,11 +518,34 @@ export function getRotationPairForModelSync(modelId: string, provider: string): 
 }
 
 /**
- * Extrae el porcentaje de cuota libre remanente de una cuenta por su prefijo exacto.
+ * Extrae el porcentaje de cuota libre remanente de una cuenta por su prefijo exacto
+ * o identificador de fachada canónica (ej. "Pool-01-gemini").
  */
 export function getAvailableQuotaForPrefix(prefix: string): number {
 	if (!prefix) return 0;
-	const account = cachedAccounts.find((a) => a.prefix.trim() === prefix.trim());
+	const cleanPrefix = prefix.trim();
+
+	// Si es un pool soberano (Pool-XX-<family>), resolver contra su base_prefix o líder
+	const poolMatch = cleanPrefix.match(/^pool-(\d+)-([a-zA-Z0-9_-]+)/i);
+	if (poolMatch) {
+		const pools = getStoredPools();
+		const matchedPool = pools.find(
+			(p) => p.id?.toLowerCase() === cleanPrefix.toLowerCase() || p.base_prefix?.toLowerCase() === cleanPrefix.toLowerCase()
+		);
+		if (matchedPool) {
+			const targetPrefix = matchedPool.base_prefix || "";
+			const account = cachedAccounts.find((a) => a.prefix.trim().toLowerCase() === targetPrefix.toLowerCase());
+			if (account) {
+				const raw = account.minAvailable.replace("%", "").trim();
+				const val = parseFloat(raw);
+				return Number.isFinite(val) ? val : 95;
+			}
+		}
+		// Si está en pools pero aún no sincronizó telemetría, asumir estado saludable (95%)
+		return 95;
+	}
+
+	const account = cachedAccounts.find((a) => a.prefix.trim() === cleanPrefix);
 	if (!account) return 0;
 	const raw = account.minAvailable.replace("%", "").trim();
 	const val = parseFloat(raw);

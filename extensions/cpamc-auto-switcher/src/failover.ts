@@ -1,10 +1,8 @@
-import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-const CLI = "cpamc-auto-switcher";
 const TIMEOUT_MS = 15_000;
 const TERMINAL_STATUSES = new Set([
 	"completed",
@@ -103,90 +101,6 @@ type ToolDetails = {
 	waited_task_ids?: unknown[];
 };
 
-type ExecResult = {
-	stdout: string;
-	stderr: string;
-	code: number | null;
-};
-
-// Run cpamc-auto-switcher without popping transient console windows on Windows (windowsHide: true)
-function runAutoSwitcher(signal: AbortSignal | undefined, force = false): Promise<ExecResult> {
-	if (signal?.aborted) {
-		return Promise.reject(new Error("aborted"));
-	}
-
-	const args = force ? ["--force"] : [];
-
-	return new Promise((resolve, reject) => {
-		const child = spawn(CLI, args, {
-			stdio: ["ignore", "pipe", "pipe"],
-			windowsHide: process.platform === "win32",
-		});
-
-		let stdout = "";
-		let stderr = "";
-		let settled = false;
-		let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-		let removeAbortListener: (() => void) | null = null;
-
-		const cleanup = (): void => {
-			if (timeoutHandle !== null) {
-				clearTimeout(timeoutHandle);
-				timeoutHandle = null;
-			}
-			if (removeAbortListener !== null) {
-				removeAbortListener();
-				removeAbortListener = null;
-			}
-		};
-
-		const settle = (finalize: () => void, waitForClose: boolean): void => {
-			if (settled) return;
-			settled = true;
-			cleanup();
-			if (!waitForClose) {
-				finalize();
-				return;
-			}
-			try {
-				child.kill();
-			} catch {
-				// child might have exited already
-			}
-			const closeGuard = setTimeout(() => finalize(), 1000);
-			child.once("close", () => {
-				clearTimeout(closeGuard);
-				finalize();
-			});
-		};
-
-		const onAbort = (): void => settle(() => reject(new Error("aborted")), true);
-
-		timeoutHandle = setTimeout(() => {
-			settle(() => reject(new Error("timeout")), true);
-		}, TIMEOUT_MS);
-
-		if (signal) {
-			signal.addEventListener("abort", onAbort, { once: true });
-			removeAbortListener = (): void => {
-				signal.removeEventListener("abort", onAbort);
-			};
-		}
-
-		child.stdout?.setEncoding("utf8");
-		child.stderr?.setEncoding("utf8");
-		child.stdout?.on("data", (chunk: string) => {
-			stdout += chunk;
-		});
-		child.stderr?.on("data", (chunk: string) => {
-			stderr += chunk;
-		});
-
-		child.once("error", (err) => settle(() => reject(err), false));
-		child.once("close", (code) => settle(() => resolve({ stdout, stderr, code }), false));
-	});
-}
-
 function readTask(value: unknown): TaskMeta | undefined {
 	if (!value || typeof value !== "object") return undefined;
 	const source = value as Record<string, unknown>;
@@ -280,13 +194,38 @@ async function attemptVirtualRotation(ctx: any, source?: string, force = false):
 		if (key) {
 			headers["Authorization"] = `Bearer ${key}`;
 		}
+
+		// Extraer el modelo activo y deducir el target pool_id / prefix si está disponible en el contexto
+		let poolId = "";
+		let prefix = "";
+		const activeModelId = ctx?.model?.id || "";
+		if (activeModelId) {
+			const m = activeModelId.match(/^(Pool-\d+-[a-zA-Z0-9_-]+)/i);
+			if (m) {
+				poolId = m[1]!;
+			} else {
+				const slashIdx = activeModelId.indexOf("/");
+				if (slashIdx > 0) {
+					prefix = activeModelId.substring(0, slashIdx);
+				}
+			}
+		}
+
+		const payload: Record<string, any> = {
+			reason: source || (force ? "failover" : "preventive"),
+			force,
+		};
+		if (poolId) {
+			payload.pool_id = poolId;
+		}
+		if (prefix) {
+			payload.prefix = prefix;
+		}
+
 		const res = await fetch(`${baseUrl}/v0/management/auto-switcher-pro/pools/rotate`, {
 			method: "POST",
 			headers,
-			body: JSON.stringify({
-				reason: source || (force ? "failover" : "preventive"),
-				force,
-			}),
+			body: JSON.stringify(payload),
 			signal: ctx?.signal,
 		});
 		if (res.ok) {
@@ -300,7 +239,7 @@ async function attemptVirtualRotation(ctx: any, source?: string, force = false):
 					return true;
 				}
 
-				const poolName = data.prefix || data.pool_id || "Pool";
+				const poolName = data.prefix || data.pool_id || poolId || "Pool";
 				const newLeader = data.new_leader ? ` hacia ${data.new_leader.replace(/^antigravity-/, "").replace(/\.json$/, "")}` : "";
 				if (force) {
 					notify(ctx, `⚡ [Rescate Reactivo] ${poolName} rotó exitosamente${newLeader} para restaurar conexión`, "warning");
@@ -310,7 +249,7 @@ async function attemptVirtualRotation(ctx: any, source?: string, force = false):
 			}
 		}
 	} catch {
-		// En caso de error de red o timeout, recaer en método secundario
+		// Error de red o endpoint no disponible
 	}
 	return false;
 }
@@ -326,34 +265,18 @@ function schedule(ctx: any, source: string, force = false): Promise<void> {
 
 	const check = async (): Promise<void> => {
 		try {
-			// Prioridad 1: Rotación Virtual Pura en Auto Switcher Pro (sin mutar credenciales físicas en disco)
+			// Rotación Virtual Pura en Auto Switcher Pro (en RAM, sin mutar credenciales físicas en disco)
 			const virtualRotated = await attemptVirtualRotation(ctx, source, force);
 			if (virtualRotated) {
 				return;
 			}
 
-			// Prioridad 2: Modo legacy fallback mediante CLI si existe en el entorno
-			const result = await runAutoSwitcher(ctx?.signal, force);
-			const output = (result.stdout || result.stderr).trim();
-
-			// If CLI returned no output (e.g. within cooldown timeout), do not show any notification
-			if (!output) {
-				return;
-			}
-
-			if (result.code !== 0) {
-				notify(ctx, `cpamc-auto-switcher: error after ${source}: ${output}`, "warning");
-				return;
-			}
-
-			if (output.startsWith("[ROTATED]")) {
-				notify(ctx, `🔄 ${output}`, "info");
+			// Si el backend virtual no respondió o falló, avisar honestamente sin corromper el disco
+			if (force) {
+				notify(ctx, `⚠️ Fallo al ejecutar rotación virtual de cuenta (${source}). Verifica la conectividad con CPAMC.`, "warning");
 			}
 		} catch (err: any) {
-			// Manejo defensivo: en entornos virtuales puros, la ausencia del CLI binario es completamente inocua
-			if (err?.code !== "ENOENT") {
-				notify(ctx, `cpamc-auto-switcher (${source}): ${err?.message || err}`, "warning");
-			}
+			notify(ctx, `cpamc-auto-switcher (${source}): ${err?.message || err}`, "warning");
 		}
 	};
 

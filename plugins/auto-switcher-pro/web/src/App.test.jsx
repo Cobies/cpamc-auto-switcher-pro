@@ -227,7 +227,7 @@ describe('App Host Component Integration', () => {
     expect(forceBtn.textContent).toContain('Chequeo Forzado');
   });
 
-  it('switches to Crear Group/Pefiles tab and renders GroupManager view', async () => {
+  it('switches to Crear Group/Perfiles tab and renders GroupManager view', async () => {
     vi.spyOn(managementClient, 'getManagementKey').mockReturnValue('valid-key-123');
     vi.spyOn(managementClient, 'loadAuthFilesWithPrefixes').mockResolvedValue([]);
 

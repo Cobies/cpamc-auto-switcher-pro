@@ -1,18 +1,53 @@
+# ============================================================
+# AUTO-SWITCHER PRO · LICENSE HUB · DOCKER COMPOSE SEGURO
+# ============================================================
+# Arquitectura:
+#   - License Hub NO expone puertos públicos (solo "expose" en red interna).
+#   - Caddy es el ÚNICO servicio con puertos 80/443 públicos.
+#   - Caddy aprovisiona y renueva certificados TLS (Let's Encrypt) automáticamente.
+#   - Los secretos se inyectan vía env_file: .env (chmod 600, fuera de Git).
+# ============================================================
+
 services:
-  license-hub:
-    image: alpine:latest
-    container_name: cpamc-license-hub
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy-proxy
     restart: unless-stopped
     ports:
-      - "8444:8444"
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - web_gateway
+
+  license-hub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cpamc-license-hub
+    restart: unless-stopped
+    # SIN directiva "ports:" -> el Hub jamás queda expuesto a Internet directamente.
+    expose:
+      - "8444"
+    env_file:
+      - .env
     environment:
       - PORT=8444
       - DB_PATH=/data/licenses.json
-      - ADMIN_TOKEN=wilox-admin-secret-2026
     volumes:
-      - ./license-server:/app/license-server
       - license_data:/data
-    entrypoint: ["/app/license-server"]
+    networks:
+      - web_gateway
 
 volumes:
   license_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  web_gateway:
+    driver: bridge

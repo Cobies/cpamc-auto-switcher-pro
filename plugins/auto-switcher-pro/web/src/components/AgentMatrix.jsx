@@ -10,6 +10,92 @@ import './AgentMatrix.css';
 
 const UNIVERSE_STORAGE_KEY = 'agent_matrix_active_universe';
 
+const isWriterAgent = (agent) => {
+  if (!agent) return false;
+  if (agent.is_orchestrator) return true;
+  const id = (agent.agent_id || '').toLowerCase();
+  const role = (agent.role_type || '').toLowerCase();
+  return role === 'apply' || id.includes('apply') || id.includes('worker') || id.includes('fix');
+};
+
+const getAgentHumanMeta = (agent) => {
+  const id = (agent.agent_id || '').toLowerCase();
+  switch (id) {
+    case '00-discovery':
+      return {
+        badge: 'FASE 0 · LECTURA',
+        badgeClass: 'badge-discovery',
+        summary: 'Exploración y recolección de evidencia sin modificar código.',
+      };
+    case '01-planning':
+      return {
+        badge: 'FASE 1 · ARQUITECTURA',
+        badgeClass: 'badge-planning',
+        summary: 'Diseño técnico de contratos plan.md y estrategia TDD.',
+      };
+    case '02-apply':
+      return {
+        badge: 'FASE 2 · IMPLEMENTACIÓN',
+        badgeClass: 'badge-apply',
+        summary: 'Edición quirúrgica de código y resolución guiada de tareas.',
+      };
+    case '03-verify':
+      return {
+        badge: 'FASE 3 · AUDITORÍA',
+        badgeClass: 'badge-verify',
+        summary: 'Auditoría independiente con suites de pruebas y regresión.',
+      };
+    case 'gentle-ai-worker':
+      return {
+        badge: 'WORKER · EDICIÓN',
+        badgeClass: 'badge-apply',
+        summary: 'Implementador fullstack senior de Gentle-Shell y OpenCode.',
+      };
+    case 'gentle-ai-explore':
+      return {
+        badge: 'EXPLORADOR',
+        badgeClass: 'badge-discovery',
+        summary: 'Análisis previo e inspección segura de repositorios.',
+      };
+    case 'gentle-ai-verify':
+      return {
+        badge: 'VERIFICADOR',
+        badgeClass: 'badge-verify',
+        summary: 'Verificación técnica independiente de suites de tests.',
+      };
+    case 'deep-researcher':
+      return {
+        badge: 'RESEARCH EXTERNO',
+        badgeClass: 'badge-research',
+        summary: 'Investigación técnica en internet, GitHub y documentación.',
+      };
+    case 'news-researcher':
+      return {
+        badge: 'INTELIGENCIA',
+        badgeClass: 'badge-news',
+        summary: 'Radar de novedades y briefings tecnológicos periódicos.',
+      };
+    case 'tool-smoke':
+      return {
+        badge: 'DIAGNÓSTICO',
+        badgeClass: 'badge-smoke',
+        summary: 'Comprobación de herramientas y permisos del entorno.',
+      };
+    case 'ui-designer':
+      return {
+        badge: '🎨 DIRECCIÓN DE ARTE',
+        badgeClass: 'badge-ui-design',
+        summary: 'Arquitectura UX/UI, tokens 2027, prototipos interactivos y auditoría Afina Esto.',
+      };
+    default:
+      return {
+        badge: agent.role_type ? agent.role_type.toUpperCase() : 'AGENTE',
+        badgeClass: 'badge-generic',
+        summary: agent.description || 'Subagente especializado de desarrollo.',
+      };
+  }
+};
+
 export default function AgentMatrix() {
   const [activeUniverse, setActiveUniverse] = useState(() => {
     if (typeof window !== 'undefined' && window.localStorage) {
@@ -141,6 +227,50 @@ export default function AgentMatrix() {
     }
   };
 
+  const isClaudeFamily = useCallback((poolId) => {
+    if (!poolId) return false;
+    const lower = poolId.toLowerCase();
+    if (lower.includes('claude') || lower.includes('sonnet') || lower.includes('opus')) {
+      return true;
+    }
+    const detail = poolDetails[poolId];
+    if (detail && detail.target_model) {
+      const mLower = detail.target_model.toLowerCase();
+      if (mLower.includes('claude') || mLower.includes('sonnet') || mLower.includes('opus')) {
+        return true;
+      }
+    }
+    return false;
+  }, [poolDetails]);
+
+  const handleApplyPreset = (preset) => {
+    setHarnesses((prev) =>
+      prev.map((h) => ({
+        ...h,
+        agents: h.agents?.map((a) => {
+          if (a.is_orchestrator) return a;
+          if (isWriterAgent(a)) {
+            return { ...a, concurrency: 1 };
+          }
+          if (preset === 'safe') return { ...a, concurrency: 1 };
+          if (preset === 'turbo') return { ...a, concurrency: 3 };
+          // pro / balanced:
+          return { ...a, concurrency: 2 };
+        }),
+      }))
+    );
+    setFeedback({
+      text:
+        preset === 'safe'
+          ? '🛡️ Modo Seguro activado: Concurrencia en 1 tarea para todos los agentes.'
+          : preset === 'turbo'
+          ? '🚀 Modo Turbo activado: Exploradores y auditores a 3 tareas en ráfaga (Escritores protegidos en 1).'
+          : '⚡ Modo Pro activado: Balance óptimo (Escritores en 1, Lectores en 2).',
+      type: 'success',
+    });
+    setTimeout(() => setFeedback({ text: '', type: '' }), 4000);
+  };
+
   const handlePoolChange = (universe, agentId, field, value) => {
     setHarnesses((prev) =>
       prev.map((h) => {
@@ -160,8 +290,8 @@ export default function AgentMatrix() {
     );
   };
 
-  const handleTestRoute = async (agent) => {
-    const agentKey = `${agent.universe}_${agent.agent_id}`;
+  const handleTestRoute = async (agent, harnessId) => {
+    const agentKey = `${harnessId || agent.universe}_${agent.agent_id}`;
     setPingStates((prev) => ({
       ...prev,
       [agentKey]: { loading: true, latency: 0, text: 'Verificando...', ok: true },
@@ -174,7 +304,7 @@ export default function AgentMatrix() {
         [agentKey]: {
           loading: false,
           latency: res.latency_ms,
-          text: `⚡ OK (${res.latency_ms}ms) · ${res.account_email}`,
+          text: `⚡ OK (${res.latency_ms}ms) · ${res.pool_id || agent.primary_pool} · ${res.account_email}`,
           ok: true,
         },
       }));
@@ -194,7 +324,12 @@ export default function AgentMatrix() {
   const handleSave = async () => {
     try {
       setSaving(true);
-      const allAgents = harnesses.flatMap((h) => h.agents || []);
+      const allAgents = harnesses.flatMap((h) =>
+        (h.agents || []).map((a) => ({
+          ...a,
+          universe: h.id, // Normalización quirúrgica: previene fragmentación en SQLite
+        }))
+      );
       const res = await saveAgentMatrix(allAgents);
       setFeedback({ text: res?.message || 'Matriz guardada y sincronizada con éxito', type: 'success' });
       setTimeout(() => setFeedback({ text: '', type: '' }), 4000);
@@ -315,7 +450,7 @@ export default function AgentMatrix() {
             <button
               type="button"
               className="btn-ping-route"
-              onClick={() => handleTestRoute(agent)}
+              onClick={() => handleTestRoute(agent, harnessId)}
               disabled={ping?.loading}
               title="Prueba de Fuego (Dry-Run Ping): Verifica la latencia y la salud del líder activo en RAM"
             >
@@ -342,6 +477,29 @@ export default function AgentMatrix() {
               {renderDropdownOptions()}
             </select>
             {renderPoolTransparencyPill(agent.primary_pool)}
+            {isClaudeFamily(agent.primary_pool) && (
+              <div
+                className="claude-contextual-controls"
+                style={{ marginTop: 6 }}
+                title="Protector de cuota Claude: tope de intentos antes de pasar a Gemini"
+              >
+                <div className="claude-contextual-row">
+                  <span className="claude-shield-icon">🛡️</span>
+                  <span className="claude-shield-label">Freno:</span>
+                  <select
+                    className="matrix-select claude-turns-select"
+                    value={agent.max_claude_turns ?? 3}
+                    onChange={(e) => handlePoolChange(harnessId, agent.agent_id, 'max_claude_turns', parseInt(e.target.value, 10))}
+                    title="Protector de cuota Claude: tope de intentos antes de pasar a Gemini"
+                  >
+                    <option value={2}>2 (Ahorro)</option>
+                    <option value={3}>3 (Recomendado)</option>
+                    <option value={5}>5 (Paciencia)</option>
+                    <option value={0}>Sin límite</option>
+                  </select>
+                </div>
+              </div>
+            )}
           </div>
 
           <span
@@ -407,35 +565,48 @@ export default function AgentMatrix() {
       <table className="agents-table">
         <thead>
           <tr>
-            <th>ROL / AGENTE</th>
-            <th>MODELO ASIGNADO (FACHADA EN RAM)</th>
-            <th></th>
+            <th>
+              <div className="th-title">ROL / AGENTE</div>
+              <div className="th-sub">Misión en el ciclo</div>
+            </th>
+            <th>
+              <div className="th-title">MODELO ASIGNADO (FACHADA EN RAM)</div>
+              <div className="th-sub">Pool primario activo</div>
+            </th>
+            <th style={{ width: 24 }}></th>
             <th title="Modo Pasivo (0% consumo ordinario). Solo toma el relevo si el modelo principal agota cuota o recibe error HTTP 429.">
-              RESCATE EN CALIENTE (FAILOVER 429) ℹ️
+              <div className="th-title">RESCATE EN CALIENTE (FAILOVER 429) ℹ️</div>
+              <div className="th-sub">Respaldo en standby (0% tokens)</div>
             </th>
-            <th>THINKING</th>
-            <th title="Task Auto-Downgrade: en turnos >= 2 de la misma tarea, reduce automáticamente el costo de razonamiento ahorrando 60-75% de tokens.">
-              AUTO-DOWNGRADE
+            <th>
+              <div className="th-title">THINKING</div>
+              <div className="th-sub">Nivel de razonamiento</div>
             </th>
-            <th title="Disyuntor de Presupuesto (Loop Protector): Si el subagente supera este número de turnos consecutivos en Claude sin resolver la tarea, se desvía automáticamente a Gemini Flash High para no vaciar la cuota.">
-              TOPE BUCLE (CLAUDE)
+            <th>
+              <div className="th-title">CONCURRENCIA</div>
+              <div className="th-sub">Capacidad paralela segura</div>
             </th>
-            <th>CONCURRENCIA</th>
-            <th>TEST</th>
+            <th>
+              <div className="th-title">TEST</div>
+              <div className="th-sub">Sonda de red y token</div>
+            </th>
           </tr>
         </thead>
         <tbody>
           {subagents.map((a) => {
             const agentKey = `${harnessId}_${a.agent_id}`;
             const ping = pingStates[agentKey];
+            const meta = getAgentHumanMeta(a);
+            const isWriter = isWriterAgent(a);
 
             return (
               <tr key={a.agent_id}>
                 <td className="agent-name-cell">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                     <span style={{ fontWeight: 600 }}>{a.displayName || a.agent_id}</span>
+                    <span className={`agent-role-chip ${meta.badgeClass}`}>{meta.badge}</span>
                   </div>
-                  <div className="agent-desc-sub">{a.description}</div>
+                  <div className="agent-desc-sub">{meta.summary}</div>
                 </td>
                 <td>
                   <select
@@ -446,6 +617,36 @@ export default function AgentMatrix() {
                     {renderDropdownOptions()}
                   </select>
                   {renderPoolTransparencyPill(a.primary_pool)}
+                  {isClaudeFamily(a.primary_pool) && (
+                    <div
+                      className="claude-contextual-controls"
+                      title="Protector de cuota Claude: tope de intentos en Claude antes de pasar a Gemini"
+                    >
+                      <div className="claude-contextual-row">
+                        <span className="claude-shield-icon">🛡️</span>
+                        <span className="claude-shield-label">Freno Anti-Bucle:</span>
+                        <select
+                          className="matrix-select claude-turns-select"
+                          value={a.max_claude_turns ?? 3}
+                          onChange={(e) => handlePoolChange(harnessId, a.agent_id, 'max_claude_turns', parseInt(e.target.value, 10))}
+                          title="Protector de cuota Claude: tope de intentos antes de pasar a Gemini"
+                        >
+                          <option value={2}>2 (Ahorro)</option>
+                          <option value={3}>3 (Recomendado)</option>
+                          <option value={5}>5 (Paciencia)</option>
+                          <option value={0}>Sin límite</option>
+                        </select>
+                        <button
+                          type="button"
+                          className={`btn-downgrade-chip ${a.auto_downgrade ? 'active' : ''}`}
+                          onClick={() => handlePoolChange(harnessId, a.agent_id, 'auto_downgrade', !a.auto_downgrade)}
+                          title="Mitigación T2+: reduce tokens de pensamiento a partir del 2do turno"
+                        >
+                          {a.auto_downgrade ? '🟢 T2+' : '⚪ T2+ Off'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </td>
                 <td style={{ textAlign: 'center', width: 24 }}>
                   <span
@@ -489,48 +690,35 @@ export default function AgentMatrix() {
                   )}
                 </td>
                 <td>
-                  <button
-                    type="button"
-                    className={`btn-downgrade-toggle ${a.auto_downgrade ? 'active' : ''}`}
-                    onClick={() => handlePoolChange(harnessId, a.agent_id, 'auto_downgrade', !a.auto_downgrade)}
-                    title="Task Auto-Downgrade: en turnos >= 2 de la misma tarea mitiga el costo de razonamiento ahorrando 60-75% de tokens"
-                  >
-                    <span>{a.auto_downgrade ? '🟢 T2+ Activo' : '⚪ Inactivo'}</span>
-                  </button>
-                </td>
-                <td>
-                  <select
-                    className="matrix-select"
-                    style={{ width: '92px', fontSize: '11px', padding: '3px 6px' }}
-                    value={a.max_claude_turns ?? 3}
-                    onChange={(e) => handlePoolChange(harnessId, a.agent_id, 'max_claude_turns', parseInt(e.target.value, 10))}
-                    title="Tope de turnos consecutivos en Claude antes de activar el disyuntor de protección"
-                  >
-                    <option value={2}>2 turnos</option>
-                    <option value={3}>3 turnos</option>
-                    <option value={5}>5 turnos</option>
-                    <option value={0}>Sin tope</option>
-                  </select>
-                </td>
-                <td>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: '#94a3b8',
-                      background: 'rgba(255,255,255,0.05)',
-                      padding: '4px 8px',
-                      borderRadius: 4,
-                    }}
-                  >
-                    {a.concurrency || 1} {a.concurrency === 1 ? 'tarea' : 'tareas'}
-                  </span>
+                  {isWriter ? (
+                    <div
+                      className="concurrency-lock-badge"
+                      title="Candado de Seguridad: Agente con permisos de escritura y edición de código. Bloqueado en 1 tarea para evitar que dos agentes editen los mismos archivos y corrompan código."
+                    >
+                      <span className="lock-icon">🔒</span>
+                      <span className="lock-label">1 tarea</span>
+                      <span className="lock-status">(Seguro)</span>
+                    </div>
+                  ) : (
+                    <div className="concurrency-selector-wrapper">
+                      <select
+                        className="matrix-select concurrency-select"
+                        value={a.concurrency || 1}
+                        onChange={(e) => handlePoolChange(harnessId, a.agent_id, 'concurrency', parseInt(e.target.value, 10))}
+                        title="Capacidad de tareas simultáneas seguras para este agente de lectura"
+                      >
+                        <option value={1}>1 (Ahorro)</option>
+                        <option value={2}>2 (Recomendado 2x)</option>
+                        <option value={3}>3 (Ráfaga Turbo)</option>
+                      </select>
+                    </div>
+                  )}
                 </td>
                 <td>
                   <button
                     type="button"
                     className="btn-ping-route"
-                    onClick={() => handleTestRoute(a)}
+                    onClick={() => handleTestRoute(a, harnessId)}
                     disabled={ping?.loading}
                     title="Test rápido de conectividad y latencia con el líder del pool"
                   >
@@ -622,6 +810,40 @@ export default function AgentMatrix() {
         <span className="gauge-badge">{stress.badge}</span>
         <span className="gauge-autonomy">Autonomía estimada: {stress.autonomy}</span>
         <span className="gauge-desc">{stress.desc}</span>
+      </div>
+
+      {/* Preset Strategy Bar (Claude Design 2027) */}
+      <div className="matrix-presets-bar">
+        <div className="presets-label">
+          <span className="presets-icon">🎛️</span>
+          <span>Estrategia de Ejecución:</span>
+        </div>
+        <div className="presets-buttons">
+          <button
+            type="button"
+            className="preset-btn safe"
+            onClick={() => handleApplyPreset('safe')}
+            title="Concurrencia en 1 tarea para todos los agentes. Máximo ahorro de cuota y cero riesgo."
+          >
+            🛡️ Modo Seguro
+          </button>
+          <button
+            type="button"
+            className="preset-btn pro"
+            onClick={() => handleApplyPreset('pro')}
+            title="Escritores en 1 tarea fija, lectores y exploradores en 2 tareas simultáneas. Velocidad 2x recomendada."
+          >
+            ⚡ Modo Pro
+          </button>
+          <button
+            type="button"
+            className="preset-btn turbo"
+            onClick={() => handleApplyPreset('turbo')}
+            title="Escritores protegidos en 1 tarea, exploradores a 3 tareas en ráfaga para proyectos gigantes."
+          >
+            🚀 Modo Turbo
+          </button>
+        </div>
       </div>
 
       {/* Universe Segmented Tabs (Dinámico según harnesses detectados) */}

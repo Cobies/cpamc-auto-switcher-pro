@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"auto-switcher-pro/internal/analytics"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -84,10 +85,11 @@ func TestAgentMatrixHandler_POST(t *testing.T) {
 			{
 				Universe:      "gentle_ai",
 				AgentID:       "gentle-ai-worker",
+				RoleType:      "apply",
 				PrimaryPool:   "Pool-03-codex",
 				FallbackPool:  "Pool-02-gemini",
 				ThinkingLevel: "high", // Should be sanitized to "none" because Codex does not support thinking
-				Concurrency:   1,
+				Concurrency:   5,      // Should be sanitized to 1 for writer safety
 			},
 		},
 	}
@@ -116,6 +118,19 @@ func TestAgentMatrixHandler_POST(t *testing.T) {
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 OK, got: %d", resp.StatusCode)
+	}
+
+	// Verify persistence sanitized concurrency to 1 for worker
+	records, err := analytics.GetAgentProfiles("gentle_ai")
+	if err != nil {
+		t.Fatalf("GetAgentProfiles failed: %v", err)
+	}
+	for _, r := range records {
+		if r.AgentID == "gentle-ai-worker" {
+			if r.Concurrency != 1 {
+				t.Errorf("expected worker concurrency to be locked to 1, got %d", r.Concurrency)
+			}
+		}
 	}
 }
 
@@ -268,5 +283,80 @@ func TestAgentMatrixHandler_DynamicDiscoveryAndMtime(t *testing.T) {
 	_ = json.Unmarshal(envWarmup.Result, &respWarmup)
 	if respWarmup.StatusCode != http.StatusOK {
 		t.Errorf("expected 200 OK for warmup-triage, got %d", respWarmup.StatusCode)
+	}
+}
+
+func TestAgentMatrix_RoleBasedPoolAllocation(t *testing.T) {
+	// 1. In a Gemini-only multi-pool setup (e.g. Pool-02-gemini and Pool-03-gemini on production):
+	geminiOnly := []string{"Pool-02-gemini", "Pool-03-gemini"}
+	pWorker, fWorker := resolveBestPoolForRole("apply", "gentle-ai-worker", geminiOnly)
+	pVerify, fVerify := resolveBestPoolForRole("verify", "gentle-ai-verify", geminiOnly)
+
+	if pWorker == pVerify {
+		t.Errorf("expected worker and verify to be distributed across distinct pools, but both got %s", pWorker)
+	}
+	if pWorker != "Pool-02-gemini" {
+		t.Errorf("expected worker to receive Pool-02-gemini, got %s", pWorker)
+	}
+	if pVerify != "Pool-03-gemini" {
+		t.Errorf("expected verify to receive Pool-03-gemini for quota isolation, got %s", pVerify)
+	}
+	if fWorker != "Pool-03-gemini" {
+		t.Errorf("expected worker fallback to be Pool-03-gemini, got %s", fWorker)
+	}
+	if fVerify != "Pool-02-gemini" {
+		t.Errorf("expected verify fallback to be Pool-02-gemini, got %s", fVerify)
+	}
+
+	// 2. In a multi-family setup (Claude + Gemini):
+	multiFamily := []string{"Pool-01-gemini", "Pool-02-gemini", "Pool-04-claude"}
+	pOrch, _ := resolveBestPoolForRole("orchestrator", "orchestrator", multiFamily)
+	pExplore, _ := resolveBestPoolForRole("discovery", "gentle-ai-explore", multiFamily)
+	pVer, _ := resolveBestPoolForRole("verify", "gentle-ai-verify", multiFamily)
+
+	if pOrch != "Pool-04-claude" {
+		t.Errorf("expected orchestrator to allocate Claude pool, got %s", pOrch)
+	}
+	if pExplore != "Pool-01-gemini" {
+		t.Errorf("expected explore to allocate Gemini 1, got %s", pExplore)
+	}
+	if pVer != "Pool-02-gemini" {
+		t.Errorf("expected verify to allocate Gemini 2, got %s", pVer)
+	}
+}
+
+func TestAgentMatrix_RealPingDiagnostics(t *testing.T) {
+	pingReq := ManagementRequestPayload{
+		Method: http.MethodPost,
+		Path:   "/v0/management/auto-switcher-pro/agent-matrix/ping",
+		Body:   []byte(`{"pool_id":"Pool-02-gemini","target_model":"gemini-3.8-flash-high"}`),
+	}
+	rawPing, err := handleAgentMatrixHTTP(pingReq)
+	if err != nil {
+		t.Fatalf("handleAgentMatrixHTTP ping failed: %v", err)
+	}
+	var env Envelope
+	_ = json.Unmarshal(rawPing, &env)
+	var resp ManagementResponsePayload
+	_ = json.Unmarshal(env.Result, &resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+	}
+
+	var res PingResult
+	bodyBytes, _ := base64.StdEncoding.DecodeString(resp.Body)
+	_ = json.Unmarshal(bodyBytes, &res)
+
+	if !res.OK {
+		t.Errorf("expected ping to be OK")
+	}
+	if res.LatencyMs <= 0 {
+		t.Errorf("expected real latency > 0ms, got %d", res.LatencyMs)
+	}
+	if res.Model != "gemini-3.8-flash-high" {
+		t.Errorf("expected model gemini-3.8-flash-high, got %s", res.Model)
+	}
+	if !strings.Contains(res.Message, "Ruta verificada") {
+		t.Errorf("expected verification status message, got: %s", res.Message)
 	}
 }

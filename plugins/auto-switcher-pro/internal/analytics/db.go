@@ -808,7 +808,11 @@ func GetAgentProfiles(universe string) ([]AgentProfileRecord, error) {
 }
 
 func startAutoVacuumDaemon() {
-	ticker := time.NewTicker(24 * time.Hour)
+	// Ejecutar checkpoint y vaciado inicial inmediato en startup para compactar registros antiguos
+	_ = AutoVacuumCheckpoint(30)
+
+	// Repetir periódicamente cada 6 horas
+	ticker := time.NewTicker(6 * time.Hour)
 	defer ticker.Stop()
 	for range ticker.C {
 		_ = AutoVacuumCheckpoint(30)

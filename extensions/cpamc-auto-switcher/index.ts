@@ -1,8 +1,10 @@
 import { existsSync, watch } from "node:fs";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { initDynamicProvider } from "./src/provider.js";
+import { initDynamicProvider, resolveCpamcBaseUrl } from "./src/provider.js";
 import { initFailoverHook, scheduleAutoSwitcher } from "./src/failover.js";
 import { registerModelPicker } from "./src/picker.js";
 import { registerAgentMatrixCommand } from "./src/matrix-command.js";
@@ -75,23 +77,12 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 		},
 	});
 
-	// 3c. Comando para actualizar Auto Switcher Pro en caliente desde el VPS
+	// 3c. Comando para actualizar Auto Switcher Pro en caliente
 	pi.registerCommand("switcher-update", {
-		description: "Actualiza el plugin de CPAMC y la extensión de Pi desde el VPS oficial en 1 clic",
+		description: "Informa sobre el estado de actualización de Auto Switcher Pro",
 		handler: async (_args, ctx) => {
 			if (ctx.hasUI) {
-				ctx.ui.notify?.("⚡ Descargando e instalando actualización desde el VPS...", "info");
-			}
-			try {
-				const cmd = `curl -sSL "${UPDATE_INSTALL_URL}" | bash`;
-				const { stdout, stderr } = await execAsync(cmd, { timeout: 45_000 });
-				if (ctx.hasUI) {
-					ctx.ui.notify?.("🎉 ¡Auto Switcher Pro actualizado exitosamente a la última versión!", "info");
-				}
-			} catch (err: any) {
-				if (ctx.hasUI) {
-					ctx.ui.notify?.(`❌ Error actualizando: ${err?.message || err}`, "error");
-				}
+				ctx.ui.notify?.(`ℹ️ Auto Switcher Pro v${CURRENT_VERSION} está activo y gestionado por tu entorno de desarrollo.`, "info");
 			}
 		},
 	});
@@ -118,7 +109,7 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 					}
 				} catch {}
 
-				const cpamcRes = await fetch("http://localhost:8317/v0/management/auto-switcher-pro/report", {
+				const cpamcRes = await fetch(`${resolveCpamcBaseUrl()}/v0/management/auto-switcher-pro/report`, {
 					headers,
 					signal: AbortSignal.timeout(4000),
 				}).catch(() => null);
@@ -166,11 +157,20 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 	// 4. Adaptador reactivo de UI (Sidebar QuotaCard + Footer)
 	let adapter: CpamcTuiAdapter | null = null;
 	let timer: NodeJS.Timeout | null = null;
+	let epochWatchers: Array<ReturnType<typeof watch>> = [];
 
 	const clearTimer = (): void => {
 		if (timer) {
 			clearInterval(timer);
 			timer = null;
+		}
+		if (epochWatchers.length > 0) {
+			for (const w of epochWatchers) {
+				try {
+					w.close();
+				} catch {}
+			}
+			epochWatchers = [];
 		}
 	};
 
@@ -299,24 +299,30 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 		// Disparar chequeo no invasivo de actualización remota
 		void checkRemoteUpdate(ctx);
 
-		// Bus Reactivo Instantáneo (<5ms) en Memoria Compartida (/dev/shm)
-		// Dispara actualización visual inmediata sin esperar al intervalo de 25s
-		const shmEpochPath = "/dev/shm/auto-switcher-pro.epoch";
-		let shmWatcher: ReturnType<typeof watch> | null = null;
+		// Bus Reactivo Instantáneo (<5ms) por Archivo de Época Compartido
+		// Vigila tanto el bind-mount persistente de Docker como la memoria compartida (/dev/shm)
+		const candidateEpochPaths = [
+			join(homedir(), "services", "cliproxy", "plugins", "auto-switcher-pro.epoch"),
+			"/dev/shm/auto-switcher-pro.epoch",
+		];
 		let shmDebounce: NodeJS.Timeout | null = null;
-		try {
-			if (existsSync(shmEpochPath)) {
-				shmWatcher = watch(shmEpochPath, () => {
-					if (shmDebounce) clearTimeout(shmDebounce);
-					shmDebounce = setTimeout(async () => {
-						try {
-							await querySwitcherAccounts(true);
-							await adapter?.update(false, ctx);
-						} catch {}
-					}, 50);
-				});
-			}
-		} catch {}
+
+		for (const epPath of candidateEpochPaths) {
+			try {
+				if (existsSync(epPath)) {
+					const w = watch(epPath, () => {
+						if (shmDebounce) clearTimeout(shmDebounce);
+						shmDebounce = setTimeout(async () => {
+							try {
+								await querySwitcherAccounts(true);
+								await adapter?.update(false, ctx);
+							} catch {}
+						}, 50);
+					});
+					epochWatchers.push(w);
+				}
+			} catch {}
+		}
 
 		// Intervalo en segundo plano cada 25s protegido contra stale context
 		let ticks = 0;
@@ -332,10 +338,6 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 				}
 			} catch {
 				clearTimer();
-				if (shmWatcher) {
-					try { shmWatcher.close(); } catch {}
-					shmWatcher = null;
-				}
 			}
 		}, 25_000);
 	});

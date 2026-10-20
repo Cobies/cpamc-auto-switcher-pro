@@ -372,6 +372,9 @@ func TestPoolRegistry_RotatePoolLeader(t *testing.T) {
 	}
 
 	// 4. HTTP POST /auto-switcher-pro/pools/rotate via DefaultRegistry
+	prevInstance := defaultRegistryInstance
+	t.Cleanup(func() { defaultRegistryInstance = prevInstance })
+	defaultRegistryInstance = NewPoolRegistry(filepath.Join(t.TempDir(), "default_state.json"))
 	defReg := DefaultRegistry()
 	_ = defReg.SavePool(pool)
 	rawResp, err := handlePoolsHTTP(ManagementRequestPayload{

@@ -230,16 +230,16 @@ export default function Maintenance({ onReloadRequested }) {
 
     const activeStages = [];
     if (phases.auth) {
-      activeStages.push({ text: 'Revisando archivos físicos de credenciales en servidor...', delay: isTest ? 10 : 800 });
+      activeStages.push({ text: 'Revisando archivos físicos de credenciales en servidor...', delay: isTest ? 10 : 20 });
     }
     if (phases.models) {
-      activeStages.push({ text: 'Buscando modelos residuales y prefijos anidados...', delay: isTest ? 10 : 800 });
+      activeStages.push({ text: 'Buscando modelos residuales y prefijos anidados...', delay: isTest ? 10 : 20 });
     }
     if (phases.pools) {
-      activeStages.push({ text: 'Comprobando jerarquía de pools y balanceo de carga...', delay: isTest ? 10 : 900 });
+      activeStages.push({ text: 'Comprobando jerarquía de pools y balanceo de carga...', delay: isTest ? 10 : 20 });
     }
     if (phases.console) {
-      activeStages.push({ text: 'Comprobando integridad de consola y versiones en canal oficial...', delay: isTest ? 10 : 900 });
+      activeStages.push({ text: 'Comprobando integridad de consola y versiones en canal oficial...', delay: isTest ? 10 : 20 });
     }
 
     try {

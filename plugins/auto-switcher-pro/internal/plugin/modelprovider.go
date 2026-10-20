@@ -943,9 +943,10 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 
 	// Blindaje de Prompt Caching (Histeresis & Sticky Session):
 	// Para no destruir los embeddings en caché de Google Antigravity a mitad de una tarea larga:
-	// 1) Si el líder no está en enfriamiento forzado ni tiene cuota crítica (<15%), se mantiene sticky.
-	// 2) Si califica para enfriamiento por volumen/fatiga pero su cuota es >= 15%, solo se rota si
-	//    alguna reserva disponible tiene una ventaja de cuota de al menos +30% (Δ >= 30%).
+	// 1) Enforce sticky leader when leader quota is unknown (!hasLeaderQuota). No rotar a ciegas.
+	// 2) Exigir histeresis matemática antes de rotar preventivamente:
+	//    - La cuota del líder debe estar en zona de peligro (< 20% en ventana de 5h).
+	//    - Y la reserva candidata DEBE tener al menos +35% (Δ >= 35%) de ventaja confirmada.
 	hasHealthyReserve := false
 	reserveWithBetterQuota := false
 	leaderQuota, hasLeaderQuota := predEngine.GetLiveQuota(leaderEmail)
@@ -957,22 +958,20 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 				if hasLeaderQuota {
 					resEmail := strings.TrimSuffix(strings.TrimPrefix(resAuth, "antigravity-"), ".json")
 					if resQ, ok := predEngine.GetLiveQuota(resEmail); ok {
-						// Histeresis: la reserva debe tener al menos +30% de ventaja en cuota de 5h
-						if (resQ.Window5hPct - leaderQuota.Window5hPct) >= 30.0 {
+						// Histeresis estricta: líder en zona de peligro (< 20%) y reserva con ventaja >= +35%
+						if leaderQuota.Window5hPct < 20.0 && (resQ.Window5hPct-leaderQuota.Window5hPct) >= 35.0 {
 							reserveWithBetterQuota = true
 							break
 						}
 					}
-				} else {
-					reserveWithBetterQuota = true
-					break
 				}
+				// Si no hay telemetría del líder (!hasLeaderQuota), se mantiene sticky (reserveWithBetterQuota = false)
 			}
 		}
 	}
 
-	// Si el líder tiene cuota crítica (<15%) o cooldown activo, rotar si hay reserva sana
-	// Si solo es fatiga por requests (>80%), aplicar histeresis: requerir reserva con +30% ventaja
+	// Si el líder tiene cooldown activo o cuota crítica (<15%), rotar si hay reserva disponible
+	// Para rotación preventiva: solo si líder <20% y la reserva tiene >= +35% de ventaja confirmada
 	skipLeaderPredictive := false
 	if hasHealthyReserve {
 		if predEngine.IsCriticalQuotaOrCooldown(leaderEmail) {
@@ -1152,6 +1151,20 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 					NewLeader:      email,
 					StatusCode:     200,
 				})
+
+				// Conexión activa con la Caja Negra Forense (Flight Recorder):
+				// Si no fue un enfriamiento preventivo planificado, registrar como incidente/failover
+				if !skipLeaderPredictive {
+					analytics.RecordFlightEvent(analytics.FlightRecorderEvent{
+						AccountEmail:    leaderEmail,
+						PoolID:          pool.ID,
+						ErrorKind:       "FAILOVER_ACTIVATION",
+						StatusCode:      429,
+						ErrorMessage:    fmt.Sprintf("Cuenta líder %s degradada o en 429; failover a reserva %s en cascada #%d", leaderEmail, email, i),
+						HeadersSnapshot: fmt.Sprintf(`{"previous_leader":"%s","active_reserve":"%s","pool":"%s"}`, leaderEmail, email, pool.ID),
+						LatencyMs:       1,
+					})
+				}
 			}
 
 			// Resolver el modelo especialista específico de esta cuenta (member_models o fallback del pool)

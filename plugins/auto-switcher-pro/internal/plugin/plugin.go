@@ -49,7 +49,13 @@ type ManagementResponsePayload struct {
 // HandlePluginMethod dispatches incoming CLIProxyAPI plugin method calls.
 func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 	switch method {
+	case "plugin.shutdown":
+		GetAutonomousQuotaPoller().Stop()
+		return OKEnvelope([]byte(`{"ok":true}`)), nil
+
 	case "plugin.register", "plugin.reconfigure":
+		GetAutonomousQuotaPoller().Start()
+
 		registration := map[string]any{
 			"schema_version": 6,
 			"metadata": map[string]any{
@@ -77,6 +83,11 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 	case "management.register":
 		regResponse := map[string]any{
 			"routes": []map[string]any{
+				{
+					"Method":      http.MethodGet,
+					"Path":        manifestRoutePath,
+					"Description": "Entrega en O(1) la agregación de pools, líderes activos en RAM, telemetría y estado",
+				},
 				{
 					"Method":      http.MethodGet,
 					"Path":        poolsRoutePath,
@@ -396,6 +407,11 @@ func HandleManagementHTTP(request []byte) ([]byte, error) {
 	method := strings.ToUpper(strings.TrimSpace(req.Method))
 	if method == "" {
 		method = http.MethodGet // default when omitted
+	}
+
+	// Manifest unified O(1) route
+	if isManifestPath(req.Path) {
+		return handleManifestHTTP(req)
 	}
 
 	// Pool management routes: GET to list pools, POST to create/update, DELETE to dissolve

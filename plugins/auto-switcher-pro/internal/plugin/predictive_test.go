@@ -32,21 +32,37 @@ func TestPredictiveEngine(t *testing.T) {
 		t.Fatalf("expected account not to cool down at 70%%")
 	}
 
-	// 3. Simular la 8va petición (alcanza el 80%)
+	// 3. Simular la 8va petición (alcanza el 80% de fatiga, pero sin telemetría de cuota)
 	pe.RecordActivity(acc)
 	if !pe.ShouldPreventiveCool(acc) {
-		t.Fatalf("expected account to cool down at 80%% threshold")
+		t.Fatalf("expected account without quota telemetry to cool down at 80%% request threshold")
 	}
 
-	fatigue, isCooling, mins := pe.GetAccountStatus(acc)
+	fatigue, _, _ := pe.GetAccountStatus(acc)
 	if fatigue < 80.0 {
 		t.Fatalf("expected fatigue >= 80%%, got %.2f", fatigue)
 	}
-	if !isCooling {
-		t.Fatalf("expected account to be marked as cooling")
+
+	// 3b. Sticky leader hysteresis: Si la cuenta tiene cuota viva sana (>= 20% 5h y >= 15% semanal),
+	// ShouldPreventiveCool DEBE devolver false a pesar de tener >80% de fatiga por requests para proteger Prompt Caching.
+	pe.RecordLiveQuota(AccountQuotaTelemetry{
+		AccountKey:  acc,
+		Window5hPct: 90.0,
+		WeeklyPct:   85.0,
+		UpdatedAt:   time.Now(),
+	})
+	if pe.ShouldPreventiveCool(acc) {
+		t.Fatalf("account with healthy live quota (90%%) must remain sticky even if request volume is high")
 	}
-	if mins <= 0 {
-		t.Fatalf("expected minutes left > 0, got %d", mins)
+
+	// 3c. SetCooldown: Si ocurre un evento reactivo (429), SetCooldown debe forzar enfriamiento
+	pe.SetCooldown(acc, 15*time.Minute)
+	if !pe.ShouldPreventiveCool(acc) {
+		t.Fatalf("account with explicit cooldown must cool down")
+	}
+	_, isCooling, mins := pe.GetAccountStatus(acc)
+	if !isCooling || mins <= 0 {
+		t.Fatalf("expected account to be cooling with positive minutes left")
 	}
 
 	// 4. Deshabilitar motor predictivo debe saltarse la protección

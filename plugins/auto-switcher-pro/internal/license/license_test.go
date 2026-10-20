@@ -2,18 +2,22 @@ package license
 
 import (
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"testing"
 	"time"
 )
 
+// TestLicenseVerificationAndMachineLock usa un par de claves Ed25519 EFÍMERO generado en runtime.
+// NUNCA se hardcodean semillas privadas en el código: los secretos viven exclusivamente
+// en el entorno de producción (.env en el VPS), jamás en el repositorio.
 func TestLicenseVerificationAndMachineLock(t *testing.T) {
-	// Recreate private key matching MasterPublicKeyHex
-	privHex := "3144b5a27ebff1ca566dd9c31afb5e8761d3590cb0b106caab0ccbca2fafae91"
-	seedBytes, _ := hex.DecodeString(privHex)
-	privKey := ed25519.NewKeyFromSeed(seedBytes)
+	// Generar par de claves efímero para la prueba (cero secretos en Git)
+	pubKey, privKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate ephemeral key pair: %v", err)
+	}
 
 	validMachineID := "CPA-AAAA-BBBB-CCCC"
 	foreignMachineID := "CPA-XXXX-YYYY-ZZZZ"
@@ -34,7 +38,7 @@ func TestLicenseVerificationAndMachineLock(t *testing.T) {
 		}
 		key := signPayload(claims)
 
-		verified, err := VerifyActivationKey(key, validMachineID)
+		verified, err := verifyActivationKeyWithPub(key, validMachineID, pubKey)
 		if err != nil {
 			t.Fatalf("expected key to verify, got: %v", err)
 		}
@@ -53,7 +57,7 @@ func TestLicenseVerificationAndMachineLock(t *testing.T) {
 		}
 		key := signPayload(claims)
 
-		_, err := VerifyActivationKey(key, foreignMachineID)
+		_, err := verifyActivationKeyWithPub(key, foreignMachineID, pubKey)
 		if err == nil {
 			t.Fatalf("expected error on foreign machine, got nil")
 		}
@@ -69,7 +73,7 @@ func TestLicenseVerificationAndMachineLock(t *testing.T) {
 		}
 		key := signPayload(claims)
 
-		_, err := VerifyActivationKey(key, validMachineID)
+		_, err := verifyActivationKeyWithPub(key, validMachineID, pubKey)
 		if err == nil {
 			t.Fatalf("expected error on expired license, got nil")
 		}
@@ -93,7 +97,7 @@ func TestLicenseVerificationAndMachineLock(t *testing.T) {
 		}
 		tampered := string(parts)
 
-		_, err := VerifyActivationKey(tampered, validMachineID)
+		_, err := verifyActivationKeyWithPub(tampered, validMachineID, pubKey)
 		if err == nil {
 			t.Fatalf("expected error on tampered key, got nil")
 		}

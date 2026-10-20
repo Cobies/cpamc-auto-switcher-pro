@@ -64,7 +64,7 @@ Ejemplos:
      bash scripts/install-all.sh --url "https://ai.midominio.com:8317" --key "mi-secreto"
 
   3. Servidor en Red Local (LAN):
-     bash scripts/install-all.sh --url "http://192.168.10.150:8317"
+     bash scripts/install-all.sh --url "http://192.168.1.100:8317"
 EOF
     exit 0
 }
@@ -166,7 +166,7 @@ resolve_connectivity() {
 
     echo -e "${BOLD}¿Dónde está alojado tu servidor CPAMC?${RESET}"
     echo -e "  ${CYAN}[1]${RESET} Localhost estándar (${GREEN}http://localhost:${DOCKER_PORT:-8317}${RESET})"
-    echo -e "  ${CYAN}[2]${RESET} Servidor en Red Local / LAN (${YELLOW}ej: http://192.168.10.150:8317${RESET})"
+    echo -e "  ${CYAN}[2]${RESET} Servidor en Red Local / LAN (${YELLOW}ej: http://192.168.1.100:8317${RESET})"
     echo -e "  ${CYAN}[3]${RESET} VPS / Servidor Remoto en la Nube (${MAGENTA}ej: https://vps.midominio.com:8317${RESET})"
     echo -e "  ${CYAN}[4]${RESET} Escribir URL personalizada manualmente"
     echo ""
@@ -185,7 +185,7 @@ resolve_connectivity() {
             ;;
         2)
             echo ""
-            echo -e "${YELLOW}📌 Ejemplo para Red Local:${RESET} http://192.168.1.100:8317 o http://192.168.10.150:8317"
+            echo -e "${YELLOW}📌 Ejemplo para Red Local:${RESET} http://192.168.1.100:8317 o http://192.168.1.100:8317"
             read -r -p "✍️  Ingresa la IP y puerto de tu CPAMC: " input_url
             TARGET_URL="${input_url:-http://192.168.1.100:8317}"
             ;;

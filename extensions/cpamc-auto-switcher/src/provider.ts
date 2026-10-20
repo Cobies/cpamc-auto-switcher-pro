@@ -216,6 +216,14 @@ function resolveBaseUrl(): string {
     return raw || DEFAULT_BASE_URL;
 }
 
+/**
+ * Resolución centralizada de la URL base de CPAMC (exportada para todos los módulos).
+ * Respeta CLIPROXYAPI_BASE_URL / CPAMC_URL y jamás hardcodea IPs o hosts externos.
+ */
+export function resolveCpamcBaseUrl(): string {
+    return resolveBaseUrl();
+}
+
 function requireApiKey(): string {
     const apiKey = (process.env.CLIPROXYAPI_API_KEY || "").trim();
     if (!apiKey) {

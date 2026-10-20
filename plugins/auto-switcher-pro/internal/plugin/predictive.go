@@ -158,21 +158,16 @@ func (pe *PredictiveEngine) RecordActivity(accountEmail string) {
 	}
 	pe.activity[key] = valid
 
-	// Si superó el umbral, marcar enfriamiento preventivo
-	limit := float64(pe.config.MaxReqsPerHour) * (pe.config.ThresholdPct / 100.0)
-	isCooling := false
-	var coolUntil time.Time
-	if float64(len(valid)) >= limit {
-		coolUntil = now.Add(time.Duration(pe.config.CoolingMinutes) * time.Minute)
-		pe.cooling[key] = coolUntil
-		isCooling = true
-	}
+	// Registrar actividad para métricas de fatiga en la última hora.
+	// NOTA (Prompt Caching & Anti-Flapping): La acumulación de requests por hora
+	// registra volumen y fatiga únicamente. NO se asigna cooldown automático por conteo
+	// para no destruir el Prompt Cache de Google cuando la cuota viva sigue alta.
+	// Los enfriamientos (cooldowns) quedan restringidos a eventos reactivos explícitos
+	// (HTTP 429, caídas de socket) mediante SetCooldown o agotamiento de cuota viva (<20% / <15%).
 
-	// Persistir salud y enfriamiento en SQLite
+	// Persistir salud y actividad en SQLite
 	var coolUntilMs int64
-	if isCooling {
-		coolUntilMs = coolUntil.UnixMilli()
-	} else if c, ok := pe.cooling[key]; ok && c.After(now) {
+	if c, ok := pe.cooling[key]; ok && c.After(now) {
 		coolUntilMs = c.UnixMilli()
 	}
 	w5h, weekly := 100.0, 100.0
@@ -250,7 +245,39 @@ func (pe *PredictiveEngine) GetAllLiveQuotas() []AccountQuotaTelemetry {
 	return list
 }
 
-// ShouldPreventiveCool indica si la cuenta debe descansar preventivamente para evitar un 429
+// SetCooldown establece explícitamente un periodo de enfriamiento para una cuenta
+// a causa de un evento reactivo (HTTP 429, error de cuota o desconexión abrupta).
+func (pe *PredictiveEngine) SetCooldown(accountEmail string, duration time.Duration) {
+	if accountEmail == "" {
+		return
+	}
+	key := normalizeAccountKey(accountEmail)
+	pe.mu.Lock()
+	defer pe.mu.Unlock()
+
+	now := time.Now()
+	coolUntil := now.Add(duration)
+	pe.cooling[key] = coolUntil
+
+	w5h, weekly := 100.0, 100.0
+	if q, ok := pe.quotas[key]; ok {
+		w5h = q.Window5hPct
+		weekly = q.WeeklyPct
+	}
+	analytics.SaveAccountHealth(analytics.AccountHealth{
+		AccountKey:  key,
+		Email:       accountEmail,
+		CoolUntilMs: coolUntil.UnixMilli(),
+		HealthScore: 0.0,
+		Window5hPct: w5h,
+		WeeklyPct:   weekly,
+		LastUsedMs:  now.UnixMilli(),
+		UpdatedAtMs: now.UnixMilli(),
+	})
+}
+
+// ShouldPreventiveCool indica si la cuenta debe descansar preventivamente para evitar un 429.
+// Mantiene al líder sticky mientras su cuota viva sea segura (>= 20% en 5h y >= 15% semanal).
 func (pe *PredictiveEngine) ShouldPreventiveCool(accountEmail string) bool {
 	pe.mu.RLock()
 	defer pe.mu.RUnlock()
@@ -261,26 +288,29 @@ func (pe *PredictiveEngine) ShouldPreventiveCool(accountEmail string) bool {
 
 	key := normalizeAccountKey(accountEmail)
 
-	// 1. ¿Está en período de enfriamiento activo?
+	// 1. ¿Está en período de enfriamiento activo (por 429 o caída previa)?
 	if coolUntil, ok := pe.cooling[key]; ok {
 		if time.Now().Before(coolUntil) {
 			return true
 		}
 	}
 
-	// 2. ¿Tiene agotamiento crítico de cuota viva (< 15% restante en ventana de 5h o semanal)?
+	// 2. ¿Tiene agotamiento crítico de cuota viva (< 20% en 5h o < 15% semanal)?
 	if pe.quotas != nil {
 		if q, ok := pe.quotas[key]; ok {
-			// Si la cuota restante de 5 horas o la semanal está por debajo del 15% (incluyendo agotamiento total al 0.0%)
 			if !q.UpdatedAt.IsZero() {
-				if q.Window5hPct < 15.0 || (q.WeeklyPct > 0 && q.WeeklyPct < 15.0) {
+				// Sticky Leader Hysteresis: Si tiene cuota >= 20% (5h) y >= 15% (semanal),
+				// NO enfriar preventivamente, preservando el Prompt Cache.
+				if q.Window5hPct < 20.0 || (q.WeeklyPct > 0 && q.WeeklyPct < 15.0) {
 					return true
 				}
+				// Si tiene telemetría y está sana, no enfriar por fatiga de requests
+				return false
 			}
 		}
 	}
 
-	// 3. ¿Tiene fatiga acumulada en la última hora por volumen de requests?
+	// 3. Fallback: Si no hay telemetría de cuotas en RAM, evaluar fatiga por volumen de requests
 	now := time.Now()
 	cutoff := now.Add(-1 * time.Hour)
 	count := 0

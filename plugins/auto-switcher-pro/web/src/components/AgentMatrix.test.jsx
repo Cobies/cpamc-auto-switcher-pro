@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import AgentMatrix from './AgentMatrix';
 import * as managementClient from '../api/managementClient';
 
@@ -118,10 +118,22 @@ describe('AgentMatrix Component', () => {
     // 8. Check Warmup Triage button
     expect(screen.getByText('Warmup Triage')).toBeDefined();
 
-    // 9. Check Auto-Downgrade column & Circuit Breaker Loop Protector
-    expect(screen.getByText('AUTO-DOWNGRADE')).toBeDefined();
-    expect(screen.getAllByText(/T2\+/i).length).toBeGreaterThan(0);
-    expect(screen.getByText('TOPE BUCLE (CLAUDE)')).toBeDefined();
+    // 9. Agnostic Architecture: Claude-centric fixed headers are ELIMINATED from the universal table
+    expect(screen.queryByText('AUTO-DOWNGRADE')).toBeNull();
+    expect(screen.queryByText('TOPE BUCLE (CLAUDE)')).toBeNull();
+
+    // 10. Check Claude Design 2027: Universal Column sub-headers (micro-copy de caso de uso)
+    expect(screen.getByText('Misión en el ciclo')).toBeDefined();
+    expect(screen.getByText('Capacidad paralela segura')).toBeDefined();
+
+    // 11. Check Safety Lock for writers and smart concurrency options
+    expect(screen.getByText('1 tarea')).toBeDefined();
+    expect(screen.getByText('(Seguro)')).toBeDefined();
+
+    // 12. Check Global Preset Buttons (Modo Seguro, Modo Pro, Modo Turbo)
+    expect(screen.getByText('🛡️ Modo Seguro')).toBeDefined();
+    expect(screen.getByText('⚡ Modo Pro')).toBeDefined();
+    expect(screen.getByText('🚀 Modo Turbo')).toBeDefined();
   });
 
   it('renders strictly Gentle-AI by default and completely hides j0k3r-pi when not detected', async () => {
@@ -188,5 +200,205 @@ describe('AgentMatrix Component', () => {
     // 3. Single active universe badge must be visible with detected agent count
     expect(screen.getAllByText(/Gentle-Shell CLI/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/1 agentes detectados en disco/i)).toBeDefined();
+  });
+
+  it('respeta las variaciones de pool por agente y ejecuta testAgentRoute con el pool dinámico seleccionado (no hardcodeado)', async () => {
+    vi.spyOn(managementClient, 'fetchAgentMatrix').mockResolvedValue({
+      ok: true,
+      jok3r_detected: false,
+      available_pools: ['Pool-01-gemini', 'Pool-03-codex', 'Pool-04-claude'],
+      pool_capabilities: {
+        'Pool-01-gemini': true,
+        'Pool-03-codex': false,
+        'Pool-04-claude': true,
+      },
+      pool_details: {
+        'Pool-01-gemini': {
+          id: 'Pool-01-gemini',
+          target_model: 'gemini-3.8-flash-high',
+          leader_email: 'antigravity-gemini@gmail.com',
+          total_members: 4,
+          reserves_count: 3,
+        },
+        'Pool-03-codex': {
+          id: 'Pool-03-codex',
+          target_model: 'gpt-4o',
+          leader_email: 'codex-master.json',
+          total_members: 2,
+          reserves_count: 1,
+        },
+        'Pool-04-claude': {
+          id: 'Pool-04-claude',
+          target_model: 'claude-sonnet-4-6',
+          leader_email: 'antigravity-claude@gmail.com',
+          total_members: 4,
+          reserves_count: 3,
+        },
+      },
+      gentle_agents: [
+        {
+          universe: 'gentle_ai',
+          agent_id: 'orchestrator',
+          displayName: '👑 ORQUESTADOR GENTLE',
+          is_orchestrator: true,
+          primary_pool: 'Pool-01-gemini',
+          fallback_pool: 'Pool-04-claude',
+          thinking_level: 'medium',
+          description: 'Cerebro senior de Gentle-AI',
+        },
+        {
+          universe: 'gentle_ai',
+          agent_id: 'gentle-ai-worker',
+          displayName: '🛠️ gentle-ai-worker',
+          is_orchestrator: false,
+          primary_pool: 'Pool-01-gemini',
+          fallback_pool: 'Pool-04-claude',
+          thinking_level: 'medium',
+          concurrency: 1,
+          description: 'Implementador',
+        },
+      ],
+      jok3r_agents: [],
+    });
+
+    const spyPing = vi.spyOn(managementClient, 'testAgentRoute').mockResolvedValue({
+      ok: true,
+      pool_id: 'Pool-04-claude',
+      latency_ms: 38,
+      account_email: 'antigravity-claude@gmail.com',
+    });
+
+    render(<AgentMatrix />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Matriz de Agentes & Orquestación')).toBeDefined();
+    });
+
+    // Cambiamos el selector del worker a 'Pool-04-claude'
+    const selects = screen.getAllByRole('combobox');
+    // selects[0] = orchestrator primary, selects[1] = orchestrator fallback
+    // selects[2] = worker primary
+    fireEvent.change(selects[2], { target: { value: 'Pool-04-claude' } });
+
+    // Hacemos clic en el botón Test del worker
+    const workerTestBtn = screen.getByTitle('Test rápido de conectividad y latencia con el líder del pool');
+    fireEvent.click(workerTestBtn);
+
+    // Verificamos que testAgentRoute se llamó con el pool y modelo dinámicos seleccionados
+    await waitFor(() => {
+      expect(spyPing).toHaveBeenCalledWith('Pool-04-claude', 'claude-sonnet-4-6');
+    });
+
+    // Verificamos que en la fila del agente aparece el resultado del test con el pool y cuenta dinámicos
+    await waitFor(() => {
+      expect(screen.getByText(/antigravity-claude@gmail.com/i)).toBeDefined();
+    });
+  });
+
+  it('permite cambiar estrategias globales de concurrencia protegiendo siempre a los agentes de escritura en 1', async () => {
+    vi.spyOn(managementClient, 'fetchAgentMatrix').mockResolvedValue({
+      ok: true,
+      jok3r_detected: true,
+      available_pools: ['Pool-01-gemini', 'Pool-04-claude'],
+      pool_capabilities: {
+        'Pool-01-gemini': true,
+        'Pool-04-claude': true,
+      },
+      pool_details: {
+        'Pool-01-gemini': { id: 'Pool-01-gemini', target_model: 'gemini-3.8-flash-high', leader_email: 'gem@gmail.com', total_members: 2, reserves_count: 1 },
+      },
+      gentle_agents: [
+        {
+          universe: 'gentle_ai',
+          agent_id: 'gentle-ai-worker',
+          displayName: '🛠️ gentle-ai-worker',
+          is_orchestrator: false,
+          role_type: 'apply',
+          primary_pool: 'Pool-01-gemini',
+          fallback_pool: 'Pool-01-gemini',
+          concurrency: 1,
+        },
+        {
+          universe: 'gentle_ai',
+          agent_id: 'gentle-ai-explore',
+          displayName: '🔍 gentle-ai-explore',
+          is_orchestrator: false,
+          role_type: 'discovery',
+          primary_pool: 'Pool-01-gemini',
+          fallback_pool: 'Pool-01-gemini',
+          concurrency: 1,
+        },
+      ],
+      jok3r_agents: [],
+    });
+
+    render(<AgentMatrix />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Matriz de Agentes & Orquestación')).toBeDefined();
+    });
+
+    // Worker debe mostrar candado de seguridad (1 tarea fija)
+    expect(screen.getByText('(Seguro)')).toBeDefined();
+
+    // Explorer debe tener un select de concurrencia
+    const turboBtn = screen.getByText('🚀 Modo Turbo');
+    fireEvent.click(turboBtn);
+
+    // Tras activar turbo, worker sigue con candado (Seguro)
+    expect(screen.getByText('(Seguro)')).toBeDefined();
+    expect(screen.getByText(/🚀 Modo Turbo activado/i)).toBeDefined();
+  });
+
+  it('elimina sesgo de Claude: tabla con 6 columnas universales y protector contextual solo cuando el agente usa Claude', async () => {
+    vi.spyOn(managementClient, 'fetchAgentMatrix').mockResolvedValue({
+      ok: true,
+      jok3r_detected: false,
+      available_pools: ['Pool-01-gemini', 'Pool-04-claude'],
+      pool_capabilities: {
+        'Pool-01-gemini': true,
+        'Pool-04-claude': true,
+      },
+      pool_details: {
+        'Pool-01-gemini': { id: 'Pool-01-gemini', target_model: 'gemini-3.8-flash-high', leader_email: 'gem@gmail.com', total_members: 2, reserves_count: 1 },
+        'Pool-04-claude': { id: 'Pool-04-claude', target_model: 'claude-sonnet-4-6', leader_email: 'clau@gmail.com', total_members: 2, reserves_count: 1 },
+      },
+      gentle_agents: [
+        {
+          universe: 'gentle_ai',
+          agent_id: 'gentle-ai-worker',
+          displayName: '🛠️ gentle-ai-worker',
+          is_orchestrator: false,
+          role_type: 'apply',
+          primary_pool: 'Pool-01-gemini', // Usando Gemini
+          fallback_pool: 'Pool-01-gemini',
+          concurrency: 1,
+        },
+      ],
+      jok3r_agents: [],
+    });
+
+    render(<AgentMatrix />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Matriz de Agentes & Orquestación')).toBeDefined();
+    });
+
+    // 1. Columnas estáticas de Claude NO existen
+    expect(screen.queryByText('AUTO-DOWNGRADE')).toBeNull();
+    expect(screen.queryByText('TOPE BUCLE (CLAUDE)')).toBeNull();
+
+    // 2. Con Gemini, el agente no muestra selector de turnos de Claude
+    expect(screen.queryByTitle(/Tope de turnos consecutivos en Claude/i)).toBeNull();
+
+    // 3. Cambiamos el worker a Claude
+    const workerSelect = screen.getAllByRole('combobox')[0]; // primer select en subagents
+    fireEvent.change(workerSelect, { target: { value: 'Pool-04-claude' } });
+
+    // 4. Ahora aparece el protector contextual de cuota exclusivo para Claude
+    await waitFor(() => {
+      expect(screen.getAllByTitle(/Protector de cuota Claude/i).length).toBeGreaterThan(0);
+      expect(screen.getByText('Freno Anti-Bucle:')).toBeDefined();
+    });
   });
 });

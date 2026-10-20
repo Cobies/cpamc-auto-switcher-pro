@@ -12,8 +12,9 @@ import (
 	"time"
 )
 
-// Private seed known ONLY to Wilox for signing commercial licenses
-const privateSeedHex = "3144b5a27ebff1ca566dd9c31afb5e8761d3590cb0b106caab0ccbca2fafae91"
+// Semilla privada Ed25519 para firmar licencias.
+// NUNCA hardcodear: se lee obligatoriamente de la variable de entorno PRIVATE_SEED_HEX.
+const envPrivateSeedVar = "PRIVATE_SEED_HEX"
 
 type LicenseClaims struct {
 	MachineID string `json:"machine_id"`
@@ -51,7 +52,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	seed, err := hex.DecodeString(privateSeedHex)
+	seedHex := os.Getenv(envPrivateSeedVar)
+	if seedHex == "" {
+		fmt.Fprintf(os.Stderr, "FATAL: la variable de entorno %s es obligatoria.\n", envPrivateSeedVar)
+		fmt.Fprintf(os.Stderr, "Genera una semilla segura con: openssl rand -hex 32\n")
+		fmt.Fprintf(os.Stderr, "Y expórtala antes de ejecutar: export %s=<valor>\n", envPrivateSeedVar)
+		os.Exit(1)
+	}
+	seed, err := hex.DecodeString(seedHex)
 	if err != nil || len(seed) != ed25519.SeedSize {
 		fmt.Fprintf(os.Stderr, "Error en clave privada: %v\n", err)
 		os.Exit(1)

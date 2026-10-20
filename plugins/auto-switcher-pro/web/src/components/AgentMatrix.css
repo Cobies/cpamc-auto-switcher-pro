@@ -643,3 +643,268 @@
   font-weight: 600;
 }
 
+/* Claude Design 2027: Table Column Sub-Headers */
+.th-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.th-sub {
+  font-size: 9.5px;
+  font-weight: 400;
+  color: #64748b;
+  text-transform: none;
+  letter-spacing: normal;
+  margin-top: 3px;
+  line-height: 1.2;
+}
+
+/* Claude Design 2027: Execution Strategy Presets Bar */
+.matrix-presets-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  padding: 8px 16px;
+  margin-bottom: 16px;
+  gap: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+.presets-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+.presets-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.preset-btn {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.preset-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f1f5f9;
+  transform: translateY(-1px);
+}
+
+.preset-btn.safe:hover {
+  border-color: rgba(16, 185, 129, 0.4);
+  color: #34d399;
+}
+
+.preset-btn.pro:hover {
+  border-color: rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+}
+
+.preset-btn.turbo:hover {
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+}
+
+/* Claude Design 2027: Role Micro-Badges */
+.agent-role-chip {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.badge-discovery {
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+}
+
+.badge-planning {
+  background: rgba(168, 85, 247, 0.12);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.25);
+}
+
+.badge-apply {
+  background: rgba(249, 115, 22, 0.12);
+  color: #fb923c;
+  border: 1px solid rgba(249, 115, 22, 0.25);
+}
+
+.badge-verify {
+  background: rgba(16, 185, 129, 0.12);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.badge-research {
+  background: rgba(99, 102, 241, 0.12);
+  color: #818cf8;
+  border: 1px solid rgba(99, 102, 241, 0.25);
+}
+
+.badge-news {
+  background: rgba(20, 184, 166, 0.12);
+  color: #2dd4bf;
+  border: 1px solid rgba(20, 184, 166, 0.25);
+}
+
+.badge-smoke {
+  background: rgba(148, 163, 184, 0.12);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.badge-ui-design {
+  background: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.28);
+}
+
+.badge-generic {
+  background: rgba(255, 255, 255, 0.06);
+  color: #cbd5e1;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Concurrency Safety Lock & Selectors */
+.concurrency-lock-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: help;
+  transition: all 0.2s ease;
+}
+
+.concurrency-lock-badge:hover {
+  background: rgba(245, 158, 11, 0.14);
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.concurrency-lock-badge .lock-icon {
+  font-size: 11px;
+}
+
+.concurrency-lock-badge .lock-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #fbbf24;
+}
+
+.concurrency-lock-badge .lock-status {
+  font-size: 10px;
+  color: #d97706;
+}
+
+.concurrency-select {
+  min-width: 130px !important;
+  font-size: 11px !important;
+  padding: 4px 8px !important;
+  border-radius: 6px !important;
+  background: rgba(15, 23, 42, 0.8) !important;
+}
+
+/* Claude Contextual Adaptive Budget Controls (Single-Pane Agnostic Architecture) */
+.claude-contextual-controls {
+  margin-top: 6px;
+  background: rgba(217, 119, 87, 0.07);
+  border: 1px solid rgba(217, 119, 87, 0.22);
+  border-radius: 6px;
+  padding: 4px 8px;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: all 0.2s ease;
+}
+
+.claude-contextual-controls:hover {
+  background: rgba(217, 119, 87, 0.12);
+  border-color: rgba(217, 119, 87, 0.38);
+}
+
+.claude-contextual-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.claude-shield-icon {
+  font-size: 11px;
+}
+
+.claude-shield-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #fb923c;
+  letter-spacing: 0.02em;
+}
+
+.claude-turns-select {
+  min-width: 90px !important;
+  font-size: 10px !important;
+  padding: 2px 6px !important;
+  height: 22px !important;
+  border-radius: 4px !important;
+  background: rgba(15, 23, 42, 0.9) !important;
+  border-color: rgba(217, 119, 87, 0.35) !important;
+  color: #f1f5f9 !important;
+}
+
+.btn-downgrade-chip {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #94a3b8;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.btn-downgrade-chip:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f1f5f9;
+}
+
+.btn-downgrade-chip.active {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+}
+
+
+
