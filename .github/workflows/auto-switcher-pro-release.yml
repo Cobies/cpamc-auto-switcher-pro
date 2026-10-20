@@ -19,7 +19,7 @@ jobs:
   build:
     name: Build and Validate Linux Plugin
     runs-on: ubuntu-latest
-    if: github.repository == 'gonzalez962/cpamc-auto-switcher' && github.ref == 'refs/heads/main'
+    if: (github.repository == 'WiloxDev/cpamc-auto-switcher-pro' || github.repository == 'gonzalez962/cpamc-auto-switcher') && github.ref == 'refs/heads/main'
     permissions:
       contents: read
     outputs:
@@ -34,8 +34,8 @@ jobs:
           INPUT_TAG: ${{ github.event.inputs.tag }}
         run: |
           set -euo pipefail
-          if [ "${REPO}" != "gonzalez962/cpamc-auto-switcher" ]; then
-            echo "::error::Unauthorized repository: ${REPO}. Workflow only allowed on gonzalez962/cpamc-auto-switcher."
+          if [ "${REPO}" != "WiloxDev/cpamc-auto-switcher-pro" ] && [ "${REPO}" != "gonzalez962/cpamc-auto-switcher" ]; then
+            echo "::error::Unauthorized repository: ${REPO}. Workflow only allowed on authorized repositories."
             exit 1
           fi
           if [ "${REF}" != "refs/heads/main" ]; then
@@ -175,15 +175,20 @@ jobs:
           ./scripts/build-plugin.sh amd64
           test -f bin/auto-switcher-pro-linux-amd64.so
 
-      - name: Install arm64 cross-compilation toolchain
+      - name: Install arm64 and windows cross-compilation toolchains
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+          sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross gcc-mingw-w64-x86-64
 
       - name: Build Linux arm64 shared library
         run: |
           ./scripts/build-plugin.sh arm64
           test -f bin/auto-switcher-pro-linux-arm64.so
+
+      - name: Build Windows amd64 shared library (.dll)
+        run: |
+          ./scripts/build-plugin.sh windows-amd64
+          test -f bin/auto-switcher-pro-windows-amd64.dll
 
       - name: Verify ELF binary architecture and glibc linkage
         working-directory: bin
@@ -216,7 +221,13 @@ jobs:
             exit 1
           fi
 
-          echo "ELF architecture and glibc verification succeeded for both amd64 and arm64."
+          echo "=== Inspecting Windows amd64 PE32+ DLL binary ==="
+          test -f auto-switcher-pro-windows-amd64.dll
+          file auto-switcher-pro-windows-amd64.dll
+          file auto-switcher-pro-windows-amd64.dll | grep -q "PE32+"
+          file auto-switcher-pro-windows-amd64.dll | grep -q "x86-64"
+
+          echo "Binary verification succeeded for Linux amd64, Linux arm64, and Windows amd64."
 
       - name: Upload Linux amd64 binary artifact (.so only)
         uses: actions/upload-artifact@v4
@@ -232,21 +243,28 @@ jobs:
           path: bin/auto-switcher-pro-linux-arm64.so
           if-no-files-found: error
 
+      - name: Upload Windows amd64 binary artifact (.dll only)
+        uses: actions/upload-artifact@v4
+        with:
+          name: auto-switcher-pro-windows-amd64
+          path: bin/auto-switcher-pro-windows-amd64.dll
+          if-no-files-found: error
+
   publish:
     name: Publish Release to GitHub
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    if: github.repository == 'gonzalez962/cpamc-auto-switcher'
+    if: github.repository == 'WiloxDev/cpamc-auto-switcher-pro' || github.repository == 'gonzalez962/cpamc-auto-switcher'
     steps:
       - name: Verify repository authorization
         env:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          if [ "${REPO}" != "gonzalez962/cpamc-auto-switcher" ]; then
-            echo "::error::Unauthorized repository: ${REPO}. Workflow only allowed on gonzalez962/cpamc-auto-switcher."
+          if [ "${REPO}" != "WiloxDev/cpamc-auto-switcher-pro" ] && [ "${REPO}" != "gonzalez962/cpamc-auto-switcher" ]; then
+            echo "::error::Unauthorized repository: ${REPO}. Workflow only allowed on authorized repositories."
             exit 1
           fi
 
@@ -268,17 +286,26 @@ jobs:
           name: auto-switcher-pro-linux-arm64
           path: release-assets
 
+      - name: Download Windows amd64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: auto-switcher-pro-windows-amd64
+          path: release-assets
+
       - name: Generate SHA256 checksums
         working-directory: release-assets
         run: |
           set -euo pipefail
           test -f auto-switcher-pro-linux-amd64.so
           test -f auto-switcher-pro-linux-arm64.so
+          test -f auto-switcher-pro-windows-amd64.dll
           sha256sum auto-switcher-pro-linux-amd64.so > auto-switcher-pro-linux-amd64.so.sha256
           sha256sum auto-switcher-pro-linux-arm64.so > auto-switcher-pro-linux-arm64.so.sha256
+          sha256sum auto-switcher-pro-windows-amd64.dll > auto-switcher-pro-windows-amd64.dll.sha256
           echo "SHA256 checksums:"
           cat auto-switcher-pro-linux-amd64.so.sha256
           cat auto-switcher-pro-linux-arm64.so.sha256
+          cat auto-switcher-pro-windows-amd64.dll.sha256
 
       - name: Recheck collisions and create GitHub Release
         env:
@@ -334,15 +361,18 @@ jobs:
           # 4. Generate release notes
           {
             printf '## Auto Switcher Pro Plugin %s\n\n' "${RELEASE_TAG}"
-            printf 'Pre-built Linux amd64 and arm64 (glibc) shared libraries for CLIProxyAPI `auto-switcher-pro` plugin.\n\n'
+            printf 'Pre-built Linux amd64/arm64 (.so) and Windows amd64 (.dll) shared libraries for CLIProxyAPI `auto-switcher-pro` plugin.\n\n'
             printf '### Artifacts\n'
             printf -- '- `auto-switcher-pro-linux-amd64.so`: Linux amd64 shared library plugin (`-buildmode=c-shared`)\n'
-            printf -- '- `auto-switcher-pro-linux-amd64.so.sha256`: SHA-256 checksum for amd64 binary\n'
+            printf -- '- `auto-switcher-pro-linux-amd64.so.sha256`: SHA-256 checksum for Linux amd64 binary\n'
             printf -- '- `auto-switcher-pro-linux-arm64.so`: Linux arm64 (glibc) shared library plugin (`-buildmode=c-shared`)\n'
-            printf -- '- `auto-switcher-pro-linux-arm64.so.sha256`: SHA-256 checksum for arm64 binary\n\n'
+            printf -- '- `auto-switcher-pro-linux-arm64.so.sha256`: SHA-256 checksum for Linux arm64 binary\n'
+            printf -- '- `auto-switcher-pro-windows-amd64.dll`: Windows x86_64 PE32+ shared DLL plugin (`-buildmode=c-shared`)\n'
+            printf -- '- `auto-switcher-pro-windows-amd64.dll.sha256`: SHA-256 checksum for Windows amd64 binary\n\n'
             printf '### Supported Architectures & Environments\n'
             printf -- '- **Linux amd64**: Standard x86_64 Linux distributions with glibc (Debian, Ubuntu, RHEL, CentOS, Fedora)\n'
-            printf -- '- **Linux arm64**: ARM64 / AArch64 Linux distributions with glibc (Raspberry Pi OS 64-bit, AWS Graviton, Apple Silicon Docker Linux containers). *Note: Linux/glibc only; native macOS host runtime is not supported.*\n\n'
+            printf -- '- **Linux arm64**: ARM64 / AArch64 Linux distributions with glibc (Raspberry Pi OS 64-bit, AWS Graviton, Apple Silicon Docker Linux containers).\n'
+            printf -- '- **Windows amd64**: Windows 10/11 / Windows Server x86_64 running native `CLIProxyAPI.exe`.\n\n'
             printf '### Build Provenance\n'
             printf -- '- **Commit**: `%s`\n' "${TARGET_COMMIT}"
             printf -- '- **Tag**: `%s` (created by release workflow)\n' "${RELEASE_TAG}"
@@ -354,7 +384,9 @@ jobs:
             printf '# For Linux amd64:\n'
             printf 'sha256sum -c auto-switcher-pro-linux-amd64.so.sha256\n\n'
             printf '# For Linux arm64:\n'
-            printf 'sha256sum -c auto-switcher-pro-linux-arm64.so.sha256\n'
+            printf 'sha256sum -c auto-switcher-pro-linux-arm64.so.sha256\n\n'
+            printf '# For Windows amd64:\n'
+            printf 'sha256sum -c auto-switcher-pro-windows-amd64.dll.sha256\n'
             printf '```\n'
           } > release-notes.md
 
@@ -365,6 +397,8 @@ jobs:
             release-assets/auto-switcher-pro-linux-amd64.so.sha256 \
             release-assets/auto-switcher-pro-linux-arm64.so \
             release-assets/auto-switcher-pro-linux-arm64.so.sha256 \
+            release-assets/auto-switcher-pro-windows-amd64.dll \
+            release-assets/auto-switcher-pro-windows-amd64.dll.sha256 \
             --target "${TARGET_COMMIT}" \
             --title "Auto Switcher Pro Plugin ${RELEASE_TAG}" \
             --notes-file release-notes.md
