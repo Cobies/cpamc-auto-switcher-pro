@@ -427,13 +427,21 @@ function toPiModelFromOpenAI(model: FallbackOpenAIModel, poolLabels?: Map<string
 }
 
 function resolveManagementKey(): string {
-    const keyFile = join(homedir(), ".cliproxy_management_key");
-    try {
-        if (existsSync(keyFile)) {
-            const diskKey = readFileSync(keyFile, "utf-8").trim();
-            if (diskKey) return diskKey;
-        }
-    } catch {}
+    const keyCandidates = [
+        join(homedir(), ".cliproxy_management_key"),
+        join(homedir(), ".pi", "agent-j0k3r", ".cliproxy_management_key"),
+        join(homedir(), ".pi", "agent", ".cliproxy_management_key"),
+        join(homedir(), ".gentle-shell", "agent", ".cliproxy_management_key"),
+    ];
+
+    for (const keyFile of keyCandidates) {
+        try {
+            if (existsSync(keyFile)) {
+                const diskKey = readFileSync(keyFile, "utf-8").trim();
+                if (diskKey) return diskKey;
+            }
+        } catch {}
+    }
     return (process.env.CLIPROXYAPI_MANAGEMENT_KEY || "").trim();
 }
 
