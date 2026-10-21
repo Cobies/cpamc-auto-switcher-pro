@@ -361,18 +361,21 @@ jobs:
           # 4. Generate release notes
           {
             printf '## Auto Switcher Pro Plugin %s\n\n' "${RELEASE_TAG}"
-            printf 'Pre-built Linux amd64/arm64 (.so) and Windows amd64 (.dll) shared libraries for CLIProxyAPI `auto-switcher-pro` plugin.\n\n'
+            printf 'Pre-built Linux amd64/arm64 (.so), Windows amd64 (.dll), and macOS Apple Silicon M1-M4 (.dylib) shared libraries for CLIProxyAPI `auto-switcher-pro` plugin.\n\n'
             printf '### Artifacts\n'
             printf -- '- `auto-switcher-pro-linux-amd64.so`: Linux amd64 shared library plugin (`-buildmode=c-shared`)\n'
             printf -- '- `auto-switcher-pro-linux-amd64.so.sha256`: SHA-256 checksum for Linux amd64 binary\n'
-            printf -- '- `auto-switcher-pro-linux-arm64.so`: Linux arm64 (glibc) shared library plugin (`-buildmode=c-shared`)\n'
+            printf -- '- `auto-switcher-pro-linux-arm64.so`: Linux arm64 (glibc / Docker Mac M1-M4) shared library plugin (`-buildmode=c-shared`)\n'
             printf -- '- `auto-switcher-pro-linux-arm64.so.sha256`: SHA-256 checksum for Linux arm64 binary\n'
             printf -- '- `auto-switcher-pro-windows-amd64.dll`: Windows x86_64 PE32+ shared DLL plugin (`-buildmode=c-shared`)\n'
-            printf -- '- `auto-switcher-pro-windows-amd64.dll.sha256`: SHA-256 checksum for Windows amd64 binary\n\n'
+            printf -- '- `auto-switcher-pro-windows-amd64.dll.sha256`: SHA-256 checksum for Windows amd64 binary\n'
+            printf -- '- `auto-switcher-pro-darwin-arm64.dylib`: macOS Apple Silicon M1-M4 Mach-O shared library plugin (`-buildmode=c-shared`)\n'
+            printf -- '- `auto-switcher-pro-darwin-arm64.dylib.sha256`: SHA-256 checksum for macOS Apple Silicon binary\n\n'
             printf '### Supported Architectures & Environments\n'
             printf -- '- **Linux amd64**: Standard x86_64 Linux distributions with glibc (Debian, Ubuntu, RHEL, CentOS, Fedora)\n'
             printf -- '- **Linux arm64**: ARM64 / AArch64 Linux distributions with glibc (Raspberry Pi OS 64-bit, AWS Graviton, Apple Silicon Docker Linux containers).\n'
-            printf -- '- **Windows amd64**: Windows 10/11 / Windows Server x86_64 running native `CLIProxyAPI.exe`.\n\n'
+            printf -- '- **Windows amd64**: Windows 10/11 / Windows Server x86_64 running native `CLIProxyAPI.exe` or `cli-proxy-api.exe`.\n'
+            printf -- '- **macOS Apple Silicon (M1-M4)**: macOS Sonoma / Sequoia on ARM64 running native `CLIProxyAPI`.\n\n'
             printf '### Build Provenance\n'
             printf -- '- **Commit**: `%s`\n' "${TARGET_COMMIT}"
             printf -- '- **Tag**: `%s` (created by release workflow)\n' "${RELEASE_TAG}"

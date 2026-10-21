@@ -71,7 +71,7 @@ build_linux_arm64() {
 }
 
 build_windows_amd64() {
-    echo "==> [3/3] Compilando auto-switcher-pro-windows-amd64.dll..."
+    echo "==> [3/4] Compilando auto-switcher-pro-windows-amd64.dll..."
     local WIN_CC="${WIN_CC:-x86_64-w64-mingw32-gcc}"
     if has_gcc "${WIN_CC}"; then
         CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC="${WIN_CC}" \
@@ -94,6 +94,19 @@ build_windows_amd64() {
     fi
 }
 
+build_darwin_arm64() {
+    echo "==> [4/4] Compilando auto-switcher-pro-darwin-arm64.dylib (Apple Silicon M1-M4)..."
+    if [ "$(uname)" = "Darwin" ]; then
+        CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 \
+        go build -buildmode=c-shared -ldflags="-s -w" -o "${BIN_DIR}/auto-switcher-pro-darwin-arm64.dylib" .
+    else
+        echo "==> Entorno Linux detectado: El binario nativo Mach-O (.dylib) para macOS Apple Silicon se genera en GitHub Actions (macos-latest)."
+        if [ ! -f "${BIN_DIR}/auto-switcher-pro-darwin-arm64.dylib" ]; then
+            echo "    [i] Si dispones de un .dylib generado por CI/CD, colócalo en bin/ para empaquetarlo localmente."
+        fi
+    fi
+}
+
 case "${ARCH}" in
     amd64|linux-amd64)
         build_linux_amd64
@@ -104,20 +117,25 @@ case "${ARCH}" in
     windows|windows-amd64|win64)
         build_windows_amd64
         ;;
+    darwin|darwin-arm64|mac|macos)
+        build_darwin_arm64
+        ;;
     all)
         build_linux_amd64
+        build_linux_arm64
         build_windows_amd64
+        build_darwin_arm64
         ;;
     *)
-        echo "Arquitectura no soportada: ${ARCH}. Opciones válidas: amd64, arm64, windows-amd64, all" >&2
+        echo "Arquitectura no soportada: ${ARCH}. Opciones válidas: amd64, arm64, windows-amd64, darwin-arm64, all" >&2
         exit 1
         ;;
 esac
 
 # Saneamiento de seguridad post-compilación:
-# Si Go por cualquier motivo generó algún .h, .so o .dll suelto en PLUGIN_DIR,
+# Si Go por cualquier motivo generó algún .h, .so, .dll o .dylib suelto en PLUGIN_DIR,
 # moverlo a BIN_DIR o limpiarlo para garantizar que el código fuente quede impecable.
-find "${PLUGIN_DIR}" -maxdepth 1 -type f \( -name "*.h" -o -name "*.so" -o -name "*.dll" \) -exec mv -f {} "${BIN_DIR}/" \; 2>/dev/null || true
+find "${PLUGIN_DIR}" -maxdepth 1 -type f \( -name "*.h" -o -name "*.so" -o -name "*.dll" -o -name "*.dylib" \) -exec mv -f {} "${BIN_DIR}/" \; 2>/dev/null || true
 
 echo "==> Compilación exitosa en ${BIN_DIR}:"
 ls -lh "${BIN_DIR}"/auto-switcher-pro-*.*
