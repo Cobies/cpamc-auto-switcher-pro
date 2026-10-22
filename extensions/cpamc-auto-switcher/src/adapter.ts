@@ -295,6 +295,7 @@ export function formatSidebarQuotaCardLines(
 		renderLine(s.muted("Modo"), s.accent("Sticky Session (Cache Shielding)")),
 		divider,
 		renderLine(s.accent("[LÍDER ACTIVA]"), `${s.text(activeAccountLabel)} ${s.muted(`(${pair.active.minAvailable})`)}`),
+		renderLine(s.muted("Authfile"), s.text(pair.active.accountId)),
 		renderLine(s.muted(`5h: ${pair.active.consumed5h}`), bar5h),
 		renderLine(s.muted(`Sem: ${pair.active.consumedWeekly}`), barWk),
 		divider,
@@ -302,6 +303,7 @@ export function formatSidebarQuotaCardLines(
 			s.accent("[SIGUIENTE EN COLA]"),
 			pair.next ? `${s.text(nextAccountLabel)} ${s.muted(`(${pair.next.minAvailable})`)}` : s.muted("Ninguna (Pool único)"),
 		),
+		...(pair.next ? [renderLine(s.muted("Reserva"), s.text(pair.next.accountId))] : []),
 		bottom,
 	];
 

@@ -119,10 +119,35 @@ export async function querySwitcherAccounts(force = false): Promise<SwitcherAcco
 	try {
 		const rawUrl = (process.env.CLIPROXYAPI_BASE_URL || process.env.CPAMC_URL || "http://127.0.0.1:8317").trim().replace(/\/+$/, "").replace(/\/v1$/, "");
 		const baseUrl = rawUrl || "http://127.0.0.1:8317";
-		const keyFile = join(homedir(), ".cliproxy_management_key");
 		let key = (process.env.CLIPROXYAPI_MANAGEMENT_KEY || "").trim();
-		if (!key && existsSync(keyFile)) {
-			key = readFileSync(keyFile, "utf-8").trim();
+		if (!key) {
+			const home = homedir();
+			const keyCandidates = [
+				join(home, ".cliproxy_management_key"),
+				join(home, ".gentle-shell", "agent", "cpamc-mgmt.key"),
+				join(home, ".gentle-shell", "agent", ".cliproxy_management_key"),
+				join(home, ".pi", "agent", "cpamc-mgmt.key"),
+				join(home, ".pi", "agent", "cpamc.key"),
+				join(home, ".pi", "agent", ".cliproxy_management_key"),
+			];
+			if (process.env.PI_CODING_AGENT_DIR) {
+				keyCandidates.push(
+					join(process.env.PI_CODING_AGENT_DIR, "cpamc-mgmt.key"),
+					join(process.env.PI_CODING_AGENT_DIR, "cpamc.key"),
+					join(process.env.PI_CODING_AGENT_DIR, ".cliproxy_management_key")
+				);
+			}
+			for (const kf of keyCandidates) {
+				try {
+					if (existsSync(kf)) {
+						const val = readFileSync(kf, "utf-8").trim();
+						if (val) {
+							key = val;
+							break;
+						}
+					}
+				} catch {}
+			}
 		}
 		const headers: Record<string, string> = {
 			Accept: "application/json",
@@ -140,17 +165,32 @@ export async function querySwitcherAccounts(force = false): Promise<SwitcherAcco
 			if (manifestRes.ok) {
 				const mData = (await manifestRes.json()) as any;
 				if (mData?.ok && Array.isArray(mData?.accounts) && mData.accounts.length > 0) {
+					const reserveIndexByPool = new Map<string, number>();
 					const list: SwitcherAccount[] = mData.accounts.map((a: any) => {
 						const isLeader = a.role === "leader";
+						const basePref = a.base_prefix || "default";
+						let prefix = basePref;
+						if (!isLeader) {
+							const nextIdx = (reserveIndexByPool.get(basePref) || 0) + 1;
+							reserveIndexByPool.set(basePref, nextIdx);
+							prefix = `${basePref}_${nextIdx}`;
+						}
+
+						const w5h = typeof a.window_5h_pct === "number" ? a.window_5h_pct : 95;
+						const wWk = typeof a.weekly_pct === "number" ? a.weekly_pct : 95;
+						const minPct = Math.round(Math.min(w5h, wWk));
+						const c5h = Math.max(0, Math.min(100, Math.round(100 - w5h)));
+						const cWk = Math.max(0, Math.min(100, Math.round(100 - wWk)));
+
 						return {
 							status: isLeader ? "[ACTIVE]" : "[RESERVE]",
 							provider: "antigravity",
-							profile: a.base_prefix || "default",
+							profile: basePref,
 							accountId: maskEmailFromAuth(a.account_key || a.email),
-							prefix: isLeader ? a.base_prefix : `${a.base_prefix}_1`,
-							consumed5h: "0",
-							consumedWeekly: "0",
-							minAvailable: `${Math.round(a.window_5h_pct || 95)}%`,
+							prefix,
+							consumed5h: `${c5h}%`,
+							consumedWeekly: `${cWk}%`,
+							minAvailable: `${minPct}%`,
 						};
 					});
 					if (list.length > 0) {
@@ -215,8 +255,10 @@ export async function querySwitcherAccounts(force = false): Promise<SwitcherAcco
 				});
 
 				// Listar miembros de reserva
+				let reserveIdx = 0;
 				for (const m of members) {
 					if (m === leaderAuth) continue;
+					reserveIdx++;
 					const mTele = telemetryAccounts.find((a: any) =>
 						a.account_email === m || (m && a.account_email && m.includes(a.account_email))
 					);
@@ -229,7 +271,7 @@ export async function querySwitcherAccounts(force = false): Promise<SwitcherAcco
 						provider: "antigravity",
 						profile: p.family || "default",
 						accountId: maskEmailFromAuth(m),
-						prefix: `${basePref}_1`,
+						prefix: `${basePref}_${reserveIdx}`,
 						consumed5h: m5h,
 						consumedWeekly: mWeekly,
 						minAvailable: mMinAvail,
@@ -502,7 +544,10 @@ export function getRotationPairForModelSync(modelId: string, provider: string): 
 		.sort((a, b) => {
 			const qA = parseFloat(a.minAvailable.replace("%", "").trim()) || 0;
 			const qB = parseFloat(b.minAvailable.replace("%", "").trim()) || 0;
-			return qB - qA; // Mejor candidata primero
+			if (qB !== qA) {
+				return qB - qA; // Mejor candidata primero
+			}
+			return (a.prefix || "").localeCompare(b.prefix || "", undefined, { numeric: true });
 		});
 
 	const next = reserves.length > 0 ? reserves[0] : undefined;
