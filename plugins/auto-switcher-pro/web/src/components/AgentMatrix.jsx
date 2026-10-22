@@ -456,10 +456,10 @@ export default function AgentMatrix() {
     return (
       <>
         {pools.length > 0 && (
-          <optgroup label="── 🛡️ POOLS DE BALANCEO ACTIVO ──">
+          <optgroup label="── 🛡️ POOLS DISPONIBLES ──">
             {pools.map((p) => (
               <option key={p} value={p}>
-                {p} {poolDetails[p]?.target_model ? `(${poolDetails[p].target_model})` : ''}
+                {p}
               </option>
             ))}
           </optgroup>
@@ -477,27 +477,42 @@ export default function AgentMatrix() {
     );
   };
 
-  const renderPoolTransparencyPill = (poolId) => {
+  const renderPoolTransparencyPill = (poolId, isFallback = false) => {
+    if (!poolId) return null;
     const detail = poolDetails[poolId];
     if (!detail) {
-      if (poolId && poolId.includes('/')) {
+      if (poolId.includes('/')) {
         return (
           <div className="pool-transparency-pill upstream-pill" title={`Modelo upstream directo: ${poolId}`}>
             <span className="dot-active">🌐</span>
-            <span className="pill-model">Direct Upstream</span>
+            <span className="pill-model">Direct Upstream: {poolId}</span>
           </div>
         );
       }
       return null;
     }
+
+    if (isFallback) {
+      return (
+        <div
+          className="pool-transparency-pill fallback-pill"
+          title={`Pool de Relevo: ${poolId}\nModelo: ${detail.target_model}\nCuentas preparadas: ${detail.total_members}\nConsumo actual: 0% tokens (en espera de 429)`}
+        >
+          <span className="dot-standby">⚪</span>
+          <span className="pill-model">Relevo: {detail.target_model}</span>
+          <span className="pill-accounts">({detail.total_members} cuentas en espera)</span>
+        </div>
+      );
+    }
+
     return (
       <div
         className="pool-transparency-pill"
-        title={`Fachada Soberana: ${poolId}\nModelo en RAM: ${detail.target_model}\nLíder Activo: ${detail.leader_email}\nCuentas físicas en pool: ${detail.total_members} (1 líder + ${detail.reserves_count} reservas)`}
+        title={`Pool Primario: ${poolId}\nModelo en ejecución: ${detail.target_model}\nLíder activo en RAM: ${detail.leader_email}\nCuentas en rotación: ${detail.total_members} (1 líder + ${detail.reserves_count} reservas)`}
       >
         <span className="dot-active">🟢</span>
-        <span className="pill-model">{detail.target_model}</span>
-        <span className="pill-accounts">({detail.total_members} cuentas)</span>
+        <span className="pill-model">Modelo: {detail.target_model}</span>
+        <span className="pill-accounts">({detail.total_members} cuentas activas)</span>
       </div>
     );
   };
@@ -532,7 +547,7 @@ export default function AgentMatrix() {
         <div className="orchestrator-controls">
           <div>
             <span style={{ fontSize: 11, color: '#94a3b8', display: 'block', marginBottom: 4 }}>
-              MODELO PRIMARIO
+              POOL PRIMARIO
             </span>
             <select
               className="matrix-select"
@@ -541,7 +556,7 @@ export default function AgentMatrix() {
             >
               {renderDropdownOptions()}
             </select>
-            {renderPoolTransparencyPill(agent.primary_pool)}
+            {renderPoolTransparencyPill(agent.primary_pool, false)}
             {isClaudeFamily(agent.primary_pool) && (
               <div
                 className="claude-contextual-controls"
@@ -569,7 +584,7 @@ export default function AgentMatrix() {
 
           <span
             className="relay-arrow"
-            title="Rescate automático: Solo toma el relevo si el líder primario recibe 429 o fallo de red"
+            title="Relevo automático: Solo toma el control si el pool primario recibe 429 o fallo de red"
           >
             →
           </span>
@@ -577,9 +592,9 @@ export default function AgentMatrix() {
           <div>
             <span
               style={{ fontSize: 11, color: '#94a3b8', display: 'block', marginBottom: 4 }}
-              title="Rescate Pasivo: Permanece en espera con 0% de consumo hasta que el líder primario agote cuota o reciba 429"
+              title="Rescate Pasivo: Permanece en espera con 0% de consumo hasta que el pool primario agote cuota o reciba 429"
             >
-              RESCATE (FAILOVER 429) ℹ️
+              POOL DE RESCATE (FAILOVER)
             </span>
             <select
               className="matrix-select"
@@ -593,7 +608,7 @@ export default function AgentMatrix() {
                 renderDropdownOptions(agent.primary_pool)
               )}
             </select>
-            <div className="fallback-subtext">Standby · 0% tokens hasta 429</div>
+            {renderPoolTransparencyPill(agent.fallback_pool, true)}
           </div>
 
           <div>
@@ -640,13 +655,13 @@ export default function AgentMatrix() {
               <div className="th-sub">Misión en el ciclo</div>
             </th>
             <th>
-              <div className="th-title">MODELO ASIGNADO (FACHADA EN RAM)</div>
-              <div className="th-sub">Pool primario activo</div>
+              <div className="th-title">POOL PRIMARIO</div>
+              <div className="th-sub">Grupo activo de ejecución</div>
             </th>
             <th style={{ width: 24 }}></th>
-            <th title="Modo Pasivo (0% consumo ordinario). Solo toma el relevo si el modelo principal agota cuota o recibe error HTTP 429.">
-              <div className="th-title">RESCATE EN CALIENTE (FAILOVER 429) ℹ️</div>
-              <div className="th-sub">Respaldo en standby (0% tokens)</div>
+            <th title="Modo Pasivo (0% consumo ordinario). Solo toma el relevo si el pool primario agota cuota o recibe error HTTP 429.">
+              <div className="th-title">POOL DE RESCATE (FAILOVER)</div>
+              <div className="th-sub">Relevo en espera (0% consumo)</div>
             </th>
             <th>
               <div className="th-title">THINKING</div>
@@ -686,7 +701,7 @@ export default function AgentMatrix() {
                   >
                     {renderDropdownOptions()}
                   </select>
-                  {renderPoolTransparencyPill(a.primary_pool)}
+                  {renderPoolTransparencyPill(a.primary_pool, false)}
                   {isClaudeFamily(a.primary_pool) && (
                     <div
                       className="claude-contextual-controls"
@@ -739,7 +754,7 @@ export default function AgentMatrix() {
                       renderDropdownOptions(a.primary_pool)
                     )}
                   </select>
-                  <div className="fallback-subtext">Standby · 0% tokens hasta 429</div>
+                  {renderPoolTransparencyPill(a.fallback_pool, true)}
                 </td>
                 <td>
                   {poolCapabilities[a.primary_pool] === false ? (

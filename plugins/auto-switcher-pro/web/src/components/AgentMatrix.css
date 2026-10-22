@@ -445,6 +445,11 @@
   font-size: 8px;
 }
 
+.dot-standby {
+  font-size: 8px;
+  color: #94a3b8;
+}
+
 .pill-model {
   color: #34d399;
   font-weight: 700;
@@ -452,6 +457,24 @@
 
 .pill-accounts {
   color: #64748b;
+}
+
+.fallback-pill {
+  background: rgba(148, 163, 184, 0.08);
+  border-color: rgba(148, 163, 184, 0.2);
+}
+
+.fallback-pill:hover {
+  background: rgba(148, 163, 184, 0.15);
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
+.fallback-pill .pill-model {
+  color: #cbd5e1;
+}
+
+.fallback-pill .pill-accounts {
+  color: #94a3b8;
 }
 
 .upstream-pill {
