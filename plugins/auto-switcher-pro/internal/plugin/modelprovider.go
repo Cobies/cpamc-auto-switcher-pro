@@ -572,10 +572,10 @@ func poolPrefixedCatalog(registry *PoolRegistry) []pluginModelInfo {
 }
 
 // routeDecisionFor resolves a model.route request:
-// 1) Clean Pool Identifier ("Pool-01-gemini"): resolves dynamically to the configured
-//    model of the current ActiveLeader account in RAM.
-// 2) Legacy "<base>/<target>" route: rewrites to the bare target model on the built-in
-//    antigravity provider.
+//  1. Clean Pool Identifier ("Pool-01-gemini"): resolves dynamically to the configured
+//     model of the current ActiveLeader account in RAM.
+//  2. Legacy "<base>/<target>" route: rewrites to the bare target model on the built-in
+//     antigravity provider.
 func routeDecisionFor(registry *PoolRegistry, requestedModel string) modelRouteResponse {
 	trimmed := strings.TrimSpace(requestedModel)
 	if trimmed == "" {

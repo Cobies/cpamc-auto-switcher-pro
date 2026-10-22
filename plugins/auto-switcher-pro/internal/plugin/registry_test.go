@@ -591,5 +591,3 @@ func TestPoolRegistry_DeterministicOrder(t *testing.T) {
 		}
 	}
 }
-
-

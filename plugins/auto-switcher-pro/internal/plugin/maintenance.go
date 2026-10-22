@@ -574,7 +574,7 @@ func atomicWriteFile(dest string, data []byte, perm os.FileMode) error {
 	}
 
 	_ = os.Remove(tmpName) // Clean up temp file if replaceOrCopyFile used copy fallback
-	tmpName = ""          // Success, disarm defer cleanup
+	tmpName = ""           // Success, disarm defer cleanup
 	return nil
 }
 

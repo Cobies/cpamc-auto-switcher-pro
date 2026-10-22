@@ -704,14 +704,14 @@ func AutoVacuumCheckpoint(maxAgeDays int) error {
 
 // AgentProfileRecord represents a persisted agent assignment in SQLite WAL.
 type AgentProfileRecord struct {
-	Universe       string `json:"universe"`        // "gentle_ai" or "jok3r_pi"
-	AgentID        string `json:"agent_id"`        // "orchestrator", "worker", "01-planning", etc.
-	PrimaryPool    string `json:"primary_pool"`    // "Pool-04-claude"
-	FallbackPool   string `json:"fallback_pool"`   // "Pool-01-gemini"
-	ThinkingLevel  string `json:"thinking_level"`  // "low", "medium", "high"
-	AutoDowngrade  bool   `json:"auto_downgrade"`  // true for automatic cost mitigation on Turn >= 2
-	MaxClaudeTurns int    `json:"max_claude_turns"`// Max consecutive turns in Claude before Circuit Breaker trips (default 3, 0 = unlimited)
-	Concurrency    int    `json:"concurrency"`     // 1 to 5
+	Universe       string `json:"universe"`         // "gentle_ai" or "jok3r_pi"
+	AgentID        string `json:"agent_id"`         // "orchestrator", "worker", "01-planning", etc.
+	PrimaryPool    string `json:"primary_pool"`     // "Pool-04-claude"
+	FallbackPool   string `json:"fallback_pool"`    // "Pool-01-gemini"
+	ThinkingLevel  string `json:"thinking_level"`   // "low", "medium", "high"
+	AutoDowngrade  bool   `json:"auto_downgrade"`   // true for automatic cost mitigation on Turn >= 2
+	MaxClaudeTurns int    `json:"max_claude_turns"` // Max consecutive turns in Claude before Circuit Breaker trips (default 3, 0 = unlimited)
+	Concurrency    int    `json:"concurrency"`      // 1 to 5
 	UpdatedAtMs    int64  `json:"updated_at_ms"`
 }
 

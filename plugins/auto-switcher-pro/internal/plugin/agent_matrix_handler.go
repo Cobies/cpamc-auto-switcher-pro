@@ -895,24 +895,76 @@ func discoverUpstreamModels(pools []string) []DiscoveredUpstreamModel {
 				cleanName = strings.TrimPrefix(cleanName, "antigravity-")
 			}
 
-			targetID := "account/" + cleanName
-			if !seen[targetID] {
-				seen[targetID] = true
-				list = append(list, DiscoveredUpstreamModel{
-					ID:          targetID,
-					Provider:    provider,
-					DisplayName: cleanName,
-				})
+			// Desglosar los modelos reales disponibles para esta cuenta suelta
+			accountModels := []string{
+				"gemini-3.8-flash-high",
+				"gemini-3.5-flash-lite",
+				"gemini-3.1-flash-lite",
+				"gemini-3-flash",
+			}
+
+			for _, mod := range accountModels {
+				targetID := "account/" + cleanName + "/" + mod
+				displayLabel := cleanName + " (" + mod + ")"
+				if !seen[targetID] {
+					seen[targetID] = true
+					list = append(list, DiscoveredUpstreamModel{
+						ID:          targetID,
+						Provider:    provider,
+						DisplayName: displayLabel,
+					})
+				}
 			}
 		}
 	}
 
-	// 2. Scan Gentle-Shell & Pi auth.json for directly logged-in upstream providers
+	// 2. Scan Gentle-Shell & Pi auth.json y models-store.json for directly logged-in upstream providers
 	home, _ := os.UserHomeDir()
 	authFiles := []string{
+		"/host-harnesses/gentle-shell/agent/auth.json",
+		"/host-harnesses/gentle-shell/auth.json",
+		"/host-harnesses/j0k3r/auth.json",
 		filepath.Join(home, ".gentle-shell", "agent", "auth.json"),
 		filepath.Join(home, ".pi", "agent-wilox", "auth.json"),
+		filepath.Join(home, ".pi", "agent-j0k3r", "auth.json"),
 		filepath.Join(home, ".pi", "agent", "auth.json"),
+	}
+
+	modelStores := []string{
+		"/host-harnesses/gentle-shell/agent/models-store.json",
+		"/host-harnesses/j0k3r/models-store.json",
+		filepath.Join(home, ".gentle-shell", "agent", "models-store.json"),
+		filepath.Join(home, ".pi", "agent-wilox", "models-store.json"),
+		filepath.Join(home, ".pi", "agent-j0k3r", "models-store.json"),
+	}
+
+	// Cargar modelos de models-store.json
+	type modelEntry struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	type storeSection struct {
+		Models []modelEntry `json:"models"`
+	}
+	providerModelsMap := make(map[string][]modelEntry)
+	for _, msFile := range modelStores {
+		data, err := os.ReadFile(msFile)
+		if err != nil || len(data) == 0 {
+			continue
+		}
+		var storeParsed map[string]storeSection
+		if err := json.Unmarshal(data, &storeParsed); err == nil {
+			for prov, val := range storeParsed {
+				pLower := strings.ToLower(prov)
+				if len(val.Models) > 0 && len(providerModelsMap[pLower]) == 0 {
+					for _, mItem := range val.Models {
+						if mItem.ID != "" {
+							providerModelsMap[pLower] = append(providerModelsMap[pLower], mItem)
+						}
+					}
+				}
+			}
+		}
 	}
 
 	for _, aFile := range authFiles {
@@ -929,14 +981,35 @@ func discoverUpstreamModels(pools []string) []DiscoveredUpstreamModel {
 			if provLower == "" {
 				continue
 			}
-			targetID := "provider/" + provLower
-			if !seen[targetID] {
-				seen[targetID] = true
-				list = append(list, DiscoveredUpstreamModel{
-					ID:          targetID,
-					Provider:    "local_harness",
-					DisplayName: strings.ToUpper(provLower) + " (Login Local)",
-				})
+
+			// Si el proveedor tiene modelos registrados en models-store.json, los desglosamos todos
+			if models, ok := providerModelsMap[provLower]; ok && len(models) > 0 {
+				for _, mItem := range models {
+					targetID := provLower + "/" + mItem.ID
+					displayLabel := strings.ToUpper(provLower) + ": " + mItem.Name + " (" + mItem.ID + ")"
+					if mItem.Name == "" {
+						displayLabel = strings.ToUpper(provLower) + ": " + mItem.ID
+					}
+					if !seen[targetID] {
+						seen[targetID] = true
+						list = append(list, DiscoveredUpstreamModel{
+							ID:          targetID,
+							Provider:    "local_harness",
+							DisplayName: displayLabel,
+						})
+					}
+				}
+			} else {
+				// Fallback si no tiene models-store
+				targetID := "provider/" + provLower
+				if !seen[targetID] {
+					seen[targetID] = true
+					list = append(list, DiscoveredUpstreamModel{
+						ID:          targetID,
+						Provider:    "local_harness",
+						DisplayName: strings.ToUpper(provLower) + " (Login Local)",
+					})
+				}
 			}
 		}
 	}

@@ -30,15 +30,15 @@ type ManifestResponse struct {
 }
 
 type ManifestAccountSummary struct {
-	AccountKey   string  `json:"account_key"`
-	Email        string  `json:"email"`
-	PoolID       string  `json:"pool_id,omitempty"`
-	BasePrefix   string  `json:"base_prefix,omitempty"`
-	Role         string  `json:"role"` // "leader", "reserve", "unassigned"
-	Window5hPct  float64 `json:"window_5h_pct"`
-	WeeklyPct    float64 `json:"weekly_pct"`
-	IsCooling    bool    `json:"is_cooling"`
-	FatiguePct   float64 `json:"fatigue_pct"`
+	AccountKey  string  `json:"account_key"`
+	Email       string  `json:"email"`
+	PoolID      string  `json:"pool_id,omitempty"`
+	BasePrefix  string  `json:"base_prefix,omitempty"`
+	Role        string  `json:"role"` // "leader", "reserve", "unassigned"
+	Window5hPct float64 `json:"window_5h_pct"`
+	WeeklyPct   float64 `json:"weekly_pct"`
+	IsCooling   bool    `json:"is_cooling"`
+	FatiguePct  float64 `json:"fatigue_pct"`
 }
 
 func handleManifestHTTP(req ManagementRequestPayload) ([]byte, error) {

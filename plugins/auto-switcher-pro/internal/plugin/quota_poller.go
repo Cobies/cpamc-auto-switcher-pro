@@ -17,14 +17,14 @@ import (
 // on all active pool member credentials, feeding PredictiveEngine in RAM without
 // depending on active browser sessions or external CLI commands.
 type AutonomousQuotaPoller struct {
-	mu           sync.Mutex
-	interval     time.Duration
-	stopCh       chan struct{}
-	running      bool
-	client       *http.Client
-	authDir      string
+	mu             sync.Mutex
+	interval       time.Duration
+	stopCh         chan struct{}
+	running        bool
+	client         *http.Client
+	authDir        string
 	antigravityURL string
-	userAgent    string
+	userAgent      string
 }
 
 var (

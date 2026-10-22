@@ -445,6 +445,11 @@ export default function AgentMatrix() {
     );
   }
 
+  const isPoolTarget = (targetId) => {
+    if (!targetId) return false;
+    return availablePools.includes(targetId);
+  };
+
   const renderDropdownOptions = (excludedValue = null) => {
     const pools = excludedValue ? availablePools.filter((p) => p !== excludedValue) : availablePools;
     const freeAccounts = (upstreamModels || []).filter((u) => u.provider !== 'local_harness' && u.id !== excludedValue);
@@ -476,7 +481,7 @@ export default function AgentMatrix() {
           </optgroup>
         )}
         {localLogins.length > 0 && (
-          <optgroup label="── 📟 PROVEEDORES LOCALES GENTLE-SHELL ──">
+          <optgroup label="── 📟 MODELOS DE LOGINS LOCALES (NVIDIA, ETC.) ──">
             {localLogins.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.displayName || u.id}
@@ -670,13 +675,13 @@ export default function AgentMatrix() {
               <div className="th-sub">Misión en el ciclo</div>
             </th>
             <th>
-              <div className="th-title">POOL PRIMARIO</div>
-              <div className="th-sub">Grupo activo de ejecución</div>
+              <div className="th-title">PRIMARIO</div>
+              <div className="th-sub">Ruta activa de ejecución</div>
             </th>
             <th style={{ width: 24 }}></th>
-            <th title="Modo Pasivo (0% consumo ordinario). Solo toma el relevo si el pool primario agota cuota o recibe error HTTP 429.">
-              <div className="th-title">POOL DE RESCATE (FAILOVER)</div>
-              <div className="th-sub">Relevo en espera (0% consumo)</div>
+            <th title="Relevo en standby. Solo se activa si la ruta primaria es una cuenta suelta y agota cuota o recibe error HTTP 429.">
+              <div className="th-title">SECUNDARIO</div>
+              <div className="th-sub">Relevo por agotamiento o 429</div>
             </th>
             <th>
               <div className="th-title">THINKING</div>
@@ -754,27 +759,41 @@ export default function AgentMatrix() {
                   )}
                 </td>
                 <td style={{ textAlign: 'center', width: 24 }}>
-                  <span
-                    className="relay-arrow"
-                    title="Rescate automático: Solo toma el relevo si el líder primario recibe 429 o fallo de red"
-                  >
-                    →
-                  </span>
+                  {isPoolTarget(a.primary_pool) ? null : (
+                    <span
+                      className="relay-arrow"
+                      title="Relevo automático: Solo toma el relevo si la cuenta suelta primaria recibe 429 o fallo de red"
+                    >
+                      →
+                    </span>
+                  )}
                 </td>
                 <td>
-                  <select
-                    className="matrix-select"
-                    value={a.fallback_pool}
-                    onChange={(e) => handlePoolChange(harnessId, a.agent_id, 'fallback_pool', e.target.value)}
-                    disabled={availablePools.length + upstreamModels.length <= 1}
-                  >
-                    {availablePools.length + upstreamModels.length <= 1 ? (
-                      <option value="">🚫 Sin failover (Requiere 2+ pools/cuentas)</option>
-                    ) : (
-                      renderDropdownOptions(a.primary_pool)
-                    )}
-                  </select>
-                  {renderPoolTransparencyPill(a.fallback_pool, true)}
+                  {isPoolTarget(a.primary_pool) ? (
+                    <div
+                      className="pool-self-covered-badge"
+                      title="Este agente está respaldado por un Pool Soberano con rotación automática de cuentas en RAM. No requiere rescate secundario externo."
+                    >
+                      <span className="self-covered-icon">🛡️</span>
+                      <span className="self-covered-text">Autocubierto en Pool</span>
+                    </div>
+                  ) : (
+                    <>
+                      <select
+                        className="matrix-select"
+                        value={a.fallback_pool}
+                        onChange={(e) => handlePoolChange(harnessId, a.agent_id, 'fallback_pool', e.target.value)}
+                        disabled={availablePools.length + upstreamModels.length <= 1}
+                      >
+                        {availablePools.length + upstreamModels.length <= 1 ? (
+                          <option value="">🚫 Sin failover (Requiere 2+ pools/cuentas)</option>
+                        ) : (
+                          renderDropdownOptions(a.primary_pool)
+                        )}
+                      </select>
+                      {renderPoolTransparencyPill(a.fallback_pool, true)}
+                    </>
+                  )}
                 </td>
                 <td>
                   {poolCapabilities[a.primary_pool] === false ? (

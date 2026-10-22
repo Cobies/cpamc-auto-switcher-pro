@@ -16,9 +16,9 @@ import (
 
 // SSE/Proxy route constants
 const (
-	healthRoutePath    = "/auto-switcher-pro/healthz"
-	readyRoutePath     = "/auto-switcher-pro/readyz"
-	sseProxyRoutePath  = "/auto-switcher-pro/sse-proxy"
+	healthRoutePath   = "/auto-switcher-pro/healthz"
+	readyRoutePath    = "/auto-switcher-pro/readyz"
+	sseProxyRoutePath = "/auto-switcher-pro/sse-proxy"
 )
 
 // HealthStatus represents the health check response.
@@ -39,11 +39,11 @@ type ReadyStatus struct {
 
 // SSEProxyConfig holds configuration for the SSE proxy.
 type SSEProxyConfig struct {
-	UpstreamBaseURL string        // e.g., "https://generativelanguage.googleapis.com"
+	UpstreamBaseURL   string // e.g., "https://generativelanguage.googleapis.com"
 	HeartbeatInterval time.Duration
-	ReadTimeout     time.Duration
-	WriteTimeout    time.Duration
-	IdleTimeout     time.Duration
+	ReadTimeout       time.Duration
+	WriteTimeout      time.Duration
+	IdleTimeout       time.Duration
 }
 
 // DefaultSSEProxyConfig returns production-ready defaults.
@@ -59,10 +59,10 @@ func DefaultSSEProxyConfig() SSEProxyConfig {
 
 // sseProxyHandler handles SSE streaming with keep-alive to prevent "terminated" errors.
 type sseProxyHandler struct {
-	config      SSEProxyConfig
-	upstream    *url.URL
-	client      *http.Client
-	mu          sync.RWMutex
+	config              SSEProxyConfig
+	upstream            *url.URL
+	client              *http.Client
+	mu                  sync.RWMutex
 	lastUpstreamLatency int64
 }
 
@@ -71,7 +71,7 @@ func newSSEProxyHandler() *sseProxyHandler {
 	config := DefaultSSEProxyConfig()
 	upstream, _ := url.Parse(config.UpstreamBaseURL)
 	return &sseProxyHandler{
-		config: config,
+		config:   config,
 		upstream: upstream,
 		client: &http.Client{
 			Timeout: 0, // No client-level timeout; we handle via context

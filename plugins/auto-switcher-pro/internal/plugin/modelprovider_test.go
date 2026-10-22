@@ -1115,6 +1115,3 @@ func TestSchedulerPick_SurvivalMode(t *testing.T) {
 		t.Errorf("expected survival mode to select fallback candidate, got %s", resp.AuthID)
 	}
 }
-
-
-

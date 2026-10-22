@@ -11,10 +11,10 @@ import (
 
 // PredictiveConfig define la configuración del motor predictivo
 type PredictiveConfig struct {
-	Enabled       bool    `json:"enabled"`
+	Enabled        bool    `json:"enabled"`
 	MaxReqsPerHour int     `json:"max_reqs_per_hour"` // Default: 80
-	ThresholdPct   float64 `json:"threshold_pct"`      // Default: 80.0 (%)
-	CoolingMinutes int     `json:"cooling_minutes"`    // Default: 15
+	ThresholdPct   float64 `json:"threshold_pct"`     // Default: 80.0 (%)
+	CoolingMinutes int     `json:"cooling_minutes"`   // Default: 15
 }
 
 // DefaultPredictiveConfig devuelve los valores seguros por defecto
@@ -34,7 +34,7 @@ type RequestRecord struct {
 
 // AccountQuotaTelemetry almacena la telemetría viva de cuotas de una cuenta
 type AccountQuotaTelemetry struct {
-	AccountKey      string    `json:"account_key"`       // filename o email
+	AccountKey      string    `json:"account_key"`        // filename o email
 	Window5hPct     float64   `json:"window_5h_pct"`      // 0.0 - 100.0 (% cuota restante 5h)
 	WeeklyPct       float64   `json:"weekly_pct"`         // 0.0 - 100.0 (% cuota restante semanal)
 	Window5hResetIn int64     `json:"window_5h_reset_in"` // segundos restantes para refresco 5h
@@ -55,10 +55,10 @@ func normalizeAccountKey(k string) string {
 type PredictiveEngine struct {
 	mu           sync.RWMutex
 	config       PredictiveConfig
-	activity     map[string][]RequestRecord         // accountKey -> lista de timestamps
-	cooling      map[string]time.Time               // accountKey -> hasta cuándo descansa
-	quotas       map[string]AccountQuotaTelemetry   // accountKey -> telemetría de cuota viva
-	lastActivity map[string]time.Time               // accountKey -> última interacción para seguimiento de Cache TTL
+	activity     map[string][]RequestRecord       // accountKey -> lista de timestamps
+	cooling      map[string]time.Time             // accountKey -> hasta cuándo descansa
+	quotas       map[string]AccountQuotaTelemetry // accountKey -> telemetría de cuota viva
+	lastActivity map[string]time.Time             // accountKey -> última interacción para seguimiento de Cache TTL
 }
 
 var globalPredictiveEngine *PredictiveEngine
@@ -526,4 +526,3 @@ func (pe *PredictiveEngine) ResetForTest() {
 	pe.quotas = make(map[string]AccountQuotaTelemetry)
 	pe.lastActivity = make(map[string]time.Time)
 }
-

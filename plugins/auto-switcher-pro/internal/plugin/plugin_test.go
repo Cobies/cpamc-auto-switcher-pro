@@ -684,8 +684,8 @@ func TestHandleAuditLogHTTP(t *testing.T) {
 	}
 
 	var data struct {
-		OK             bool                           `json:"ok"`
-		AuditEvents    []analytics.AuditEvent         `json:"audit_events"`
+		OK             bool                            `json:"ok"`
+		AuditEvents    []analytics.AuditEvent          `json:"audit_events"`
 		FlightRecorder []analytics.FlightRecorderEvent `json:"flight_recorder"`
 	}
 	if err := json.Unmarshal(bodyBytes, &data); err != nil || !data.OK {

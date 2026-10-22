@@ -88,7 +88,7 @@ type PoolDefinition struct {
 	ActiveLeader string            `json:"active_leader,omitempty"` // Dynamic active leader currently serving in RAM
 	LeaderAuth   string            `json:"leader_auth"`             // Legacy compatibility (first/current active member)
 	LeaderEmail  string            `json:"leader_email,omitempty"`
-	Reserves     []string          `json:"reserves"`                // Legacy compatibility (remaining members)
+	Reserves     []string          `json:"reserves"` // Legacy compatibility (remaining members)
 	Policy       PoolPolicy        `json:"policy"`
 	CreatedAt    string            `json:"created_at,omitempty"`
 	UpdatedAt    string            `json:"updated_at,omitempty"`

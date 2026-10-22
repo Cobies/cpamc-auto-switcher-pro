@@ -413,5 +413,3 @@ func TestAtomicWriteFileOverwritesExisting(t *testing.T) {
 		}
 	}
 }
-
-
