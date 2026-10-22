@@ -26,6 +26,13 @@ describe('QuickGuideModal Component - Manual de Usuario Interactivo', () => {
 
     // Verify 3-step quick flow
     expect(screen.getByText('Flujo Rápido Recomendado (En 3 Pasos)')).toBeTruthy();
+
+    // Verify Multi-Project Best Practices & Prompt Caching section
+    expect(screen.getByTestId('quick-guide-multiproject-section')).toBeTruthy();
+    expect(screen.getByText('Multi-Proyecto: 1 Pool por Repositorio')).toBeTruthy();
+    expect(screen.getByText(/Preservación de Prompt Caching & Prevención de Thrashing/i)).toBeTruthy();
+    expect(screen.getByText(/MaxInFlight = 2/i)).toBeTruthy();
+    expect(screen.getByText(/Afinidad de Sesión: 5 min TTL/i)).toBeTruthy();
   });
 
   it('calls onClose when close button or bottom button is clicked', () => {

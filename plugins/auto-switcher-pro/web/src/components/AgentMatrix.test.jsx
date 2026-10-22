@@ -95,19 +95,18 @@ describe('AgentMatrix Component', () => {
     expect(screen.getByText('📟 Gentle-Shell Terminal CLI')).toBeDefined();
     expect(screen.getByText(/Terminal CLI Soberana/i)).toBeDefined();
 
-    // 3. Check Clarity Item 2: Rescate Failover 429 clarity
-    expect(screen.getAllByText(/RESCATE EN CALIENTE \(FAILOVER 429\)/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Standby · 0% tokens hasta 429/i).length).toBeGreaterThan(0);
+    // 3. Check Clarity Item 2: Rescate Failover 429 clarity & Pool Self-Covered badge
+    expect(screen.getAllByText(/Autocubierto en Pool/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/SECUNDARIO/i).length).toBeGreaterThan(0);
 
     // 4. Check Clarity Item 3: Sovereign Facade -> Physical Reality transparency
-    expect(screen.getAllByText('claude-sonnet-4-6').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('(4 cuentas)').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/claude-sonnet-4-6/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/\(4 cuentas activas\)/i).length).toBeGreaterThan(0);
 
     // 5. Check Non-reasoning Thinking N/A Badge
     expect(screen.getByText('🚫 N/A')).toBeDefined();
 
     // 6. Check Dry-Run Ping button existence
-    expect(screen.getAllByText('⚡ Test Route').length).toBeGreaterThan(0);
     expect(screen.getAllByText('⚡ Test').length).toBeGreaterThan(0);
 
     // 7. Check Token Burn Gauge & Stress Semaphore
@@ -123,12 +122,12 @@ describe('AgentMatrix Component', () => {
     expect(screen.queryByText('TOPE BUCLE (CLAUDE)')).toBeNull();
 
     // 10. Check Claude Design 2027: Universal Column sub-headers (micro-copy de caso de uso)
-    expect(screen.getByText('Misión en el ciclo')).toBeDefined();
-    expect(screen.getByText('Capacidad paralela segura')).toBeDefined();
+    expect(screen.getAllByText('Misión en el ciclo').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Capacidad paralela segura').length).toBeGreaterThan(0);
 
     // 11. Check Safety Lock for writers and smart concurrency options
-    expect(screen.getByText('1 tarea')).toBeDefined();
-    expect(screen.getByText('(Seguro)')).toBeDefined();
+    expect(screen.getAllByText('1 tarea').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('(Seguro)').length).toBeGreaterThan(0);
 
     // 12. Check Global Preset Buttons (Modo Seguro, Modo Pro, Modo Turbo)
     expect(screen.getByText('🛡️ Modo Seguro')).toBeDefined();
@@ -276,13 +275,12 @@ describe('AgentMatrix Component', () => {
 
     // Cambiamos el selector del worker a 'Pool-04-claude'
     const selects = screen.getAllByRole('combobox');
-    // selects[0] = orchestrator primary, selects[1] = orchestrator fallback
-    // selects[2] = worker primary
-    fireEvent.change(selects[2], { target: { value: 'Pool-04-claude' } });
+    // selects[0] = orchestrator primary, selects[1] = worker primary (los pools usan badge de autocubierto)
+    fireEvent.change(selects[1], { target: { value: 'Pool-04-claude' } });
 
-    // Hacemos clic en el botón Test del worker
-    const workerTestBtn = screen.getByTitle('Test rápido de conectividad y latencia con el líder del pool');
-    fireEvent.click(workerTestBtn);
+    // Hacemos clic en el botón Test del worker (segundo botón de test)
+    const testBtns = screen.getAllByTitle('Test rápido de conectividad y latencia con el líder del pool');
+    fireEvent.click(testBtns[1]);
 
     // Verificamos que testAgentRoute se llamó con el pool y modelo dinámicos seleccionados
     await waitFor(() => {
