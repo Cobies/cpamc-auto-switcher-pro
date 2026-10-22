@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, watch } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, watch, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -56,7 +56,7 @@ function resolveCacheTargets(): string[] {
         const standardAgent = join(piDir, "agent");
         targets.add(join(standardAgent, "cpamc-models-cache.json"));
         try {
-            const entries = require("node:fs").readdirSync(piDir, { withFileTypes: true });
+            const entries = readdirSync(piDir, { withFileTypes: true });
             for (const entry of entries) {
                 if (entry.isDirectory() && entry.name.startsWith("agent")) {
                     targets.add(join(piDir, entry.name, "cpamc-models-cache.json"));
@@ -214,6 +214,23 @@ function resolveRecommendedContextWindow(modelId: string, reportedContext?: numb
 function resolveBaseUrl(): string {
     const raw = (process.env.CLIPROXYAPI_BASE_URL || process.env.CPAMC_URL || DEFAULT_BASE_URL).trim().replace(/\/+$/, "").replace(/\/v1$/, "");
     return raw || DEFAULT_BASE_URL;
+}
+
+/**
+ * Cascada universal de URLs base para CPAMC:
+ * 1. URL explícita por entorno (CLIPROXYAPI_BASE_URL / CPAMC_URL)
+ * 2. Loopback IPv4 estándar (http://127.0.0.1:8317)
+ * 3. Loopback hostname (http://localhost:8317)
+ */
+export function resolveCandidateBaseUrls(): string[] {
+    const urls = new Set<string>();
+    const explicit = (process.env.CLIPROXYAPI_BASE_URL || process.env.CPAMC_URL || "").trim().replace(/\/+$/, "").replace(/\/v1$/, "");
+    if (explicit) {
+        urls.add(explicit);
+    }
+    urls.add("http://127.0.0.1:8317");
+    urls.add("http://localhost:8317");
+    return Array.from(urls);
 }
 
 /**
@@ -427,12 +444,27 @@ function toPiModelFromOpenAI(model: FallbackOpenAIModel, poolLabels?: Map<string
 }
 
 function resolveManagementKey(): string {
-    const keyCandidates = [
-        join(homedir(), ".cliproxy_management_key"),
-        join(homedir(), ".pi", "agent-j0k3r", ".cliproxy_management_key"),
-        join(homedir(), ".pi", "agent", ".cliproxy_management_key"),
-        join(homedir(), ".gentle-shell", "agent", ".cliproxy_management_key"),
-    ];
+    const keyCandidates = new Set<string>();
+    if (process.env.PI_CODING_AGENT_DIR) {
+        keyCandidates.add(join(process.env.PI_CODING_AGENT_DIR, ".cliproxy_management_key"));
+    }
+    const home = homedir();
+    keyCandidates.add(join(home, ".cliproxy_management_key"));
+    keyCandidates.add(join(home, ".gentle-shell", "agent", ".cliproxy_management_key"));
+    keyCandidates.add(join(home, ".pi", "agent", ".cliproxy_management_key"));
+
+    // Búsqueda dinámica en cualquier subdirectorio agent* de ~/.pi/ sin nombres de usuario hardcodeados
+    const piDir = join(home, ".pi");
+    if (existsSync(piDir)) {
+        try {
+            const entries = readdirSync(piDir, { withFileTypes: true });
+            for (const entry of entries) {
+                if (entry.isDirectory() && entry.name.startsWith("agent")) {
+                    keyCandidates.add(join(piDir, entry.name, ".cliproxy_management_key"));
+                }
+            }
+        } catch {}
+    }
 
     for (const keyFile of keyCandidates) {
         try {
@@ -463,7 +495,7 @@ type DownloadedAuthFile = {
     excluded_models?: string[];
 };
 
-async function fetchAccountPrefixesAndExclusions(baseUrl: string, signal?: AbortSignal): Promise<{
+async function fetchAccountPrefixesAndExclusions(preferredBaseUrl?: string, signal?: AbortSignal): Promise<{
     validPrefixes: Set<string>;
     prefixExclusions: Map<string, Set<string>>;
     familyActiveLeaderPrefix: Map<string, string>;
@@ -486,197 +518,205 @@ async function fetchAccountPrefixesAndExclusions(baseUrl: string, signal?: Abort
         return cachedFilterData;
     }
 
-    try {
-        const timeout = AbortSignal.timeout(10000);
-        const combinedSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
-        const res = await fetch(`${baseUrl}/v0/management/auth-files`, {
-            headers: {
-                Authorization: `Bearer ${mgmtKey}`,
-                Accept: "application/json",
-            },
-            signal: combinedSignal,
-        });
+    const candidateUrls = preferredBaseUrl
+        ? [preferredBaseUrl, ...resolveCandidateBaseUrls().filter((u) => u !== preferredBaseUrl)]
+        : resolveCandidateBaseUrls();
 
-        if (!res.ok) return null;
-        const data = (await res.json()) as { files?: AuthFileSummary[] };
-        const files = Array.isArray(data.files) ? data.files : [];
+    for (const baseUrl of candidateUrls) {
+        try {
+            const timeout = AbortSignal.timeout(5000);
+            const combinedSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
+            const res = await fetch(`${baseUrl}/v0/management/auth-files`, {
+                headers: {
+                    Authorization: `Bearer ${mgmtKey}`,
+                    Accept: "application/json",
+                },
+                signal: combinedSignal,
+            });
 
-        const validPrefixes = new Set<string>();
-        const prefixExclusions = new Map<string, Set<string>>();
-        const authFileExclusions = new Map<string, Set<string>>();
-        const authFilePrefixes = new Map<string, string>();
-        const authFileProviders = new Map<string, string>();
-        const activeAuthFiles = new Set<string>();
+            if (!res.ok) continue;
+            const data = (await res.json()) as { files?: AuthFileSummary[] };
+            const files = Array.isArray(data.files) ? data.files : [];
 
-        // Pre-poblar metadatos desde el resumen de archivos de autenticación
-        for (const file of files) {
-            const rawNote = typeof file.note === "string" ? file.note.trim() : "";
-            const rawPref = typeof file.prefix === "string" ? file.prefix.trim() : "";
-            const candidate = rawPref || rawNote;
-            if (candidate) {
-                validPrefixes.add(candidate);
-            }
-            if (file.name && !file.disabled && !file.unavailable) {
-                activeAuthFiles.add(file.name);
-                if (file.type || file.provider) {
-                    authFileProviders.set(file.name, (file.provider || file.type)!.toLowerCase());
+            const validPrefixes = new Set<string>();
+            const prefixExclusions = new Map<string, Set<string>>();
+            const authFileExclusions = new Map<string, Set<string>>();
+            const authFilePrefixes = new Map<string, string>();
+            const authFileProviders = new Map<string, string>();
+            const activeAuthFiles = new Set<string>();
+
+            // Pre-poblar metadatos desde el resumen de archivos de autenticación
+            for (const file of files) {
+                const rawNote = typeof file.note === "string" ? file.note.trim() : "";
+                const rawPref = typeof file.prefix === "string" ? file.prefix.trim() : "";
+                const candidate = rawPref || rawNote;
+                if (candidate) {
+                    validPrefixes.add(candidate);
+                }
+                if (file.name && !file.disabled && !file.unavailable) {
+                    activeAuthFiles.add(file.name);
+                    if (file.type || file.provider) {
+                        authFileProviders.set(file.name, (file.provider || file.type)!.toLowerCase());
+                    }
                 }
             }
-        }
 
-        await Promise.allSettled(
-            files.map(async (file) => {
-                if (!file.name || file.name.includes("/")) return;
-                const dlRes = await fetch(`${baseUrl}/v0/management/auth-files/download?name=${encodeURIComponent(file.name)}`, {
-                    headers: {
-                        Authorization: `Bearer ${mgmtKey}`,
-                        Accept: "application/json",
-                    },
-                    signal: combinedSignal,
-                });
-                if (!dlRes.ok) return;
-                const dlData = (await dlRes.json()) as DownloadedAuthFile;
-                const pref = (typeof dlData.prefix === "string" && dlData.prefix.trim())
-                    ? dlData.prefix.trim()
-                    : (typeof dlData.note === "string" && dlData.note.trim())
-                        ? dlData.note.trim()
-                        : (typeof file.note === "string" ? file.note.trim() : "");
+            await Promise.allSettled(
+                files.map(async (file) => {
+                    if (!file.name || file.name.includes("/")) return;
+                    const dlRes = await fetch(`${baseUrl}/v0/management/auth-files/download?name=${encodeURIComponent(file.name)}`, {
+                        headers: {
+                            Authorization: `Bearer ${mgmtKey}`,
+                            Accept: "application/json",
+                        },
+                        signal: combinedSignal,
+                    });
+                    if (!dlRes.ok) return;
+                    const dlData = (await dlRes.json()) as DownloadedAuthFile;
+                    const pref = (typeof dlData.prefix === "string" && dlData.prefix.trim())
+                        ? dlData.prefix.trim()
+                        : (typeof dlData.note === "string" && dlData.note.trim())
+                            ? dlData.note.trim()
+                            : (typeof file.note === "string" ? file.note.trim() : "");
+                    
+                    authFilePrefixes.set(file.name, pref);
+                    const prov = (dlData.provider || dlData.type || file.provider || file.type || "").toLowerCase().trim();
+                    if (prov) {
+                        authFileProviders.set(file.name, prov);
+                    }
+
+                    const exSet = new Set(Array.isArray(dlData.excluded_models) ? dlData.excluded_models : []);
+                    authFileExclusions.set(file.name, exSet);
+
+                    if (pref) {
+                        validPrefixes.add(pref);
+                        prefixExclusions.set(pref, exSet);
+                    }
+                })
+            );
+
+            const familyActiveLeaderPrefix = new Map<string, string>();
+            const prefixToFamily = new Map<string, string>();
+
+            const activePoolFamilies = new Set<string>();
+            const poolAssignedPrefixes = new Set<string>();
+            const poolMemberFiles = new Set<string>();
+            const registeredPoolBases = new Set<string>();
+            const confirmedActivePools = new Set<string>();
+
+            const poolsRes = await fetch(`${baseUrl}/v0/management/auto-switcher-pro/pools`, {
+                headers: {
+                    Authorization: `Bearer ${mgmtKey}`,
+                    Accept: "application/json",
+                },
+                signal: combinedSignal,
+            });
+            if (poolsRes.ok) {
+                const poolsData = (await poolsRes.json()) as {
+                    pools?: Array<{
+                        id?: string;
+                        name?: string;
+                        display_name?: string;
+                        base_prefix?: string;
+                        family?: string;
+                        enabled?: boolean;
+                        leader_auth?: string;
+                        reserves?: string[];
+                        members?: string[];
+                        policy?: { excluded_models?: string[] };
+                    }>;
+                };
+                const pools = Array.isArray(poolsData.pools) ? poolsData.pools : [];
                 
-                authFilePrefixes.set(file.name, pref);
-                const prov = (dlData.provider || dlData.type || file.provider || file.type || "").toLowerCase().trim();
-                if (prov) {
-                    authFileProviders.set(file.name, prov);
-                }
+                // Mapeo ordenado determinista: el pool base canónico (ej. 'agy' frente a 'agy2')
+                for (const pool of pools) {
+                    const basePref = typeof pool.base_prefix === "string" ? pool.base_prefix.trim() : "";
+                    if (!basePref) continue;
 
-                const exSet = new Set(Array.isArray(dlData.excluded_models) ? dlData.excluded_models : []);
-                authFileExclusions.set(file.name, exSet);
-
-                if (pref) {
-                    validPrefixes.add(pref);
-                    prefixExclusions.set(pref, exSet);
-                }
-            })
-        );
-
-        const familyActiveLeaderPrefix = new Map<string, string>();
-        const prefixToFamily = new Map<string, string>();
-
-        const activePoolFamilies = new Set<string>();
-        const poolAssignedPrefixes = new Set<string>();
-        const poolMemberFiles = new Set<string>();
-        const registeredPoolBases = new Set<string>();
-        const confirmedActivePools = new Set<string>();
-
-        const poolsRes = await fetch(`${baseUrl}/v0/management/auto-switcher-pro/pools`, {
-            headers: {
-                Authorization: `Bearer ${mgmtKey}`,
-                Accept: "application/json",
-            },
-            signal: combinedSignal,
-        });
-        if (poolsRes.ok) {
-            const poolsData = (await poolsRes.json()) as {
-                pools?: Array<{
-                    id?: string;
-                    name?: string;
-                    display_name?: string;
-                    base_prefix?: string;
-                    family?: string;
-                    enabled?: boolean;
-                    leader_auth?: string;
-                    reserves?: string[];
-                    members?: string[];
-                    policy?: { excluded_models?: string[] };
-                }>;
-            };
-            const pools = Array.isArray(poolsData.pools) ? poolsData.pools : [];
-            
-            // Mapeo ordenado determinista: el pool base canónico (ej. 'agy' frente a 'agy2')
-            for (const pool of pools) {
-                const basePref = typeof pool.base_prefix === "string" ? pool.base_prefix.trim() : "";
-                if (!basePref) continue;
-
-                if (pool.enabled !== false) {
-                    const poolIdentifier = (pool.display_name || pool.id || pool.name || "").trim();
-                    if (poolIdentifier) {
-                        confirmedActivePools.add(poolIdentifier);
+                    if (pool.enabled !== false) {
+                        const poolIdentifier = (pool.display_name || pool.id || pool.name || "").trim();
+                        if (poolIdentifier) {
+                            confirmedActivePools.add(poolIdentifier);
+                        }
                     }
-                }
 
-                registeredPoolBases.add(basePref.toLowerCase());
-                // Marcar el prefijo base del pool como asignado a un pool activo
-                poolAssignedPrefixes.add(basePref.toLowerCase());
+                    registeredPoolBases.add(basePref.toLowerCase());
+                    // Marcar el prefijo base del pool como asignado a un pool activo
+                    poolAssignedPrefixes.add(basePref.toLowerCase());
 
-                if (pool.leader_auth) poolMemberFiles.add(pool.leader_auth.trim());
-                if (Array.isArray(pool.reserves)) {
-                    for (const r of pool.reserves) if (r) poolMemberFiles.add(r.trim());
-                }
-                if (Array.isArray(pool.members)) {
-                    for (const m of pool.members) if (m) poolMemberFiles.add(m.trim());
-                }
+                    if (pool.leader_auth) poolMemberFiles.add(pool.leader_auth.trim());
+                    if (Array.isArray(pool.reserves)) {
+                        for (const r of pool.reserves) if (r) poolMemberFiles.add(r.trim());
+                    }
+                    if (Array.isArray(pool.members)) {
+                        for (const m of pool.members) if (m) poolMemberFiles.add(m.trim());
+                    }
 
-                const fam = (typeof pool.family === "string" && pool.family.trim()) ? pool.family.trim() : "default";
-                activePoolFamilies.add(fam);
-                prefixToFamily.set(basePref, fam);
-                validPrefixes.add(basePref);
+                    const fam = (typeof pool.family === "string" && pool.family.trim()) ? pool.family.trim() : "default";
+                    activePoolFamilies.add(fam);
+                    prefixToFamily.set(basePref, fam);
+                    validPrefixes.add(basePref);
 
-                // Determinar el líder representativo activo para la familia
-                if (!familyActiveLeaderPrefix.has(fam)) {
-                    familyActiveLeaderPrefix.set(fam, basePref);
-                } else {
-                    const existing = familyActiveLeaderPrefix.get(fam)!;
-                    // Priorizar prefijo canónico más corto o alfabéticamente superior ('agy' antes que 'agy2')
-                    if (basePref.length < existing.length || (basePref.length === existing.length && basePref < existing)) {
+                    // Determinar el líder representativo activo para la familia
+                    if (!familyActiveLeaderPrefix.has(fam)) {
                         familyActiveLeaderPrefix.set(fam, basePref);
+                    } else {
+                        const existing = familyActiveLeaderPrefix.get(fam)!;
+                        // Priorizar prefijo canónico más corto o alfabéticamente superior ('agy' antes que 'agy2')
+                        if (basePref.length < existing.length || (basePref.length === existing.length && basePref < existing)) {
+                            familyActiveLeaderPrefix.set(fam, basePref);
+                        }
                     }
-                }
 
-                // Sincronizar exclusiones de la Tuerca ⚙️ de la cuenta líder del pool
-                if (pool.leader_auth && authFileExclusions.has(pool.leader_auth)) {
-                    prefixExclusions.set(basePref, authFileExclusions.get(pool.leader_auth)!);
-                } else if (Array.isArray(pool.policy?.excluded_models)) {
-                    prefixExclusions.set(basePref, new Set(pool.policy.excluded_models));
-                }
-            }
-        }
-
-        // Descubrir cuentas libres activas que NO pertenecen a ningún pool
-        const activeBareProviders = new Set<string>();
-        const bareExclusions = new Set<string>();
-
-        for (const fileName of activeAuthFiles) {
-            if (!poolMemberFiles.has(fileName)) {
-                const pref = authFilePrefixes.get(fileName) ?? "";
-                if (!pref || pref === "argon" || pref.startsWith("argon")) {
-                    // Cuenta libre sin prefijo o cuenta Argon libre: habilitar su proveedor legítimo
-                    const prov = authFileProviders.get(fileName) || (pref.startsWith("argon") ? "gemini-argon" : "antigravity");
-                    activeBareProviders.add(prov);
-                    const exs = authFileExclusions.get(fileName);
-                    if (exs) {
-                        for (const ex of exs) bareExclusions.add(ex);
+                    // Sincronizar exclusiones de la Tuerca ⚙️ de la cuenta líder del pool
+                    if (pool.leader_auth && authFileExclusions.has(pool.leader_auth)) {
+                        prefixExclusions.set(basePref, authFileExclusions.get(pool.leader_auth)!);
+                    } else if (Array.isArray(pool.policy?.excluded_models)) {
+                        prefixExclusions.set(basePref, new Set(pool.policy.excluded_models));
                     }
                 }
             }
-        }
 
-        const result = {
-            validPrefixes,
-            prefixExclusions,
-            familyActiveLeaderPrefix,
-            prefixToFamily,
-            activePoolFamilies,
-            poolAssignedPrefixes,
-            activeBareProviders,
-            bareExclusions,
-            registeredPoolBases,
-            confirmedActivePools,
-        };
-        cachedFilterData = result;
-        lastKnownEpoch = currentEpoch || readCurrentSignalEpoch();
-        return result;
-    } catch {
-        return cachedFilterData;
+            // Descubrir cuentas libres activas que NO pertenecen a ningún pool
+            const activeBareProviders = new Set<string>();
+            const bareExclusions = new Set<string>();
+
+            for (const fileName of activeAuthFiles) {
+                if (!poolMemberFiles.has(fileName)) {
+                    const pref = authFilePrefixes.get(fileName) ?? "";
+                    if (!pref || pref === "argon" || pref.startsWith("argon")) {
+                        // Cuenta libre sin prefijo o cuenta Argon libre: habilitar su proveedor legítimo
+                        const prov = authFileProviders.get(fileName) || (pref.startsWith("argon") ? "gemini-argon" : "antigravity");
+                        activeBareProviders.add(prov);
+                        const exs = authFileExclusions.get(fileName);
+                        if (exs) {
+                            for (const ex of exs) bareExclusions.add(ex);
+                        }
+                    }
+                }
+            }
+
+            const result = {
+                validPrefixes,
+                prefixExclusions,
+                familyActiveLeaderPrefix,
+                prefixToFamily,
+                activePoolFamilies,
+                poolAssignedPrefixes,
+                activeBareProviders,
+                bareExclusions,
+                registeredPoolBases,
+                confirmedActivePools,
+            };
+            cachedFilterData = result;
+            lastKnownEpoch = currentEpoch || readCurrentSignalEpoch();
+            return result;
+        } catch {
+            // Continúa probando la siguiente URL en la cascada
+        }
     }
+
+    return cachedFilterData;
 }
 
 function isKnownFallbackPrefix(prefix: string): boolean {
@@ -710,7 +750,21 @@ export function isCleanIncludedModel(id: string, filterData: {
 
     // Modelos Planos / Sin Barra (Cuentas Libres Nativas y Fallback Bimodal N=0)
     if (slashIndex === -1) {
-        if (!filterData?.activeBareProviders || filterData.activeBareProviders.size === 0) {
+        if (!filterData) {
+            // Cold boot / offline fallback: permitir modelos estándar oficiales reconocidos
+            const lower = trimmed.toLowerCase();
+            return (
+                lower.startsWith("gemini") ||
+                lower.startsWith("claude") ||
+                lower.startsWith("gpt") ||
+                lower.startsWith("o1") ||
+                lower.startsWith("o3") ||
+                lower.startsWith("chatgpt") ||
+                lower.includes("argon")
+            );
+        }
+
+        if (!filterData.activeBareProviders || filterData.activeBareProviders.size === 0) {
             return false;
         }
 
@@ -824,69 +878,81 @@ export function isCleanIncludedModel(id: string, filterData: {
 }
 
 export async function fetchCLIProxyModels(signal?: AbortSignal) {
-    const baseUrl = resolveBaseUrl();
+    const candidateUrls = resolveCandidateBaseUrls();
     const apiKey = requireApiKey();
-
-    const filterData = await fetchAccountPrefixesAndExclusions(baseUrl, signal);
     const prefixOf = (id: string) => {
         const idx = id.indexOf("/");
         return idx > 0 ? id.slice(0, idx) : "";
     };
 
-    try {
-        const response = await fetch(`${baseUrl}/v1/models?client_version=1`, {
-            headers: { Authorization: `Bearer ${apiKey}` },
-            signal,
-        });
+    let filterData = await fetchAccountPrefixesAndExclusions(undefined, signal);
 
-        if (response.ok) {
-            const payload = (await response.json()) as { models?: CPAModel[] };
-            if (Array.isArray(payload.models) && payload.models.length > 0) {
-                const included = payload.models.filter((model) => {
-                    const id = typeof model.slug === "string" ? model.slug.trim()
-                        : (typeof model.id === "string" ? model.id.trim() : "");
+    // Intentar /v1/models?client_version=1 a través de la cascada universal
+    for (const baseUrl of candidateUrls) {
+        try {
+            const timeout = AbortSignal.timeout(6000);
+            const combinedSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
+            const response = await fetch(`${baseUrl}/v1/models?client_version=1`, {
+                headers: { Authorization: `Bearer ${apiKey}` },
+                signal: combinedSignal,
+            });
+
+            if (response.ok) {
+                const payload = (await response.json()) as { models?: CPAModel[] };
+                if (Array.isArray(payload.models) && payload.models.length > 0) {
+                    const included = payload.models.filter((model) => {
+                        const id = typeof model.slug === "string" ? model.slug.trim()
+                            : (typeof model.id === "string" ? model.id.trim() : "");
+                        return isCleanIncludedModel(id, filterData);
+                    });
+                    const poolLabels = buildPoolLabelMap(
+                        filterData ? [...filterData.validPrefixes] : included.map((m) => prefixOf(typeof m.slug === "string" ? m.slug : (m.id ?? ""))),
+                        filterData?.registeredPoolBases
+                    );
+                    const mappedModels = included
+                        .map((m) => toPiModelFromCPA(m, poolLabels))
+                        .filter((model): model is NonNullable<ReturnType<typeof toPiModelFromCPA>> => Boolean(model));
+
+                    return reconcileActivePoolFacades(mappedModels, filterData?.confirmedActivePools);
+                }
+            }
+        } catch {
+            // Continúa con la siguiente URL en la cascada
+        }
+    }
+
+    // Fallback a /v1/models estándar a través de la cascada universal
+    for (const baseUrl of candidateUrls) {
+        try {
+            const timeout = AbortSignal.timeout(6000);
+            const combinedSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
+            const response = await fetch(`${baseUrl}/v1/models`, {
+                headers: { Authorization: `Bearer ${apiKey}` },
+                signal: combinedSignal,
+            });
+
+            if (response.ok) {
+                const payload = (await response.json()) as { data?: FallbackOpenAIModel[] };
+                const includedFallback = (payload.data ?? []).filter((model) => {
+                    const id = typeof model.id === "string" ? model.id.trim() : "";
                     return isCleanIncludedModel(id, filterData);
                 });
-                const poolLabels = buildPoolLabelMap(
-                    filterData ? [...filterData.validPrefixes] : included.map((m) => prefixOf(typeof m.slug === "string" ? m.slug : (m.id ?? ""))),
+                const poolLabelsFallback = buildPoolLabelMap(
+                    filterData ? [...filterData.validPrefixes] : includedFallback.map((m) => prefixOf(typeof m.id === "string" ? m.id : "")),
                     filterData?.registeredPoolBases
                 );
-                const mappedModels = included
-                    .map((m) => toPiModelFromCPA(m, poolLabels))
-                    .filter((model): model is NonNullable<ReturnType<typeof toPiModelFromCPA>> => Boolean(model));
+                const mappedFallback = includedFallback
+                    .map((m) => toPiModelFromOpenAI(m, poolLabelsFallback))
+                    .filter((model): model is NonNullable<ReturnType<typeof toPiModelFromOpenAI>> => Boolean(model));
 
-                return reconcileActivePoolFacades(mappedModels, filterData?.confirmedActivePools);
+                return reconcileActivePoolFacades(mappedFallback, filterData?.confirmedActivePools);
             }
+        } catch {
+            // Continúa con la siguiente URL en la cascada
         }
-    } catch {
-        // Fallback al endpoint estándar
     }
 
-    const response = await fetch(`${baseUrl}/v1/models`, {
-        headers: { Authorization: `Bearer ${apiKey}` },
-        signal,
-    });
-
-    if (!response.ok) {
-        const body = await response.text().catch(() => "");
-        const detail = body ? `: ${body.slice(0, 300)}` : "";
-        throw new Error(`CLIProxyAPI /v1/models failed with HTTP ${response.status}${detail}`);
-    }
-
-    const payload = (await response.json()) as { data?: FallbackOpenAIModel[] };
-    const includedFallback = (payload.data ?? []).filter((model) => {
-        const id = typeof model.id === "string" ? model.id.trim() : "";
-        return isCleanIncludedModel(id, filterData);
-    });
-    const poolLabelsFallback = buildPoolLabelMap(
-        filterData ? [...filterData.validPrefixes] : includedFallback.map((m) => prefixOf(typeof m.id === "string" ? m.id : "")),
-        filterData?.registeredPoolBases
-    );
-    const mappedFallback = includedFallback
-        .map((m) => toPiModelFromOpenAI(m, poolLabelsFallback))
-        .filter((model): model is NonNullable<ReturnType<typeof toPiModelFromOpenAI>> => Boolean(model));
-
-    return reconcileActivePoolFacades(mappedFallback, filterData?.confirmedActivePools);
+    throw new Error("CLIProxyAPI /v1/models failed across all candidate base URLs");
 }
 
 /**

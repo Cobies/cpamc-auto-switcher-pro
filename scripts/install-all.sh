@@ -371,9 +371,11 @@ install_extension() {
         echo -e "${YELLOW}ℹ️  No se detectaron agentes previos. Inicializando Gentle-Shell (~/.gentle-shell/agent)${RESET}"
     fi
 
-    # Origen de la extensión
+    # Origen de la extensión y agentes
     local repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd || true)"
     local local_ext_src="${repo_root}/extensions/cpamc-auto-switcher"
+    local local_subagents_src="${repo_root}/subagents"
+    local local_agents_src="${repo_root}/agents"
     local tmp_dir=""
 
     if [ ! -d "$local_ext_src" ]; then
@@ -382,6 +384,8 @@ install_extension() {
         if command -v git >/dev/null 2>&1; then
             git clone --depth 1 "$REPO_URL.git" "$tmp_dir/repo" >/dev/null 2>&1 || true
             local_ext_src="$tmp_dir/repo/extensions/cpamc-auto-switcher"
+            local_subagents_src="$tmp_dir/repo/subagents"
+            local_agents_src="$tmp_dir/repo/agents"
         fi
     fi
 
@@ -396,6 +400,20 @@ install_extension() {
             echo -e "${GREEN}    [✓] Extensión instalada en: ${ext_dest}${RESET}"
         else
             echo -e "${RED}    [ERROR] No se pudo encontrar el origen de extensions/cpamc-auto-switcher.${RESET}"
+        fi
+
+        # Aprovisionar subagentes de Planned Workflow
+        if [ -d "$local_subagents_src" ]; then
+            mkdir -p "${agent_home}/subagents"
+            cp -r "$local_subagents_src"/* "${agent_home}/subagents/" 2>/dev/null || true
+            echo -e "${GREEN}    [✓] Subagentes Planned Workflow sincronizados en: ${agent_home}/subagents${RESET}"
+        fi
+
+        # Aprovisionar agentes de Gentle AI
+        if [ -d "$local_agents_src" ]; then
+            mkdir -p "${agent_home}/agents"
+            cp -r "$local_agents_src"/* "${agent_home}/agents/" 2>/dev/null || true
+            echo -e "${GREEN}    [✓] Agentes Gentle AI sincronizados en: ${agent_home}/agents${RESET}"
         fi
 
         # Persistir configuración en settings.json del agente si la URL no es localhost estándar

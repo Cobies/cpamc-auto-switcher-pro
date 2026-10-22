@@ -43,39 +43,47 @@ function scanHostHarnesses() {
 
   // 1. Gentle-Shell CLI
   const gentleDir = path.join(home, '.gentle-shell', 'agent');
-  if (fs.existsSync(gentleDir)) {
+  if (fs.existsSync(gentleDir) || fs.existsSync(path.join(home, '.gentle-shell'))) {
     const agentsDir = path.join(gentleDir, 'agents');
+    const subagentsDir = path.join(gentleDir, 'subagents');
     const agents = [];
 
     // Orchestrator
     agents.push({
       agent_id: 'orchestrator',
-      display_name: '👑 ORQUESTADOR GENTLE',
+      display_name: '👑 ORQUESTADOR GENTLE-SHELL',
       role_type: 'orchestrator',
       is_orchestrator: true,
-      description: 'Cerebro senior interactivo de Gentle-Shell CLI',
+      description: 'Cerebro senior interactivo de Gentle-Shell CLI con streaming nativo',
       default_primary: 'Pool-04-claude',
       default_fallback: 'Pool-01-gemini',
       default_thinking: 'high',
       concurrency: 1,
     });
 
-    if (fs.existsSync(agentsDir)) {
-      for (const f of fs.readdirSync(agentsDir).sort()) {
-        if (f.endsWith('.md')) {
-          const id = f.replace(/\.md$/, '');
-          const meta = parseMarkdownMetadata(path.join(agentsDir, f), id);
-          agents.push({
-            agent_id: id,
-            display_name: meta.displayName,
-            role_type: deriveRole(id),
-            is_orchestrator: false,
-            description: meta.description,
-            default_primary: id.includes('verify') ? 'Pool-02-gemini' : (id.includes('plan') || id.includes('worker') || id.includes('fix') ? 'Pool-04-claude' : 'Pool-01-gemini'),
-            default_fallback: 'Pool-02-gemini',
-            default_thinking: id.includes('verify') ? 'low' : 'medium',
-            concurrency: (id.includes('explore') || id.includes('verify')) ? 2 : 1,
-          });
+    const seenIds = new Set(['orchestrator']);
+    const scanDirs = [agentsDir, subagentsDir, path.join(__dirname, '..', 'agents'), path.join(__dirname, '..', 'subagents')];
+
+    for (const d of scanDirs) {
+      if (fs.existsSync(d)) {
+        for (const f of fs.readdirSync(d).sort()) {
+          if (f.endsWith('.md')) {
+            const id = f.replace(/\.md$/, '');
+            if (seenIds.has(id)) continue;
+            seenIds.add(id);
+            const meta = parseMarkdownMetadata(path.join(d, f), id);
+            agents.push({
+              agent_id: id,
+              display_name: meta.displayName,
+              role_type: deriveRole(id),
+              is_orchestrator: false,
+              description: meta.description,
+              default_primary: id.includes('verify') ? 'Pool-02-gemini' : (id.includes('plan') || id.includes('worker') || id.includes('fix') ? 'Pool-04-claude' : 'Pool-01-gemini'),
+              default_fallback: 'Pool-02-gemini',
+              default_thinking: id.includes('verify') ? 'low' : 'medium',
+              concurrency: (id.includes('explore') || id.includes('verify') || id.includes('discovery')) ? 2 : 1,
+            });
+          }
         }
       }
     }
@@ -91,52 +99,125 @@ function scanHostHarnesses() {
     });
   }
 
-  // 2. j0k3r-pi
-  const jok3rDir = path.join(home, '.pi', 'agent-j0k3r');
-  if (fs.existsSync(jok3rDir)) {
-    const subagentsDir = path.join(jok3rDir, 'subagents');
+  // 2. Gentle-PI
+  const gentlePiDir = path.join(home, '.pi', 'gentle-ai');
+  if (fs.existsSync(gentlePiDir) || fs.existsSync(path.join(home, '.gentle-ai')) || fs.existsSync(path.join(__dirname, '..', 'agents'))) {
     const agents = [];
-
-    // Orchestrator
     agents.push({
       agent_id: 'orchestrator',
-      display_name: '👑 ORQUESTADOR J0K3R',
+      display_name: '👑 ORQUESTADOR GENTLE-PI',
       role_type: 'orchestrator',
       is_orchestrator: true,
-      description: 'Cerebro principal interactivo de j0k3r-pi que coordina el ciclo de vida',
+      description: 'Cerebro senior de Gentle-AI que atiende en OpenCode y suite Pi',
       default_primary: 'Pool-04-claude',
       default_fallback: 'Pool-01-gemini',
       default_thinking: 'high',
       concurrency: 1,
     });
 
-    if (fs.existsSync(subagentsDir)) {
-      for (const f of fs.readdirSync(subagentsDir).sort()) {
-        if (f.endsWith('.md')) {
-          const id = f.replace(/\.md$/, '');
-          const meta = parseMarkdownMetadata(path.join(subagentsDir, f), id);
-          agents.push({
-            agent_id: id,
-            display_name: meta.displayName,
-            role_type: deriveRole(id),
-            is_orchestrator: false,
-            description: meta.description,
-            default_primary: id.includes('verify') ? 'Pool-02-gemini' : (id.includes('plan') || id.includes('apply') ? 'Pool-04-claude' : 'Pool-01-gemini'),
-            default_fallback: 'Pool-02-gemini',
-            default_thinking: id.includes('verify') ? 'low' : 'medium',
-            concurrency: (id.includes('discovery') || id.includes('verify') || id.includes('research')) ? 2 : 1,
-          });
+    const seenIds = new Set(['orchestrator']);
+    const scanDirs = [
+      path.join(gentlePiDir, 'agents'),
+      path.join(home, '.pi', 'agent', 'agents'),
+      path.join(__dirname, '..', 'agents'),
+    ];
+
+    for (const d of scanDirs) {
+      if (fs.existsSync(d)) {
+        for (const f of fs.readdirSync(d).sort()) {
+          if (f.endsWith('.md')) {
+            const id = f.replace(/\.md$/, '');
+            if (seenIds.has(id)) continue;
+            seenIds.add(id);
+            const meta = parseMarkdownMetadata(path.join(d, f), id);
+            agents.push({
+              agent_id: id,
+              display_name: meta.displayName,
+              role_type: deriveRole(id),
+              is_orchestrator: false,
+              description: meta.description,
+              default_primary: id.includes('verify') ? 'Pool-02-gemini' : (id.includes('plan') || id.includes('worker') || id.includes('fix') ? 'Pool-04-claude' : 'Pool-01-gemini'),
+              default_fallback: 'Pool-02-gemini',
+              default_thinking: id.includes('verify') ? 'low' : 'medium',
+              concurrency: (id.includes('explore') || id.includes('verify')) ? 2 : 1,
+            });
+          }
         }
       }
     }
 
     detectedHarnesses.push({
-      id: 'jok3r_pi',
-      name: 'j0k3r-pi',
+      id: 'gentle_pi',
+      name: 'Gentle-PI',
+      icon: '🤖',
+      badge: '🤖 Gentle-PI Suite',
+      config_path: '~/.pi/gentle-ai/profiles.json',
+      subtitle: '🤖 Entorno oficial Gentle-PI con suite de agentes y evaluadores de arquitectura (ODD/Judgment Day).',
+      agents,
+    });
+  }
+
+  // 3. Wilox-Pi (Planned Workflow)
+  const wiloxPiDir = path.join(home, '.pi', 'agent-wilox');
+  const jok3rDir = path.join(home, '.pi', 'agent-j0k3r');
+  const piVanillaDir = path.join(home, '.pi', 'agent');
+  const hasWilox = fs.existsSync(wiloxPiDir) || fs.existsSync(jok3rDir) || fs.existsSync(path.join(__dirname, '..', 'subagents'));
+
+  if (hasWilox) {
+    const agents = [];
+
+    // Orchestrator
+    agents.push({
+      agent_id: 'orchestrator',
+      display_name: '👑 ORQUESTADOR WILOX-PI',
+      role_type: 'orchestrator',
+      is_orchestrator: true,
+      description: 'Cerebro principal interactivo de Wilox-Pi que coordina el Planned Workflow',
+      default_primary: 'Pool-04-claude',
+      default_fallback: 'Pool-01-gemini',
+      default_thinking: 'high',
+      concurrency: 1,
+    });
+
+    const seenIds = new Set(['orchestrator']);
+    const scanDirs = [
+      path.join(wiloxPiDir, 'subagents'),
+      path.join(jok3rDir, 'subagents'),
+      path.join(piVanillaDir, 'subagents'),
+      path.join(__dirname, '..', 'subagents'),
+    ];
+
+    for (const d of scanDirs) {
+      if (fs.existsSync(d)) {
+        for (const f of fs.readdirSync(d).sort()) {
+          if (f.endsWith('.md')) {
+            const id = f.replace(/\.md$/, '');
+            if (seenIds.has(id)) continue;
+            seenIds.add(id);
+            const meta = parseMarkdownMetadata(path.join(d, f), id);
+            agents.push({
+              agent_id: id,
+              display_name: meta.displayName,
+              role_type: deriveRole(id),
+              is_orchestrator: false,
+              description: meta.description,
+              default_primary: id.includes('verify') ? 'Pool-02-gemini' : (id.includes('plan') || id.includes('apply') ? 'Pool-04-claude' : 'Pool-01-gemini'),
+              default_fallback: 'Pool-02-gemini',
+              default_thinking: id.includes('verify') ? 'low' : 'medium',
+              concurrency: (id.includes('discovery') || id.includes('verify') || id.includes('research')) ? 2 : 1,
+            });
+          }
+        }
+      }
+    }
+
+    detectedHarnesses.push({
+      id: 'wilox_pi',
+      name: 'Wilox-Pi',
       icon: '⚡',
-      badge: '⚡ j0k3r-pi Orchestrator',
-      config_path: '~/.pi/agent-j0k3r/subagents.json',
-      subtitle: '⚡ Suite Todo-en-Uno Soberana: Orquestador interactivo de terminal y escuadrón de subagentes Planned Workflow.',
+      badge: '⚡ Wilox-Pi Orchestrator',
+      config_path: '~/.pi/agent-wilox/subagents.json',
+      subtitle: '⚡ Suite Soberana Planned Workflow: Orquestador interactivo y escuadrón de subagentes (00-discovery a 03-verify).',
       agents,
     });
   }

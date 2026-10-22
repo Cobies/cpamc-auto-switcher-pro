@@ -31,17 +31,37 @@ else
   echo "⚠️ Aviso: 'go' no está instalado en el sistema. Se utilizará la telemetría integrada de la extensión."
 fi
 
-# 2. Enlazar la extensión en los entornos detectados
+# 2. Enlazar la extensión y sincronizar agentes en los entornos detectados
 LINKED=0
+
+sync_agents_and_subagents() {
+  local agent_root="$1"
+  local label="$2"
+
+  if [ -d "${agent_root}" ]; then
+    if [ -d "${SCRIPT_DIR}/subagents" ]; then
+      mkdir -p "${agent_root}/subagents"
+      cp -r "${SCRIPT_DIR}/subagents"/* "${agent_root}/subagents/" 2>/dev/null || true
+      echo "🤖 Subagentes Planned Workflow sincronizados en [${label}]: ${agent_root}/subagents"
+    fi
+    if [ -d "${SCRIPT_DIR}/agents" ]; then
+      mkdir -p "${agent_root}/agents"
+      cp -r "${SCRIPT_DIR}/agents"/* "${agent_root}/agents/" 2>/dev/null || true
+      echo "👥 Agentes Gentle AI sincronizados en [${label}]: ${agent_root}/agents"
+    fi
+  fi
+}
 
 link_extension() {
   local target_dir="$1"
   local label="$2"
+  local agent_root="$(dirname "${target_dir}")"
 
-  if [ -d "$(dirname "${target_dir}")" ]; then
+  if [ -d "${agent_root}" ]; then
     mkdir -p "${target_dir}"
     ln -sfn "${EXT_DIR}" "${target_dir}/cpamc-auto-switcher"
     echo "🔗 Extensión vinculada con éxito en [${label}]: ${target_dir}/cpamc-auto-switcher"
+    sync_agents_and_subagents "${agent_root}" "${label}"
     LINKED=1
   fi
 }

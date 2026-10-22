@@ -109,6 +109,11 @@ type AgentMatrixPayload struct {
 }
 
 func getJok3rRootDir() string {
+	if env := os.Getenv("PI_CODING_AGENT_DIR"); env != "" {
+		if fi, err := os.Stat(env); err == nil && fi.IsDir() {
+			return env
+		}
+	}
 	if env := os.Getenv("HOST_PI_DIR"); env != "" {
 		if fi, err := os.Stat(env); err == nil && fi.IsDir() {
 			return env
@@ -118,9 +123,14 @@ func getJok3rRootDir() string {
 		return "/host-harnesses/j0k3r"
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		p := filepath.Join(home, ".pi", "agent-j0k3r")
-		if fi, err := os.Stat(p); err == nil && fi.IsDir() {
-			return p
+		for _, cand := range []string{
+			filepath.Join(home, ".pi", "agent-wilox"),
+			filepath.Join(home, ".pi", "agent-j0k3r"),
+			filepath.Join(home, ".pi", "agent"),
+		} {
+			if fi, err := os.Stat(cand); err == nil && fi.IsDir() {
+				return cand
+			}
 		}
 	}
 	return ""
@@ -667,8 +677,8 @@ func loadManifestOrDiscover(availablePools []string, poolCapabilities map[string
 		}
 		if err := json.Unmarshal(rawManifest, &diskManifest); err == nil && len(diskManifest.DetectedHarnesses) > 0 {
 			for _, h := range diskManifest.DetectedHarnesses {
-				// If j0k3r-pi is in manifest but dynamic detection says false, skip it
-				if h.ID == "jok3r_pi" && !jok3rDetected {
+				// If j0k3r-pi / wilox-pi is in manifest but dynamic detection says false, skip it
+				if (h.ID == "jok3r_pi" || h.ID == "wilox_pi") && !jok3rDetected {
 					continue
 				}
 
@@ -683,10 +693,10 @@ func loadManifestOrDiscover(availablePools []string, poolCapabilities map[string
 
 				// Merge with dynamically discovered local files so new markdown subagents appear immediately
 				var dynamicDiscovered []AgentInfo
-				if h.ID == "jok3r_pi" {
-					dynamicDiscovered = discoverUniverseAgents("jok3r_pi", savedMap, availablePools)
-				} else if h.ID == "gentle_shell" || h.ID == "gentle_ai" {
-					dynamicDiscovered = discoverUniverseAgents("gentle_ai", savedMap, availablePools)
+				if h.ID == "jok3r_pi" || h.ID == "wilox_pi" {
+					dynamicDiscovered = discoverUniverseAgents(h.ID, savedMap, availablePools)
+				} else if h.ID == "gentle_shell" || h.ID == "gentle_ai" || h.ID == "gentle_pi" {
+					dynamicDiscovered = discoverUniverseAgents(h.ID, savedMap, availablePools)
 				}
 
 				seenAgent := make(map[string]bool)
@@ -754,10 +764,14 @@ func loadManifestOrDiscover(availablePools []string, poolCapabilities map[string
 				h.Agents = agentsWithState
 				harnesses = append(harnesses, h)
 
-				if h.ID == "gentle_shell" || h.ID == "gentle_ai" {
-					gentleAgents = h.Agents
-				} else if h.ID == "jok3r_pi" {
-					jok3rAgents = h.Agents
+				if h.ID == "gentle_shell" || h.ID == "gentle_ai" || h.ID == "gentle_pi" {
+					if len(gentleAgents) == 0 {
+						gentleAgents = h.Agents
+					}
+				} else if h.ID == "jok3r_pi" || h.ID == "wilox_pi" {
+					if len(jok3rAgents) == 0 {
+						jok3rAgents = h.Agents
+					}
 				}
 			}
 
@@ -766,12 +780,16 @@ func loadManifestOrDiscover(availablePools []string, poolCapabilities map[string
 	}
 
 	// Fallback to legacy scanning if no manifest exists on disk
-	savedGentle, _ := analytics.GetAgentProfiles("gentle_ai")
+	// 1. Gentle-Shell CLI
+	savedGentle, _ := analytics.GetAgentProfiles("gentle_shell")
+	if len(savedGentle) == 0 {
+		savedGentle, _ = analytics.GetAgentProfiles("gentle_ai")
+	}
 	gentleMap := make(map[string]analytics.AgentProfileRecord)
 	for _, p := range savedGentle {
 		gentleMap[p.AgentID] = p
 	}
-	gentleAgents = discoverUniverseAgents("gentle_ai", gentleMap, availablePools)
+	gentleAgents = discoverUniverseAgents("gentle_shell", gentleMap, availablePools)
 	harnesses = append(harnesses, DiscoveredHarness{
 		ID:         "gentle_shell",
 		Name:       "Gentle-Shell CLI",
@@ -782,21 +800,42 @@ func loadManifestOrDiscover(availablePools []string, poolCapabilities map[string
 		Agents:     gentleAgents,
 	})
 
+	// 2. Gentle-PI
+	savedGentlePi, _ := analytics.GetAgentProfiles("gentle_pi")
+	gentlePiMap := make(map[string]analytics.AgentProfileRecord)
+	for _, p := range savedGentlePi {
+		gentlePiMap[p.AgentID] = p
+	}
+	gentlePiAgents := discoverUniverseAgents("gentle_pi", gentlePiMap, availablePools)
+	harnesses = append(harnesses, DiscoveredHarness{
+		ID:         "gentle_pi",
+		Name:       "Gentle-PI",
+		Icon:       "🤖",
+		Badge:      "🤖 Gentle-PI Suite",
+		ConfigPath: "~/.pi/gentle-ai/profiles.json",
+		Subtitle:   "🤖 Entorno oficial Gentle-PI con suite de agentes y evaluadores de arquitectura.",
+		Agents:     gentlePiAgents,
+	})
+
+	// 3. Wilox-Pi (Planned Workflow)
 	jok3rDetected = isJok3rDetected()
 	if jok3rDetected {
-		savedJok3r, _ := analytics.GetAgentProfiles("jok3r_pi")
-		jok3rMap := make(map[string]analytics.AgentProfileRecord)
-		for _, p := range savedJok3r {
-			jok3rMap[p.AgentID] = p
+		savedWilox, _ := analytics.GetAgentProfiles("wilox_pi")
+		if len(savedWilox) == 0 {
+			savedWilox, _ = analytics.GetAgentProfiles("jok3r_pi")
 		}
-		jok3rAgents = discoverUniverseAgents("jok3r_pi", jok3rMap, availablePools)
+		wiloxMap := make(map[string]analytics.AgentProfileRecord)
+		for _, p := range savedWilox {
+			wiloxMap[p.AgentID] = p
+		}
+		jok3rAgents = discoverUniverseAgents("wilox_pi", wiloxMap, availablePools)
 		harnesses = append(harnesses, DiscoveredHarness{
-			ID:         "jok3r_pi",
-			Name:       "j0k3r-pi",
+			ID:         "wilox_pi",
+			Name:       "Wilox-Pi",
 			Icon:       "⚡",
-			Badge:      "⚡ j0k3r-pi Orchestrator",
-			ConfigPath: "~/.pi/agent-j0k3r/subagents.json",
-			Subtitle:   "⚡ Suite Todo-en-Uno Soberana: Orquestador interactivo de terminal y escuadrón de subagentes Planned Workflow.",
+			Badge:      "⚡ Wilox-Pi Orchestrator",
+			ConfigPath: "~/.pi/agent-wilox/subagents.json",
+			Subtitle:   "⚡ Suite Soberana Planned Workflow: Orquestador interactivo y escuadrón de subagentes (00-discovery a 03-verify).",
 			Agents:     jok3rAgents,
 		})
 	}
@@ -872,15 +911,20 @@ func discoverUniverseAgents(universe string, savedMap map[string]analytics.Agent
 		if gDir := getGentleRootDir(); gDir != "" {
 			agentDirs = append(agentDirs,
 				filepath.Join(gDir, "agent", "agents"),
+				filepath.Join(gDir, "agent", "subagents"),
 				filepath.Join(gDir, "agents"),
+				filepath.Join(gDir, "subagents"),
 			)
 		}
 		if home != "" {
 			agentDirs = append(agentDirs,
 				filepath.Join(home, ".gentle-shell", "agent", "agents"),
+				filepath.Join(home, ".gentle-shell", "agent", "subagents"),
 				filepath.Join(home, ".pi", "gentle-ai", "agents"),
+				filepath.Join(home, ".pi", "gentle-ai", "subagents"),
 			)
 		}
+		agentDirs = append(agentDirs, "subagents", "agents", ".pi/subagents", ".pi/agents")
 	} else {
 		if jDir := getJok3rRootDir(); jDir != "" {
 			agentDirs = append(agentDirs,
@@ -890,11 +934,14 @@ func discoverUniverseAgents(universe string, savedMap map[string]analytics.Agent
 		}
 		if home != "" {
 			agentDirs = append(agentDirs,
+				filepath.Join(home, ".pi", "agent-wilox", "subagents"),
+				filepath.Join(home, ".pi", "agent-wilox", "agents"),
 				filepath.Join(home, ".pi", "agent-j0k3r", "subagents"),
 				filepath.Join(home, ".pi", "agent-j0k3r", "agents"),
+				filepath.Join(home, ".pi", "agent", "subagents"),
 			)
 		}
-		agentDirs = append(agentDirs, ".pi/subagents")
+		agentDirs = append(agentDirs, "subagents", ".pi/subagents")
 	}
 
 	// Start with Orquestador on the Throne
@@ -903,31 +950,44 @@ func discoverUniverseAgents(universe string, savedMap map[string]analytics.Agent
 
 	defP, defF := resolveBestPoolForRole("orchestrator", "orchestrator", availablePools)
 
-	if universe == "gentle_ai" || universe == "gentle_shell" {
+	if universe == "gentle_shell" {
 		list = append(list, AgentInfo{
-			Universe:       "gentle_ai",
+			Universe:       "gentle_shell",
 			AgentID:        "orchestrator",
-			DisplayName:    "👑 ORQUESTADOR GENTLE",
+			DisplayName:    "👑 ORQUESTADOR GENTLE-SHELL",
 			RoleType:       "orchestrator",
 			IsOrchestrator: true,
 			PrimaryPool:    getVal(savedMap, "orchestrator", "primary", defP, availablePools),
 			FallbackPool:   getVal(savedMap, "orchestrator", "fallback", defF, availablePools),
 			ThinkingLevel:  getVal(savedMap, "orchestrator", "thinking", "high", availablePools),
 			Concurrency:    1,
-			Description:    "Cerebro senior de Gentle-AI que atiende en OpenCode y Gentle-Shell",
+			Description:    "Cerebro senior interactivo de Gentle-Shell CLI con streaming nativo",
+		})
+	} else if universe == "gentle_pi" || universe == "gentle_ai" {
+		list = append(list, AgentInfo{
+			Universe:       "gentle_pi",
+			AgentID:        "orchestrator",
+			DisplayName:    "👑 ORQUESTADOR GENTLE-PI",
+			RoleType:       "orchestrator",
+			IsOrchestrator: true,
+			PrimaryPool:    getVal(savedMap, "orchestrator", "primary", defP, availablePools),
+			FallbackPool:   getVal(savedMap, "orchestrator", "fallback", defF, availablePools),
+			ThinkingLevel:  getVal(savedMap, "orchestrator", "thinking", "high", availablePools),
+			Concurrency:    1,
+			Description:    "Cerebro senior de Gentle-AI que atiende en OpenCode y suite Pi",
 		})
 	} else {
 		list = append(list, AgentInfo{
-			Universe:       "jok3r_pi",
+			Universe:       universe,
 			AgentID:        "orchestrator",
-			DisplayName:    "👑 ORQUESTADOR J0K3R",
+			DisplayName:    "👑 ORQUESTADOR WILOX-PI",
 			RoleType:       "orchestrator",
 			IsOrchestrator: true,
 			PrimaryPool:    getVal(savedMap, "orchestrator", "primary", defP, availablePools),
 			FallbackPool:   getVal(savedMap, "orchestrator", "fallback", defF, availablePools),
 			ThinkingLevel:  getVal(savedMap, "orchestrator", "thinking", "high", availablePools),
 			Concurrency:    1,
-			Description:    "Cerebro principal interactivo de j0k3r-pi que coordina el ciclo de vida",
+			Description:    "Cerebro principal interactivo de Wilox-Pi que coordina el Planned Workflow",
 		})
 	}
 	seenIDs["orchestrator"] = true
@@ -1187,28 +1247,40 @@ func deriveAgentDefaults(agentID string, availablePools []string) (role, primary
 }
 
 func getCoreDefaults(universe string, availablePools []string) []AgentInfo {
-	if universe == "gentle_ai" {
-		pWorker, fWorker := resolveBestPoolForRole("apply", "gentle-ai-worker", availablePools)
-		pExplore, fExplore := resolveBestPoolForRole("discovery", "gentle-ai-explore", availablePools)
-		pVerify, fVerify := resolveBestPoolForRole("verify", "gentle-ai-verify", availablePools)
-
-		return []AgentInfo{
-			{Universe: "gentle_ai", AgentID: "gentle-ai-worker", DisplayName: "🛠️ gentle-ai-worker", RoleType: "apply", PrimaryPool: pWorker, FallbackPool: fWorker, ThinkingLevel: "high", Concurrency: 1, Description: "Implementador fullstack senior de Gentle-Shell y OpenCode"},
-			{Universe: "gentle_ai", AgentID: "gentle-ai-explore", DisplayName: "🔍 gentle-ai-explore", RoleType: "discovery", PrimaryPool: pExplore, FallbackPool: fExplore, ThinkingLevel: "medium", Concurrency: 2, Description: "Explorador ODD para análisis previo e inspección de repositorios"},
-			{Universe: "gentle_ai", AgentID: "gentle-ai-verify", DisplayName: "🧪 gentle-ai-verify", RoleType: "verify", PrimaryPool: pVerify, FallbackPool: fVerify, ThinkingLevel: "low", Concurrency: 2, Description: "Verificador independiente ODD de suites de pruebas y regresión"},
-		}
-	}
-
+	pWorker, fWorker := resolveBestPoolForRole("apply", "gentle-ai-worker", availablePools)
+	pExplore, fExplore := resolveBestPoolForRole("discovery", "gentle-ai-explore", availablePools)
+	pVerify, fVerify := resolveBestPoolForRole("verify", "gentle-ai-verify", availablePools)
 	pDisc, fDisc := resolveBestPoolForRole("discovery", "00-discovery", availablePools)
 	pPlan, fPlan := resolveBestPoolForRole("planning", "01-planning", availablePools)
 	pApply, fApply := resolveBestPoolForRole("apply", "02-apply", availablePools)
 	pVer, fVer := resolveBestPoolForRole("verify", "03-verify", availablePools)
+	pDeep, fDeep := resolveBestPoolForRole("research", "deep-researcher", availablePools)
+
+	if universe == "gentle_shell" {
+		return []AgentInfo{
+			{Universe: "gentle_shell", AgentID: "gentle-ai-worker", DisplayName: "🛠️ gentle-ai-worker", RoleType: "apply", PrimaryPool: pWorker, FallbackPool: fWorker, ThinkingLevel: "high", Concurrency: 1, Description: "Implementador fullstack senior de Gentle-Shell y OpenCode"},
+			{Universe: "gentle_shell", AgentID: "gentle-ai-explore", DisplayName: "🔍 gentle-ai-explore", RoleType: "discovery", PrimaryPool: pExplore, FallbackPool: fExplore, ThinkingLevel: "medium", Concurrency: 2, Description: "Explorador ODD para análisis previo e inspección de repositorios"},
+			{Universe: "gentle_shell", AgentID: "gentle-ai-verify", DisplayName: "🧪 gentle-ai-verify", RoleType: "verify", PrimaryPool: pVerify, FallbackPool: fVerify, ThinkingLevel: "low", Concurrency: 2, Description: "Verificador independiente ODD de suites de pruebas y regresión"},
+			{Universe: "gentle_shell", AgentID: "00-discovery", DisplayName: "🔍 00-discovery", RoleType: "discovery", PrimaryPool: pDisc, FallbackPool: fDisc, ThinkingLevel: "medium", Concurrency: 2, Description: "Explorador de evidencia y descubrimiento de código local"},
+			{Universe: "gentle_shell", AgentID: "02-apply", DisplayName: "⚡ 02-apply", RoleType: "apply", PrimaryPool: pApply, FallbackPool: fApply, ThinkingLevel: "medium", Concurrency: 1, Description: "Implementador quirúrgico de código y resolución de fallos"},
+		}
+	}
+
+	if universe == "gentle_pi" || universe == "gentle_ai" {
+		return []AgentInfo{
+			{Universe: universe, AgentID: "gentle-ai-worker", DisplayName: "🛠️ gentle-ai-worker", RoleType: "apply", PrimaryPool: pWorker, FallbackPool: fWorker, ThinkingLevel: "high", Concurrency: 1, Description: "Implementador fullstack senior de Gentle-Shell y OpenCode"},
+			{Universe: universe, AgentID: "gentle-ai-explore", DisplayName: "🔍 gentle-ai-explore", RoleType: "discovery", PrimaryPool: pExplore, FallbackPool: fExplore, ThinkingLevel: "medium", Concurrency: 2, Description: "Explorador ODD para análisis previo e inspección de repositorios"},
+			{Universe: universe, AgentID: "gentle-ai-verify", DisplayName: "🧪 gentle-ai-verify", RoleType: "verify", PrimaryPool: pVerify, FallbackPool: fVerify, ThinkingLevel: "low", Concurrency: 2, Description: "Verificador independiente ODD de suites de pruebas y regresión"},
+			{Universe: universe, AgentID: "deep-researcher", DisplayName: "🌐 deep-researcher", RoleType: "research", PrimaryPool: pDeep, FallbackPool: fDeep, ThinkingLevel: "medium", Concurrency: 1, Description: "Investigación técnica profunda con fuentes externas"},
+		}
+	}
 
 	return []AgentInfo{
-		{Universe: "jok3r_pi", AgentID: "00-discovery", DisplayName: "🔍 00-discovery", RoleType: "discovery", PrimaryPool: pDisc, FallbackPool: fDisc, ThinkingLevel: "medium", Concurrency: 2, Description: "Explorador de evidencia y descubrimiento de código local"},
-		{Universe: "jok3r_pi", AgentID: "01-planning", DisplayName: "📐 01-planning", RoleType: "planning", PrimaryPool: pPlan, FallbackPool: fPlan, ThinkingLevel: "high", Concurrency: 1, Description: "Diseñador de arquitectura, contratos plan.md y estrategia TDD"},
-		{Universe: "jok3r_pi", AgentID: "02-apply", DisplayName: "⚡ 02-apply", RoleType: "apply", PrimaryPool: pApply, FallbackPool: fApply, ThinkingLevel: "medium", Concurrency: 1, Description: "Implementador quirúrgico de código y resolución de fallos"},
-		{Universe: "jok3r_pi", AgentID: "03-verify", DisplayName: "🧪 03-verify", RoleType: "verify", PrimaryPool: pVer, FallbackPool: fVer, ThinkingLevel: "low", Concurrency: 2, Description: "Verificador independiente de tests, build y regresiones"},
+		{Universe: universe, AgentID: "00-discovery", DisplayName: "🔍 00-discovery", RoleType: "discovery", PrimaryPool: pDisc, FallbackPool: fDisc, ThinkingLevel: "medium", Concurrency: 2, Description: "Explorador de evidencia y descubrimiento de código local"},
+		{Universe: universe, AgentID: "01-planning", DisplayName: "📐 01-planning", RoleType: "planning", PrimaryPool: pPlan, FallbackPool: fPlan, ThinkingLevel: "high", Concurrency: 1, Description: "Diseñador de arquitectura, contratos plan.md y estrategia TDD"},
+		{Universe: universe, AgentID: "02-apply", DisplayName: "⚡ 02-apply", RoleType: "apply", PrimaryPool: pApply, FallbackPool: fApply, ThinkingLevel: "medium", Concurrency: 1, Description: "Implementador quirúrgico de código y resolución de fallos"},
+		{Universe: universe, AgentID: "03-verify", DisplayName: "🧪 03-verify", RoleType: "verify", PrimaryPool: pVer, FallbackPool: fVer, ThinkingLevel: "low", Concurrency: 2, Description: "Verificador independiente de tests, build y regresiones"},
+		{Universe: universe, AgentID: "deep-researcher", DisplayName: "🌐 deep-researcher", RoleType: "research", PrimaryPool: pDeep, FallbackPool: fDeep, ThinkingLevel: "medium", Concurrency: 1, Description: "Investigación técnica profunda con fuentes externas"},
 	}
 }
 
@@ -1271,7 +1343,7 @@ func postAgentMatrixResponse(body []byte) ([]byte, error) {
 		_ = analytics.UpsertAgentProfile(rec)
 
 		// 2. Prepare file sync payloads
-		if a.Universe == "jok3r_pi" {
+		if a.Universe == "jok3r_pi" || a.Universe == "wilox_pi" {
 			jok3rProfiles[a.AgentID] = map[string]any{
 				"model":            "cpamc/" + a.PrimaryPool,
 				"fallback":         "cpamc/" + a.FallbackPool,
@@ -1279,7 +1351,7 @@ func postAgentMatrixResponse(body []byte) ([]byte, error) {
 				"auto_downgrade":   a.AutoDowngrade,
 				"max_claude_turns": maxClaudeTurns,
 			}
-		} else if a.Universe == "gentle_shell" || a.Universe == "gentle_ai" {
+		} else if a.Universe == "gentle_shell" || a.Universe == "gentle_ai" || a.Universe == "gentle_pi" {
 			gentleProfiles[a.AgentID] = map[string]any{
 				"model":            "cpamc/" + a.PrimaryPool,
 				"fallback":         "cpamc/" + a.FallbackPool,
@@ -1323,13 +1395,20 @@ func syncDiskProfiles(jok3rProfiles, gentleProfiles map[string]any) {
 	matrixMu.Lock()
 	defer matrixMu.Unlock()
 
-	// 1. Target jok3r-pi subagents.json
+	// 1. Target wilox-pi / jok3r-pi subagents.json
 	var jok3rTargets []string
+	if env := os.Getenv("PI_CODING_AGENT_DIR"); env != "" {
+		jok3rTargets = append(jok3rTargets, filepath.Join(env, "subagents.json"))
+	}
 	if jDir := getJok3rRootDir(); jDir != "" {
 		jok3rTargets = append(jok3rTargets, filepath.Join(jDir, "subagents.json"))
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		jok3rTargets = append(jok3rTargets, filepath.Join(home, ".pi", "agent-j0k3r", "subagents.json"))
+		jok3rTargets = append(jok3rTargets,
+			filepath.Join(home, ".pi", "agent-wilox", "subagents.json"),
+			filepath.Join(home, ".pi", "agent-j0k3r", "subagents.json"),
+			filepath.Join(home, ".pi", "agent", "subagents.json"),
+		)
 	}
 
 	for _, jok3rPath := range jok3rTargets {
@@ -1361,6 +1440,7 @@ func syncDiskProfiles(jok3rProfiles, gentleProfiles map[string]any) {
 		gentleTargets = append(gentleTargets,
 			filepath.Join(home, ".gentle-shell", "agent", "profiles.json"),
 			filepath.Join(home, ".pi", "gentle-ai", "profiles.json"),
+			filepath.Join(home, ".pi", "agent", "profiles.json"),
 		)
 	}
 

@@ -214,6 +214,16 @@ if [ -f "${REPO_ROOT}/extensions/cpamc-auto-switcher/README.md" ]; then
     cp -f "${REPO_ROOT}/extensions/cpamc-auto-switcher/README.md" "${PKG_DIR}/extensions/cpamc-auto-switcher/"
 fi
 
+# Copiar subagentes y agentes para aprovisionamiento offline en la distribución
+if [ -d "${REPO_ROOT}/subagents" ]; then
+    mkdir -p "${PKG_DIR}/subagents"
+    cp -r "${REPO_ROOT}/subagents"/* "${PKG_DIR}/subagents/" 2>/dev/null || true
+fi
+if [ -d "${REPO_ROOT}/agents" ]; then
+    mkdir -p "${PKG_DIR}/agents"
+    cp -r "${REPO_ROOT}/agents"/* "${PKG_DIR}/agents/" 2>/dev/null || true
+fi
+
 # 4. Crear archivo comprimido .tar.gz o .zip
 cd "${DIST_DIR}"
 if [ "${OS}" = "windows" ]; then
