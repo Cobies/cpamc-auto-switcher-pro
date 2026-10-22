@@ -965,13 +965,13 @@ func TestSchedulerPickCircuitBreakerLoopProtector(t *testing.T) {
 		PoolID:       "pool-clau-1",
 		AccountEmail: "antigravity-a@gmail.com",
 	})
-	time.Sleep(100 * time.Millisecond)
+	analytics.FlushWriteQueueForTest()
 	analytics.SetSessionAffinity(analytics.SessionAffinity{
 		SessionID:    sessionID,
 		PoolID:       "pool-clau-1",
 		AccountEmail: "antigravity-a@gmail.com",
 	})
-	time.Sleep(150 * time.Millisecond)
+	analytics.FlushWriteQueueForTest()
 
 	// Turn 2 request: agent 02-apply asking for Claude, but turnCount has reached max_claude_turns (2)
 	reqTurn2 := schedulerPickRequest{
@@ -1004,22 +1004,18 @@ func TestSchedulerPickCircuitBreakerLoopProtector(t *testing.T) {
 		t.Errorf("expected diverted AuthID antigravity-a@gmail.com.json, got %s", resp.AuthID)
 	}
 
+	// Flush any pending write tasks (such as RecordAuditEvent) deterministically
+	analytics.FlushWriteQueueForTest()
+
 	foundBreaker := false
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		events, err := analytics.QueryAuditEvents(10)
-		if err == nil {
-			for _, e := range events {
-				if e.EventType == "CIRCUIT_BREAKER_LOOP_PREVENTED" {
-					foundBreaker = true
-					break
-				}
+	events, err := analytics.QueryAuditEvents(10)
+	if err == nil {
+		for _, e := range events {
+			if e.EventType == "CIRCUIT_BREAKER_LOOP_PREVENTED" {
+				foundBreaker = true
+				break
 			}
 		}
-		if foundBreaker {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
 	}
 	if !foundBreaker {
 		t.Errorf("expected CIRCUIT_BREAKER_LOOP_PREVENTED event recorded")
