@@ -30,7 +30,7 @@ export async function resolve(specifier, context, nextResolve) {
 
 register("data:text/javascript," + encodeURIComponent(loaderCode));
 
-const { formatFooterRotationBlock, stripAnsi } = await import("./adapter.js");
+const { formatFooterRotationBlock, formatSidebarQuotaCardLines, stripAnsi } = await import("./adapter.js");
 import type { PoolRotationPair } from "./store.js";
 
 describe("Adapter Footer Formatting & Origin Indicator", () => {
@@ -120,5 +120,16 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 	it("returns empty string when pair is null and originTag is undefined", () => {
 		const out = formatFooterRotationBlock(null, false);
 		assert.equal(out, "");
+	});
+
+	it("renders sidebar card with Authfile, 5h, Sem and Reserva labels", () => {
+		const lines = formatSidebarQuotaCardLines(mockPoolPair, 48);
+		const text = lines.map((l: string) => stripAnsi(l)).join("\n");
+		assert.match(text, /\[LÍDER ACTIVA\]/);
+		assert.match(text, /Authfile\s+acc-1/);
+		assert.match(text, /5h:\s+10\/100/);
+		assert.match(text, /Sem:\s+50\/500/);
+		assert.match(text, /\[SIGUIENTE EN COLA\]/);
+		assert.match(text, /Reserva\s+acc-2/);
 	});
 });
