@@ -847,30 +847,97 @@ func discoverUpstreamModels(pools []string) []DiscoveredUpstreamModel {
 	var list []DiscoveredUpstreamModel
 	seen := make(map[string]bool)
 
-	// Standard baseline Antigravity direct models
-	for _, m := range baselineAntigravityModels {
-		if !seen[m.ID] {
-			seen[m.ID] = true
-			list = append(list, DiscoveredUpstreamModel{
-				ID:          m.ID,
-				Provider:    "antigravity",
-				DisplayName: m.DisplayName,
-			})
+	// Collect member accounts already belonging to registered pools
+	poolMembers := make(map[string]bool)
+	if reg := activeRegistry(); reg != nil {
+		for _, p := range reg.ListPools() {
+			for _, m := range p.Members {
+				poolMembers[m] = true
+			}
+			for _, r := range p.Reserves {
+				poolMembers[r] = true
+			}
+			if p.LeaderAuth != "" {
+				poolMembers[p.LeaderAuth] = true
+			}
+			if p.ActiveLeader != "" {
+				poolMembers[p.ActiveLeader] = true
+			}
 		}
 	}
 
-	// Canonical direct upstream models from common providers
-	commonModels := []DiscoveredUpstreamModel{
-		{ID: "openai/gpt-4o", Provider: "openai", DisplayName: "OpenAI GPT-4o"},
-		{ID: "openai/o3-mini", Provider: "openai", DisplayName: "OpenAI o3-mini"},
-		{ID: "deepseek/deepseek-chat", Provider: "deepseek", DisplayName: "DeepSeek V3"},
-		{ID: "deepseek/deepseek-reasoner", Provider: "deepseek", DisplayName: "DeepSeek R1"},
-		{ID: "claude-3-7-sonnet", Provider: "anthropic", DisplayName: "Claude 3.7 Sonnet (Direct)"},
+	// 1. Scan physical credentials in auth-dir (e.g. /root/.cli-proxy-api/*.json)
+	authDirs := []string{
+		"/root/.cli-proxy-api",
+		filepath.Join(os.Getenv("HOME"), ".cli-proxy-api"),
 	}
-	for _, m := range commonModels {
-		if !seen[m.ID] {
-			seen[m.ID] = true
-			list = append(list, m)
+
+	for _, aDir := range authDirs {
+		entries, err := os.ReadDir(aDir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+				continue
+			}
+			fName := e.Name()
+			// If already in a pool, skip it — it is managed by the pool
+			if poolMembers[fName] {
+				continue
+			}
+
+			// Clean display name
+			cleanName := strings.TrimSuffix(fName, ".json")
+			provider := "free_account"
+			if strings.HasPrefix(cleanName, "antigravity-") {
+				provider = "google"
+				cleanName = strings.TrimPrefix(cleanName, "antigravity-")
+			}
+
+			targetID := "account/" + cleanName
+			if !seen[targetID] {
+				seen[targetID] = true
+				list = append(list, DiscoveredUpstreamModel{
+					ID:          targetID,
+					Provider:    provider,
+					DisplayName: cleanName,
+				})
+			}
+		}
+	}
+
+	// 2. Scan Gentle-Shell & Pi auth.json for directly logged-in upstream providers
+	home, _ := os.UserHomeDir()
+	authFiles := []string{
+		filepath.Join(home, ".gentle-shell", "agent", "auth.json"),
+		filepath.Join(home, ".pi", "agent-wilox", "auth.json"),
+		filepath.Join(home, ".pi", "agent", "auth.json"),
+	}
+
+	for _, aFile := range authFiles {
+		data, err := os.ReadFile(aFile)
+		if err != nil || len(data) == 0 {
+			continue
+		}
+		var parsed map[string]any
+		if err := json.Unmarshal(data, &parsed); err != nil {
+			continue
+		}
+		for provKey := range parsed {
+			provLower := strings.ToLower(provKey)
+			if provLower == "" {
+				continue
+			}
+			targetID := "provider/" + provLower
+			if !seen[targetID] {
+				seen[targetID] = true
+				list = append(list, DiscoveredUpstreamModel{
+					ID:          targetID,
+					Provider:    "local_harness",
+					DisplayName: strings.ToUpper(provLower) + " (Login Local)",
+				})
+			}
 		}
 	}
 

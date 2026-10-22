@@ -269,6 +269,17 @@
   background: rgba(255, 255, 255, 0.015);
 }
 
+.orchestrator-row {
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.08) 0%, rgba(15, 23, 42, 0.4) 100%) !important;
+  border-left: 3px solid #f59e0b;
+}
+
+.orchestrator-row td {
+  border-bottom: 2px solid rgba(245, 158, 11, 0.25) !important;
+  padding-top: 14px;
+  padding-bottom: 14px;
+}
+
 .agent-name-cell {
   font-weight: 600;
   color: #e2e8f0;

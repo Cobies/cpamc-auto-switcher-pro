@@ -447,16 +447,18 @@ export default function AgentMatrix() {
 
   const renderDropdownOptions = (excludedValue = null) => {
     const pools = excludedValue ? availablePools.filter((p) => p !== excludedValue) : availablePools;
-    const upstreams = excludedValue ? upstreamModels.filter((u) => u.id !== excludedValue) : upstreamModels;
+    const freeAccounts = (upstreamModels || []).filter((u) => u.provider !== 'local_harness' && u.id !== excludedValue);
+    const localLogins = (upstreamModels || []).filter((u) => u.provider === 'local_harness' && u.id !== excludedValue);
 
-    if (pools.length === 0 && upstreams.length === 0) {
+    const totalCount = pools.length + freeAccounts.length + localLogins.length;
+    if (totalCount === 0) {
       return <option value="">(Sin opciones disponibles)</option>;
     }
 
     return (
       <>
         {pools.length > 0 && (
-          <optgroup label="── 🛡️ POOLS DISPONIBLES ──">
+          <optgroup label="── 🛡️ POOLS DE BALANCEO ACTIVO ──">
             {pools.map((p) => (
               <option key={p} value={p}>
                 {p}
@@ -464,11 +466,20 @@ export default function AgentMatrix() {
             ))}
           </optgroup>
         )}
-        {upstreams.length > 0 && (
-          <optgroup label="── 🌐 CUENTAS SUELTAS / UPSTREAM ──">
-            {upstreams.map((u) => (
+        {freeAccounts.length > 0 && (
+          <optgroup label="── 📋 CUENTAS LIBRES CPAMC (SIN POOL) ──">
+            {freeAccounts.map((u) => (
               <option key={u.id} value={u.id}>
-                {u.id} ({u.displayName})
+                {u.displayName || u.id}
+              </option>
+            ))}
+          </optgroup>
+        )}
+        {localLogins.length > 0 && (
+          <optgroup label="── 📟 PROVEEDORES LOCALES GENTLE-SHELL ──">
+            {localLogins.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.displayName || u.id}
               </option>
             ))}
           </optgroup>
@@ -643,8 +654,12 @@ export default function AgentMatrix() {
   };
 
   const renderTable = (agents, harnessId) => {
+    if (!agents || agents.length === 0) return null;
+
+    // Colocar el orquestador como la Fila de Honor (Fila 1) en la tabla
+    const orch = agents.find((a) => a.is_orchestrator);
     const subagents = agents.filter((a) => !a.is_orchestrator);
-    if (subagents.length === 0) return null;
+    const orderedAgents = orch ? [orch, ...subagents] : subagents;
 
     return (
       <table className="agents-table">
@@ -678,20 +693,23 @@ export default function AgentMatrix() {
           </tr>
         </thead>
         <tbody>
-          {subagents.map((a) => {
+          {orderedAgents.map((a) => {
             const agentKey = `${harnessId}_${a.agent_id}`;
             const ping = pingStates[agentKey];
             const meta = getAgentHumanMeta(a);
             const isWriter = isWriterAgent(a);
+            const isOrch = a.is_orchestrator;
 
             return (
-              <tr key={a.agent_id}>
+              <tr key={a.agent_id} className={isOrch ? 'orchestrator-row' : ''}>
                 <td className="agent-name-cell">
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                    <span style={{ fontWeight: 600 }}>{a.displayName || a.agent_id}</span>
+                    <span style={{ fontWeight: 700, color: isOrch ? '#f59e0b' : '#e2e8f0' }}>
+                      {a.displayName || a.agent_id}
+                    </span>
                     <span className={`agent-role-chip ${meta.badgeClass}`}>{meta.badge}</span>
                   </div>
-                  <div className="agent-desc-sub">{meta.summary}</div>
+                  <div className="agent-desc-sub">{a.description || meta.summary}</div>
                 </td>
                 <td>
                   <select
@@ -721,14 +739,16 @@ export default function AgentMatrix() {
                           <option value={5}>5 (Paciencia)</option>
                           <option value={0}>Sin límite</option>
                         </select>
-                        <button
-                          type="button"
-                          className={`btn-downgrade-chip ${a.auto_downgrade ? 'active' : ''}`}
-                          onClick={() => handlePoolChange(harnessId, a.agent_id, 'auto_downgrade', !a.auto_downgrade)}
-                          title="Mitigación T2+: reduce tokens de pensamiento a partir del 2do turno"
-                        >
-                          {a.auto_downgrade ? '🟢 T2+' : '⚪ T2+ Off'}
-                        </button>
+                        {!isOrch && (
+                          <button
+                            type="button"
+                            className={`btn-downgrade-chip ${a.auto_downgrade ? 'active' : ''}`}
+                            onClick={() => handlePoolChange(harnessId, a.agent_id, 'auto_downgrade', !a.auto_downgrade)}
+                            title="Mitigación T2+: reduce tokens de pensamiento a partir del 2do turno"
+                          >
+                            {a.auto_downgrade ? '🟢 T2+' : '⚪ T2+ Off'}
+                          </button>
+                        )}
                       </div>
                     </div>
                   )}
@@ -783,11 +803,11 @@ export default function AgentMatrix() {
                   {isWriter ? (
                     <div
                       className="concurrency-lock-badge"
-                      title="Candado de Seguridad: Agente con permisos de escritura y edición de código. Bloqueado en 1 tarea para evitar que dos agentes editen los mismos archivos y corrompan código."
+                      title={isOrch ? "Orquestador Soberano: Atiende en consola interactiva con concurrencia fija en 1" : "Candado de Seguridad: Agente con permisos de escritura y edición de código. Bloqueado en 1 tarea para evitar que dos agentes editen los mismos archivos y corrompan código."}
                     >
                       <span className="lock-icon">🔒</span>
                       <span className="lock-label">1 tarea</span>
-                      <span className="lock-status">(Seguro)</span>
+                      <span className="lock-status">{isOrch ? "(Líder)" : "(Seguro)"}</span>
                     </div>
                   ) : (
                     <div className="concurrency-selector-wrapper">
@@ -1032,8 +1052,7 @@ export default function AgentMatrix() {
               </div>
             </div>
 
-            {orch && renderOrchestrator(orch, harness.id)}
-            {renderTable(subagents, harness.id)}
+            {renderTable(harness.agents || [], harness.id)}
           </div>
         );
       })}
