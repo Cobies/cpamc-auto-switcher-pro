@@ -1,11 +1,16 @@
 name: Release Linux Auto-Switcher-Pro Plugin
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'plugins/auto-switcher-pro/internal/version/version.go'
   workflow_dispatch:
     inputs:
       tag:
         description: 'New release version tag (e.g. v0.1.0, must strictly match vX.Y.Z)'
-        required: true
+        required: false
         type: string
 
 concurrency:
@@ -27,7 +32,13 @@ jobs:
       version: ${{ steps.validate.outputs.version }}
       commit_sha: ${{ steps.validate.outputs.commit_sha }}
     steps:
-      - name: Verify repository, branch, and tag input format
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify repository, branch, and resolve tag
+        id: resolve_tag
         env:
           REPO: ${{ github.repository }}
           REF: ${{ github.ref }}
@@ -39,40 +50,47 @@ jobs:
             exit 1
           fi
           if [ "${REF}" != "refs/heads/main" ]; then
-            echo "::error::Invalid branch: ${REF}. Manual workflow_dispatch must run from refs/heads/main."
-            exit 1
-          fi
-          if [[ ! "${INPUT_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Tag input '${INPUT_TAG}' does not match expected format vX.Y.Z (e.g. v0.1.0)"
+            echo "::error::Invalid branch: ${REF}. Release workflow must run on refs/heads/main."
             exit 1
           fi
 
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+          if [ -n "${INPUT_TAG}" ]; then
+            RESOLVED_TAG="${INPUT_TAG}"
+          else
+            DETECTED_VER=$(grep -E 'const Version = "[^"]+"' plugins/auto-switcher-pro/internal/version/version.go | sed -E 's/.*"([^"]+)".*/\1/')
+            RESOLVED_TAG="v${DETECTED_VER}"
+          fi
+
+          if [[ ! "${RESOLVED_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Resolved tag '${RESOLVED_TAG}' does not match expected format vX.Y.Z (e.g. v0.1.0)"
+            exit 1
+          fi
+
+          echo "resolved_tag=${RESOLVED_TAG}" >> "$GITHUB_OUTPUT"
+          echo "Resolved release tag: ${RESOLVED_TAG}"
 
       - name: Validate tag, pin commit to main, check parity and collisions
         id: validate
         env:
-          INPUT_TAG: ${{ github.event.inputs.tag }}
+          RESOLVED_TAG: ${{ steps.resolve_tag.outputs.resolved_tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           DISPATCH_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
 
-          TAG="${INPUT_TAG}"
+          TAG="${RESOLVED_TAG}"
 
           # 1. Validate tag format strictly matching vX.Y.Z
           if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Tag input '${TAG}' does not match expected format vX.Y.Z (e.g. v0.1.0)"
+            echo "::error::Tag '${TAG}' does not match expected format vX.Y.Z (e.g. v0.1.0)"
             exit 1
           fi
 
           VERSION="${TAG#v}"
 
-          # 2. Pin checked-out commit SHA and verify alignment with workflow_dispatch SHA on main
+          # 2. Pin checked-out commit SHA and verify alignment with workflow SHA on main
           COMMIT_SHA=$(git rev-parse HEAD)
           if [ -n "${DISPATCH_SHA}" ] && [ "${COMMIT_SHA}" != "${DISPATCH_SHA}" ]; then
             echo "::error::Checked-out SHA ${COMMIT_SHA} does not match dispatch SHA ${DISPATCH_SHA}."
@@ -94,8 +112,13 @@ jobs:
           set -e
 
           if [ ${TAG_CHECK_EXIT} -eq 0 ]; then
-            echo "::error::Git tag '${TAG}' already exists on remote origin. Release workflow requires a new version tag."
-            exit 1
+            if [ "${EVENT_NAME}" = "push" ]; then
+              echo "Release tag '${TAG}' already exists on remote origin. Nothing new to release on this push."
+              exit 0
+            else
+              echo "::error::Git tag '${TAG}' already exists on remote origin. Release workflow requires a new version tag."
+              exit 1
+            fi
           elif [ ${TAG_CHECK_EXIT} -eq 2 ]; then
             echo "Verified remote tag '${TAG}' does not exist (clean)."
           else
