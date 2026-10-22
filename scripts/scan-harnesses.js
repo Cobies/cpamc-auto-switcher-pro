@@ -42,13 +42,18 @@ function scanHostHarnesses() {
   const detectedHarnesses = [];
 
   // 1. Gentle-Shell CLI
-  const gentleDir = path.join(home, '.gentle-shell', 'agent');
-  if (fs.existsSync(gentleDir) || fs.existsSync(path.join(home, '.gentle-shell'))) {
-    const agentsDir = path.join(gentleDir, 'agents');
-    const subagentsDir = path.join(gentleDir, 'subagents');
+  const gentleAgentDir = path.join(home, '.gentle-shell', 'agent');
+  const gentleAgentsPath = path.join(gentleAgentDir, 'agents');
+  const gentleSubagentsPath = path.join(gentleAgentDir, 'subagents');
+
+  // Solo se detecta si existe físicamente ~/.gentle-shell/agent/agents o ~/.gentle-shell/agent
+  const hasGentleAgents = fs.existsSync(gentleAgentsPath) && fs.readdirSync(gentleAgentsPath).some(f => f.endsWith('.md'));
+  const hasGentleSubagents = fs.existsSync(gentleSubagentsPath) && fs.readdirSync(gentleSubagentsPath).some(f => f.endsWith('.md'));
+
+  if (hasGentleAgents || hasGentleSubagents || fs.existsSync(gentleAgentDir)) {
     const agents = [];
 
-    // Orchestrator
+    // Orchestrator de Gentle-Shell
     agents.push({
       agent_id: 'orchestrator',
       display_name: '👑 ORQUESTADOR GENTLE-SHELL',
@@ -62,28 +67,32 @@ function scanHostHarnesses() {
     });
 
     const seenIds = new Set(['orchestrator']);
-    const scanDirs = [agentsDir, subagentsDir, path.join(__dirname, '..', 'agents'), path.join(__dirname, '..', 'subagents')];
+    const scanDirs = [gentleAgentsPath, gentleSubagentsPath].filter(d => fs.existsSync(d));
+
+    // Si no tiene agentes instalados localmente en su home, solo ahí usamos los agentes de repo para aprovisionamiento inicial
+    if (scanDirs.length === 0) {
+      const repoAgents = path.join(__dirname, '..', 'agents');
+      if (fs.existsSync(repoAgents)) scanDirs.push(repoAgents);
+    }
 
     for (const d of scanDirs) {
-      if (fs.existsSync(d)) {
-        for (const f of fs.readdirSync(d).sort()) {
-          if (f.endsWith('.md')) {
-            const id = f.replace(/\.md$/, '');
-            if (seenIds.has(id)) continue;
-            seenIds.add(id);
-            const meta = parseMarkdownMetadata(path.join(d, f), id);
-            agents.push({
-              agent_id: id,
-              display_name: meta.displayName,
-              role_type: deriveRole(id),
-              is_orchestrator: false,
-              description: meta.description,
-              default_primary: id.includes('verify') ? 'Pool-02-gemini' : (id.includes('plan') || id.includes('worker') || id.includes('fix') ? 'Pool-04-claude' : 'Pool-01-gemini'),
-              default_fallback: 'Pool-02-gemini',
-              default_thinking: id.includes('verify') ? 'low' : 'medium',
-              concurrency: (id.includes('explore') || id.includes('verify') || id.includes('discovery')) ? 2 : 1,
-            });
-          }
+      for (const f of fs.readdirSync(d).sort()) {
+        if (f.endsWith('.md')) {
+          const id = f.replace(/\.md$/, '');
+          if (seenIds.has(id)) continue;
+          seenIds.add(id);
+          const meta = parseMarkdownMetadata(path.join(d, f), id);
+          agents.push({
+            agent_id: id,
+            display_name: meta.displayName,
+            role_type: deriveRole(id),
+            is_orchestrator: false,
+            description: meta.description,
+            default_primary: id.includes('verify') ? 'Pool-02-gemini' : (id.includes('plan') || id.includes('worker') || id.includes('fix') ? 'Pool-04-claude' : 'Pool-01-gemini'),
+            default_fallback: 'Pool-02-gemini',
+            default_thinking: id.includes('verify') ? 'low' : 'medium',
+            concurrency: (id.includes('explore') || id.includes('verify')) ? 2 : 1,
+          });
         }
       }
     }
@@ -99,9 +108,13 @@ function scanHostHarnesses() {
     });
   }
 
-  // 2. Gentle-PI
-  const gentlePiDir = path.join(home, '.pi', 'gentle-ai');
-  if (fs.existsSync(gentlePiDir) || fs.existsSync(path.join(home, '.gentle-ai')) || fs.existsSync(path.join(__dirname, '..', 'agents'))) {
+  // 2. Gentle-PI (Solo si existe físicamente ~/.pi/gentle-ai con agentes markdown)
+  const gentlePiAgentsDir = path.join(home, '.pi', 'gentle-ai', 'agents');
+  const gentlePiSubagentsDir = path.join(home, '.pi', 'gentle-ai', 'subagents');
+  const hasGentlePiMarkdown = (fs.existsSync(gentlePiAgentsDir) && fs.readdirSync(gentlePiAgentsDir).some(f => f.endsWith('.md'))) ||
+                              (fs.existsSync(gentlePiSubagentsDir) && fs.readdirSync(gentlePiSubagentsDir).some(f => f.endsWith('.md')));
+
+  if (hasGentlePiMarkdown) {
     const agents = [];
     agents.push({
       agent_id: 'orchestrator',
@@ -116,32 +129,26 @@ function scanHostHarnesses() {
     });
 
     const seenIds = new Set(['orchestrator']);
-    const scanDirs = [
-      path.join(gentlePiDir, 'agents'),
-      path.join(home, '.pi', 'agent', 'agents'),
-      path.join(__dirname, '..', 'agents'),
-    ];
+    const scanDirs = [gentlePiAgentsDir, gentlePiSubagentsDir].filter(d => fs.existsSync(d));
 
     for (const d of scanDirs) {
-      if (fs.existsSync(d)) {
-        for (const f of fs.readdirSync(d).sort()) {
-          if (f.endsWith('.md')) {
-            const id = f.replace(/\.md$/, '');
-            if (seenIds.has(id)) continue;
-            seenIds.add(id);
-            const meta = parseMarkdownMetadata(path.join(d, f), id);
-            agents.push({
-              agent_id: id,
-              display_name: meta.displayName,
-              role_type: deriveRole(id),
-              is_orchestrator: false,
-              description: meta.description,
-              default_primary: id.includes('verify') ? 'Pool-02-gemini' : (id.includes('plan') || id.includes('worker') || id.includes('fix') ? 'Pool-04-claude' : 'Pool-01-gemini'),
-              default_fallback: 'Pool-02-gemini',
-              default_thinking: id.includes('verify') ? 'low' : 'medium',
-              concurrency: (id.includes('explore') || id.includes('verify')) ? 2 : 1,
-            });
-          }
+      for (const f of fs.readdirSync(d).sort()) {
+        if (f.endsWith('.md')) {
+          const id = f.replace(/\.md$/, '');
+          if (seenIds.has(id)) continue;
+          seenIds.add(id);
+          const meta = parseMarkdownMetadata(path.join(d, f), id);
+          agents.push({
+            agent_id: id,
+            display_name: meta.displayName,
+            role_type: deriveRole(id),
+            is_orchestrator: false,
+            description: meta.description,
+            default_primary: id.includes('verify') ? 'Pool-02-gemini' : (id.includes('plan') || id.includes('worker') || id.includes('fix') ? 'Pool-04-claude' : 'Pool-01-gemini'),
+            default_fallback: 'Pool-02-gemini',
+            default_thinking: id.includes('verify') ? 'low' : 'medium',
+            concurrency: (id.includes('explore') || id.includes('verify')) ? 2 : 1,
+          });
         }
       }
     }
@@ -158,15 +165,23 @@ function scanHostHarnesses() {
   }
 
   // 3. Wilox-Pi (Planned Workflow)
-  const wiloxPiDir = path.join(home, '.pi', 'agent-wilox');
-  const jok3rDir = path.join(home, '.pi', 'agent-j0k3r');
-  const piVanillaDir = path.join(home, '.pi', 'agent');
-  const hasWilox = fs.existsSync(wiloxPiDir) || fs.existsSync(jok3rDir) || fs.existsSync(path.join(__dirname, '..', 'subagents'));
+  const wiloxPiSubagentsDir = path.join(home, '.pi', 'agent-wilox', 'subagents');
+  const jok3rSubagentsDir = path.join(home, '.pi', 'agent-j0k3r', 'subagents');
+  const piSubagentsDir = path.join(home, '.pi', 'agent', 'subagents');
+  const localRepoSubagents = path.join(__dirname, '..', 'subagents');
 
-  if (hasWilox) {
+  const hasWiloxSubagents = (fs.existsSync(wiloxPiSubagentsDir) && fs.readdirSync(wiloxPiSubagentsDir).some(f => f.endsWith('.md'))) ||
+                            (fs.existsSync(jok3rSubagentsDir) && fs.readdirSync(jok3rSubagentsDir).some(f => f.endsWith('.md'))) ||
+                            (fs.existsSync(piSubagentsDir) && fs.readdirSync(piSubagentsDir).some(f => f.endsWith('.md')));
+
+  const hasWiloxDir = fs.existsSync(path.join(home, '.pi', 'agent-wilox')) ||
+                      fs.existsSync(path.join(home, '.pi', 'agent-j0k3r')) ||
+                      fs.existsSync(path.join(home, '.pi', 'agent'));
+
+  if (hasWiloxSubagents || hasWiloxDir) {
     const agents = [];
 
-    // Orchestrator
+    // Orchestrator de Wilox-Pi
     agents.push({
       agent_id: 'orchestrator',
       display_name: '👑 ORQUESTADOR WILOX-PI',
@@ -181,32 +196,34 @@ function scanHostHarnesses() {
 
     const seenIds = new Set(['orchestrator']);
     const scanDirs = [
-      path.join(wiloxPiDir, 'subagents'),
-      path.join(jok3rDir, 'subagents'),
-      path.join(piVanillaDir, 'subagents'),
-      path.join(__dirname, '..', 'subagents'),
-    ];
+      wiloxPiSubagentsDir,
+      jok3rSubagentsDir,
+      piSubagentsDir,
+    ].filter(d => fs.existsSync(d));
+
+    // Si las carpetas locales están vacías o no existen aún, usamos repo subagents
+    if (scanDirs.length === 0 && fs.existsSync(localRepoSubagents)) {
+      scanDirs.push(localRepoSubagents);
+    }
 
     for (const d of scanDirs) {
-      if (fs.existsSync(d)) {
-        for (const f of fs.readdirSync(d).sort()) {
-          if (f.endsWith('.md')) {
-            const id = f.replace(/\.md$/, '');
-            if (seenIds.has(id)) continue;
-            seenIds.add(id);
-            const meta = parseMarkdownMetadata(path.join(d, f), id);
-            agents.push({
-              agent_id: id,
-              display_name: meta.displayName,
-              role_type: deriveRole(id),
-              is_orchestrator: false,
-              description: meta.description,
-              default_primary: id.includes('verify') ? 'Pool-02-gemini' : (id.includes('plan') || id.includes('apply') ? 'Pool-04-claude' : 'Pool-01-gemini'),
-              default_fallback: 'Pool-02-gemini',
-              default_thinking: id.includes('verify') ? 'low' : 'medium',
-              concurrency: (id.includes('discovery') || id.includes('verify') || id.includes('research')) ? 2 : 1,
-            });
-          }
+      for (const f of fs.readdirSync(d).sort()) {
+        if (f.endsWith('.md')) {
+          const id = f.replace(/\.md$/, '');
+          if (seenIds.has(id)) continue;
+          seenIds.add(id);
+          const meta = parseMarkdownMetadata(path.join(d, f), id);
+          agents.push({
+            agent_id: id,
+            display_name: meta.displayName,
+            role_type: deriveRole(id),
+            is_orchestrator: false,
+            description: meta.description,
+            default_primary: id.includes('verify') ? 'Pool-02-gemini' : (id.includes('plan') || id.includes('apply') ? 'Pool-04-claude' : 'Pool-01-gemini'),
+            default_fallback: 'Pool-02-gemini',
+            default_thinking: id.includes('verify') ? 'low' : 'medium',
+            concurrency: (id.includes('discovery') || id.includes('verify') || id.includes('research')) ? 2 : 1,
+          });
         }
       }
     }

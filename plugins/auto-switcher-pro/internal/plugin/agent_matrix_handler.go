@@ -907,37 +907,37 @@ func discoverUniverseAgents(universe string, savedMap map[string]analytics.Agent
 	home, _ := os.UserHomeDir()
 	var agentDirs []string
 
-	if universe == "gentle_ai" || universe == "gentle_shell" {
+	if universe == "gentle_shell" {
 		if gDir := getGentleRootDir(); gDir != "" {
 			agentDirs = append(agentDirs,
 				filepath.Join(gDir, "agent", "agents"),
 				filepath.Join(gDir, "agent", "subagents"),
-				filepath.Join(gDir, "agents"),
-				filepath.Join(gDir, "subagents"),
 			)
 		}
 		if home != "" {
 			agentDirs = append(agentDirs,
 				filepath.Join(home, ".gentle-shell", "agent", "agents"),
 				filepath.Join(home, ".gentle-shell", "agent", "subagents"),
+			)
+		}
+		agentDirs = append(agentDirs, "agents")
+	} else if universe == "gentle_pi" || universe == "gentle_ai" {
+		if home != "" {
+			agentDirs = append(agentDirs,
 				filepath.Join(home, ".pi", "gentle-ai", "agents"),
 				filepath.Join(home, ".pi", "gentle-ai", "subagents"),
 			)
 		}
-		agentDirs = append(agentDirs, "subagents", "agents", ".pi/subagents", ".pi/agents")
 	} else {
 		if jDir := getJok3rRootDir(); jDir != "" {
 			agentDirs = append(agentDirs,
 				filepath.Join(jDir, "subagents"),
-				filepath.Join(jDir, "agents"),
 			)
 		}
 		if home != "" {
 			agentDirs = append(agentDirs,
 				filepath.Join(home, ".pi", "agent-wilox", "subagents"),
-				filepath.Join(home, ".pi", "agent-wilox", "agents"),
 				filepath.Join(home, ".pi", "agent-j0k3r", "subagents"),
-				filepath.Join(home, ".pi", "agent-j0k3r", "agents"),
 				filepath.Join(home, ".pi", "agent", "subagents"),
 			)
 		}

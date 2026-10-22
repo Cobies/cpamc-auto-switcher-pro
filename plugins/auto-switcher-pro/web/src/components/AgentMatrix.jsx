@@ -114,7 +114,8 @@ export default function AgentMatrix() {
   const [scanning, setScanning] = useState(false);
   const [warming, setWarming] = useState(false);
   const [feedback, setFeedback] = useState({ text: '', type: '' });
-  const [pingStates, setPingStates] = useState({}); // { [agentKey]: { loading: bool, latency: number, text: string, ok: bool } }
+  const [pingStates, setPingStates] = useState({});
+  const [dirtyHarnesses, setDirtyHarnesses] = useState({}); // { [agentKey]: { loading: bool, latency: number, text: string, ok: bool } }
 
   const handleUniverseChange = (univ) => {
     setActiveUniverse(univ);
@@ -272,6 +273,7 @@ export default function AgentMatrix() {
   };
 
   const handlePoolChange = (universe, agentId, field, value) => {
+    setDirtyHarnesses((prev) => ({ ...prev, [universe]: true }));
     setHarnesses((prev) =>
       prev.map((h) => {
         if (h.id !== universe) return h;
@@ -321,6 +323,29 @@ export default function AgentMatrix() {
     }
   };
 
+  const handleSaveHarness = async (harnessId) => {
+    const harness = harnesses.find((h) => h.id === harnessId);
+    if (!harness) return;
+    try {
+      setSaving(true);
+      const agentsToSave = (harness.agents || []).map((a) => ({
+        ...a,
+        universe: harness.id,
+      }));
+      const res = await saveAgentMatrix(agentsToSave);
+      setDirtyHarnesses((prev) => ({ ...prev, [harnessId]: false }));
+      setFeedback({
+        text: `✓ ${harness.name}: ${res?.message || 'Guardado exitosamente en disco'}`,
+        type: 'success',
+      });
+      setTimeout(() => setFeedback({ text: '', type: '' }), 5000);
+    } catch (err) {
+      setFeedback({ text: `Error al guardar ${harness.name}: ${err.message}`, type: 'error' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleSave = async () => {
     try {
       setSaving(true);
@@ -331,8 +356,9 @@ export default function AgentMatrix() {
         }))
       );
       const res = await saveAgentMatrix(allAgents);
-      setFeedback({ text: res?.message || 'Matriz guardada y sincronizada con éxito', type: 'success' });
-      setTimeout(() => setFeedback({ text: '', type: '' }), 4000);
+      setDirtyHarnesses({});
+      setFeedback({ text: res?.message || 'Matriz guardada y sincronizada con éxito en disco', type: 'success' });
+      setTimeout(() => setFeedback({ text: '', type: '' }), 5000);
     } catch (err) {
       setFeedback({ text: `Error al guardar: ${err.message}`, type: 'error' });
     } finally {
@@ -919,9 +945,27 @@ export default function AgentMatrix() {
                   {harness.subtitle}
                 </p>
               </div>
-              <span className="universe-meta">
-                {harness.config_path}
-              </span>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+                <span className="universe-meta">
+                  📁 {harness.config_path}
+                </span>
+                <button
+                  type="button"
+                  className={`matrix-save-harness-btn ${dirtyHarnesses[harness.id] ? 'dirty' : ''}`}
+                  onClick={() => handleSaveHarness(harness.id)}
+                  disabled={saving || loading}
+                  title={`Guardar cambios y persistir en ${harness.config_path}`}
+                >
+                  <span>{saving ? '⏳' : '💾'}</span>
+                  <span>
+                    {saving
+                      ? 'Guardando...'
+                      : dirtyHarnesses[harness.id]
+                      ? `Guardar Cambios Pendientes (${harness.name})`
+                      : `Guardar ${harness.name}`}
+                  </span>
+                </button>
+              </div>
             </div>
 
             {orch && renderOrchestrator(orch, harness.id)}
