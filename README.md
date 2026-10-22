@@ -1,6 +1,8 @@
 # cpamc-auto-switcher
 
-Standalone Go utility to automatically inspect account quotas on CLIProxyAPI and rotate active account prefixes with reserve accounts when rate limits are approached, with manual switch capabilities. Supports both **Antigravity** and **Codex** providers.
+**Auto Switcher Pro**: High-performance, zero-latency dynamic load balancer and pool failover plugin for **CLIProxyAPI (CPAMC) v8.0.13+**, with seamless integration into **Pi** and **Gentle-Shell**.
+
+> ⚠️ **Architectural Note**: The modern production architecture operates exclusively as a **CGO Dynamic Plugin (`auto-switcher-pro-linux-amd64.so`)** loaded natively by CPAMC v8. All account rotations, pool quotas, and active leader selections occur **100% in RAM with Pure Virtual Isolation (`ActiveLeader`)**. The legacy CLI tool (`cmd/cpamc-auto-switcher`) and disk mutations (`PatchAuthPrefix`) are deprecated and never touch physical credential files.
 
 ## Features & Rotation Rules
 

@@ -112,3 +112,19 @@ Every subagent, developer, and workflow MUST strictly uphold these 4 rotation pi
   - **Unassigned Free Accounts (Same or Different Provider)**: Any physical account or provider NOT assigned to any pool (e.g. a newly linked 5th Gemini account, or free accounts from OpenAI, Direct Claude, DeepSeek, etc.) **strictly preserves 100% native CPAMC behavior ("Auth Files Management")**. Its credentials from disk, its physical prefix, and its native inclusions/exclusions configured in CPAMC native credential modal pass directly to `/model` without plugin intervention or artificial shadowing.
   - **Continuous Auto-Purge & Zero-Residue Contingency**: Upon creating, editing, adopting, or dissolving pools in Auto Switcher Pro, Pi's dynamic provider automatically reconciles and purges the local models cache (`cpamc-models-cache.json`) without lingering ghost models or manual intervention.
 
+## Architectural Deployment & Third-Party Agent Invariant (MANDATORY)
+
+Every AI agent, developer, and automated installer MUST strictly uphold this deployment policy:
+
+### 1. Canonical Production Runtime: Plugin .so over CPAMC v8 (Zero Disk Mutation)
+- **Authoritative Mode**: Auto Switcher Pro runs EXCLUSIVELY as a Go CGO dynamic library (`auto-switcher-pro-linux-amd64.so`) loaded natively by CPAMC v8 (CLIProxyAPI v8.0.13+).
+- **Legacy CLI Deprecation**: The standalone CLI utility (`cmd/cpamc-auto-switcher`) and physical prefix mutation (`PatchAuthPrefix`) are HISTORICAL AND STRICTLY DEPRECATED. They MUST NEVER be deployed, invoked, or recommended in production.
+- **Pure Virtual RAM Isolation**: All pool leadership, failover, quota evaluations, and account rotations occur 100% in memory RAM (`ActiveLeader`). The physical credentials in disco (`/root/.cli-proxy-api/*.json` or `auths/`) remain 100% immutable and intact.
+
+### 2. Autonomous Installer & Third-Party Agent Decision Resolution (4/4 Pre-Checks)
+When any third-party agent or automated installer prompts for environment choices:
+1. **[1/4] Code**: Use the prebuilt standalone release (`cpamc-auto-switcher-release-linux-amd64.tar.gz`), containing only the compiled `.so` and the Pi/Gentle-Shell extension.
+2. **[2/4] Version**: Select `Plugin .so sobre CPAMC v8` / `La que marque el repo de Wilox` (`origin/main`).
+3. **[3/4] Credentials**: Select `Volumen separado (recomendado)` to isolate test OAuth tokens and eliminate any risk to production credentials.
+4. **[4/4] Scope**: Select `También apuntar mis agentes al dev` so Pi / Gentle-Shell connects to the Auto Switcher Pro instance and activates active pools in `/model`.
+
