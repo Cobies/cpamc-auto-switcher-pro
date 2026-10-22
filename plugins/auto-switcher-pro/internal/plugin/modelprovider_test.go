@@ -1115,3 +1115,83 @@ func TestSchedulerPick_SurvivalMode(t *testing.T) {
 		t.Errorf("expected survival mode to select fallback candidate, got %s", resp.AuthID)
 	}
 }
+
+func TestSchedulerPick_ProjectAwareCacheAffinity(t *testing.T) {
+	registry := testModelProviderRegistry(t)
+	trueVal := true
+	p := PoolDefinition{
+		ID:          "Pool-01-gemini",
+		Name:        "Pool-01-gemini",
+		DisplayName: "Pool-01-gemini",
+		Family:      "gemini_pure",
+		BasePrefix:  "agy",
+		Enabled:     &trueVal,
+		Members: []string{
+			"antigravity-proj-a.json",
+			"antigravity-proj-b.json",
+		},
+		ActiveLeader: "antigravity-proj-a.json",
+		Policy: PoolPolicy{
+			TargetModels: []string{"gemini-3.8-flash-high"},
+		},
+	}
+	_ = registry.SavePool(p)
+	previous := activeRegistry
+	activeRegistry = func() *PoolRegistry { return registry }
+	t.Cleanup(func() { activeRegistry = previous })
+
+	// Project A: Should pick ActiveLeader (antigravity-proj-a.json) and bind it
+	reqProjA := schedulerPickRequest{
+		Provider: "antigravity",
+		Model:    "gemini-3.8-flash-high",
+		Options: schedulerOptions{
+			Metadata: map[string]any{"requested_model": "agy/gemini-3.8-flash-high"},
+			Headers: map[string][]string{
+				"X-Project-Identity": {"project-alpha-hash"},
+			},
+		},
+		Candidates: []schedulerCandidate{
+			{ID: "antigravity-proj-a.json", Provider: "antigravity", Status: "active"},
+			{ID: "antigravity-proj-b.json", Provider: "antigravity", Status: "active"},
+		},
+	}
+	respA := handleSchedulerPick(reqProjA)
+	if !respA.Handled {
+		t.Fatalf("expected request handled, got %+v", respA)
+	}
+	if respA.AuthID != "antigravity-proj-a.json" {
+		t.Errorf("expected AuthID antigravity-proj-a.json, got %s", respA.AuthID)
+	}
+
+	// Manually bind Project B to the second reserve in RAM to emulate dynamic assignment
+	registry.SetProjectLeader(p.ID, "project-beta-hash", "antigravity-proj-b.json")
+
+	// Project B: Should pick its dedicated project leader (antigravity-proj-b.json) preserving prompt cache
+	reqProjB := schedulerPickRequest{
+		Provider: "antigravity",
+		Model:    "gemini-3.8-flash-high",
+		Options: schedulerOptions{
+			Metadata: map[string]any{"requested_model": "agy/gemini-3.8-flash-high"},
+			Headers: map[string][]string{
+				"X-Project-Identity": {"project-beta-hash"},
+			},
+		},
+		Candidates: []schedulerCandidate{
+			{ID: "antigravity-proj-a.json", Provider: "antigravity", Status: "active"},
+			{ID: "antigravity-proj-b.json", Provider: "antigravity", Status: "active"},
+		},
+	}
+	respB := handleSchedulerPick(reqProjB)
+	if !respB.Handled {
+		t.Fatalf("expected request handled, got %+v", respB)
+	}
+	if respB.AuthID != "antigravity-proj-b.json" {
+		t.Errorf("expected AuthID antigravity-proj-b.json for Project B, got %s", respB.AuthID)
+	}
+
+	// Project A again: MUST still pick antigravity-proj-a.json without cache thrashing
+	respA2 := handleSchedulerPick(reqProjA)
+	if respA2.AuthID != "antigravity-proj-a.json" {
+		t.Errorf("expected Project A to remain pinned to antigravity-proj-a.json, got %s", respA2.AuthID)
+	}
+}

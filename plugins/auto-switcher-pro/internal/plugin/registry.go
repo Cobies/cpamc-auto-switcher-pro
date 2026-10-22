@@ -271,11 +271,12 @@ type RegistryState struct {
 // PoolRegistry provides thread-safe in-memory caching and atomic file persistence
 // for pools created via GroupManager.
 type PoolRegistry struct {
-	mu            sync.RWMutex
-	filePath      string
-	pools         map[string]PoolDefinition // keyed by base_prefix (case-insensitive)
-	activeLeaders map[string]string         // volatile in-memory active leader per pool key
-	loaded        bool
+	mu             sync.RWMutex
+	filePath       string
+	pools          map[string]PoolDefinition // keyed by base_prefix (case-insensitive)
+	activeLeaders  map[string]string         // volatile in-memory active leader per pool key
+	projectLeaders map[string]string         // volatile in-memory project affinity leader (poolKey::projectID -> activeAuth)
+	loaded         bool
 }
 
 var (
@@ -541,6 +542,33 @@ func (r *PoolRegistry) GetPool(idOrPrefix string) (PoolDefinition, bool) {
 // SetActiveLeader dynamically updates the active leader for a pool
 // when Auto Switcher Pro rotates leadership among pool members.
 // It updates in-memory state and persists atomically to disk, emitting the .epoch signal.
+// GetProjectLeader returns the pinned active leader for a given workspace/project in volatile RAM.
+func (r *PoolRegistry) GetProjectLeader(poolKey, projectID string) (string, bool) {
+	k := strings.ToLower(strings.TrimSpace(poolKey)) + "::" + strings.TrimSpace(projectID)
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.projectLeaders == nil {
+		return "", false
+	}
+	auth, ok := r.projectLeaders[k]
+	return auth, ok && auth != ""
+}
+
+// SetProjectLeader binds a specific active leader to a project in volatile RAM for cache affinity.
+func (r *PoolRegistry) SetProjectLeader(poolKey, projectID, activeAuth string) {
+	k := strings.ToLower(strings.TrimSpace(poolKey)) + "::" + strings.TrimSpace(projectID)
+	auth := strings.TrimSpace(activeAuth)
+	if strings.TrimSpace(poolKey) == "" || strings.TrimSpace(projectID) == "" || auth == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.projectLeaders == nil {
+		r.projectLeaders = make(map[string]string)
+	}
+	r.projectLeaders[k] = auth
+}
+
 func (r *PoolRegistry) SetActiveLeader(basePrefix, activeAuth string) {
 	key := strings.ToLower(strings.TrimSpace(basePrefix))
 	auth := strings.TrimSpace(activeAuth)
