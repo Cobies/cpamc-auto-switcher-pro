@@ -923,11 +923,37 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 		}
 	}
 
+	// Project-Aware Cache Affinity (Zero-Config multi-project prompt cache isolation):
+	// If the request carries an X-Project-Identity header (or workspace identifier),
+	// resolve or bind a dedicated active leader for this project in volatile RAM.
+	var projectID string
+	if req.Options.Headers != nil {
+		for k, vals := range req.Options.Headers {
+			if (strings.EqualFold(k, "x-project-identity") || strings.EqualFold(k, "x-workspace-root") || strings.EqualFold(k, "x-project-id")) && len(vals) > 0 {
+				projectID = strings.TrimSpace(vals[0])
+				break
+			}
+		}
+	}
+	if projectID == "" && req.Options.Metadata != nil {
+		if v, ok := req.Options.Metadata["project_identity"].(string); ok && strings.TrimSpace(v) != "" {
+			projectID = strings.TrimSpace(v)
+		}
+	}
+
 	// 2) Symmetrical Pool Members with Dynamic Active Leader ordering:
-	// Start from the current ActiveLeader in RAM (if set), followed by remaining pool members.
+	// Start from the current ActiveLeader in RAM (or project-specific leader if bound), followed by remaining pool members.
 	allMembers := pool.AllMembers()
 	cascade := make([]string, 0, len(allMembers))
 	currentActive := strings.TrimSpace(pool.ActiveLeader)
+	if projectID != "" && registry != nil {
+		if projLeader, ok := registry.GetProjectLeader(pool.ID, projectID); ok && projLeader != "" {
+			currentActive = projLeader
+		} else {
+			// First request from this project: bind it to currentActive or least-used member
+			registry.SetProjectLeader(pool.ID, projectID, currentActive)
+		}
+	}
 	if currentActive != "" {
 		for _, m := range allMembers {
 			if strings.EqualFold(m, currentActive) {
