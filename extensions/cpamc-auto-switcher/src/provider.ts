@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, watch, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
+import { createHash } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 type CPAModel = {
@@ -1037,10 +1038,9 @@ export function initDynamicProvider(pi: ExtensionAPI): void {
 
     // Resolve deterministic Project Identity (SHA-256 of active workspace/cwd) for Zero-Config cache affinity
     let projectIdentity = "";
+    const cwd = process.cwd();
     try {
-        const cwd = process.cwd();
         if (cwd) {
-            const { createHash } = await import("node:crypto");
             projectIdentity = createHash("sha256").update(cwd).digest("hex").slice(0, 16);
         }
     } catch {}
@@ -1050,7 +1050,10 @@ export function initDynamicProvider(pi: ExtensionAPI): void {
         baseUrl: `${resolveBaseUrl()}/v1`,
         apiKey: "$CLIPROXYAPI_API_KEY",
         api: "openai-completions",
-        headers: projectIdentity ? { "X-Project-Identity": projectIdentity } : undefined,
+        headers: projectIdentity ? {
+            "x-project-identity": projectIdentity,
+            "x-workspace-root": cwd,
+        } : undefined,
         models: cachedModels.length > 0 ? (cachedModels as any) : undefined,
         compat: {
             supportsDeveloperRole: false,
