@@ -32,24 +32,27 @@ type HourlyBucket struct {
 
 // PoolStat represents aggregated requests per pool.
 type PoolStat struct {
-	PoolID       string `json:"pool_id,omitempty"`
-	PoolPrefix   string `json:"pool_prefix"`
-	Family       string `json:"family,omitempty"`
-	TargetModel  string `json:"model"`
-	Requests     int64  `json:"requests"`
-	Failovers    int64  `json:"failovers"`
-	ActiveLeader string `json:"active_leader,omitempty"`
+	PoolID           string `json:"pool_id,omitempty"`
+	PoolPrefix       string `json:"pool_prefix"`
+	Family           string `json:"family,omitempty"`
+	TargetModel      string `json:"model"`
+	Requests         int64  `json:"requests"`
+	Failovers        int64  `json:"failovers"`
+	ActiveLeader     string `json:"active_leader,omitempty"`
+	SurvivalFallback string `json:"survival_fallback,omitempty"`
 }
 
 // AccountStat represents individual account usage.
 type AccountStat struct {
-	Email      string  `json:"email"`
-	PoolID     string  `json:"pool_id,omitempty"`
-	PoolPrefix string  `json:"pool_prefix,omitempty"`
-	Role       string  `json:"role"`
-	Requests   int64   `json:"requests"`
-	SharePct   float64 `json:"share_pct"`
-	Status     string  `json:"status"`
+	Email        string  `json:"email"`
+	PoolID       string  `json:"pool_id,omitempty"`
+	PoolPrefix   string  `json:"pool_prefix,omitempty"`
+	Role         string  `json:"role"`
+	Requests     int64   `json:"requests"`
+	SharePct     float64 `json:"share_pct"`
+	Status       string  `json:"status"`
+	HealthScore  float64 `json:"health_score,omitempty"`
+	EstimatedETA string  `json:"estimated_eta,omitempty"`
 }
 
 // SupportReport represents a diagnostic snapshot sent by a client.

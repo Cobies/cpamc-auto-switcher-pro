@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -109,7 +110,93 @@ func (pe *PredictiveEngine) hydrateFromSQLite() {
 	}
 }
 
-// GetConfig devuelve la configuración actual de forma thread-safe
+// AccountRecoveryETA represents computed recovery time estimates for an account.
+type AccountRecoveryETA struct {
+	AccountKey      string  `json:"account_key"`
+	IsCooling       bool    `json:"is_cooling"`
+	CoolingSeconds  int64   `json:"cooling_seconds"`
+	Window5hPct     float64 `json:"window_5h_pct"`
+	Window5hResetIn int64   `json:"window_5h_reset_in"`
+	FatiguePct      float64 `json:"fatigue_pct"`
+	EstimatedETAStr string  `json:"estimated_eta_str"`
+}
+
+// GetAccountRecoveryETA returns precise remaining seconds and a human-readable recovery estimate.
+func (pe *PredictiveEngine) GetAccountRecoveryETA(accountEmail string) AccountRecoveryETA {
+	pe.mu.RLock()
+	defer pe.mu.RUnlock()
+
+	key := normalizeAccountKey(accountEmail)
+	now := time.Now()
+
+	eta := AccountRecoveryETA{
+		AccountKey: key,
+	}
+
+	// 1. Cooling check
+	if coolUntil, ok := pe.cooling[key]; ok && now.Before(coolUntil) {
+		eta.IsCooling = true
+		eta.CoolingSeconds = int64(time.Until(coolUntil).Seconds())
+	}
+
+	// 2. Quota telemetry check
+	if q, ok := pe.quotas[key]; ok {
+		eta.Window5hPct = q.Window5hPct
+		eta.Window5hResetIn = q.Window5hResetIn
+	}
+
+	// 3. Hourly fatigue
+	cutoff := now.Add(-1 * time.Hour)
+	count := 0
+	for _, r := range pe.activity[key] {
+		if r.Timestamp.After(cutoff) {
+			count++
+		}
+	}
+	maxReqs := pe.config.MaxReqsPerHour
+	if maxReqs <= 0 {
+		maxReqs = 80
+	}
+	eta.FatiguePct = (float64(count) / float64(maxReqs)) * 100.0
+
+	// 4. Compute human-readable recovery label
+	switch {
+	case eta.IsCooling && eta.CoolingSeconds > 0:
+		mins := (eta.CoolingSeconds + 59) / 60
+		eta.EstimatedETAStr = fmt.Sprintf("Enfriando: recupera en ~%d min", mins)
+	case eta.Window5hResetIn > 0 && eta.Window5hPct < 20.0:
+		mins := (eta.Window5hResetIn + 59) / 60
+		eta.EstimatedETAStr = fmt.Sprintf("Cuota 5h baja: refresca en ~%d min", mins)
+	case eta.FatiguePct >= 80.0:
+		eta.EstimatedETAStr = "Fatiga RPM alta: micro-pacing activo"
+	default:
+		eta.EstimatedETAStr = "Óptima (Zona Verde)"
+	}
+
+	return eta
+}
+
+// GetAllRecoveryETAs computes recovery estimates for all tracked accounts.
+func (pe *PredictiveEngine) GetAllRecoveryETAs() []AccountRecoveryETA {
+	pe.mu.RLock()
+	allKeys := make(map[string]struct{})
+	for k := range pe.activity {
+		allKeys[k] = struct{}{}
+	}
+	for k := range pe.cooling {
+		allKeys[k] = struct{}{}
+	}
+	for k := range pe.quotas {
+		allKeys[k] = struct{}{}
+	}
+	pe.mu.RUnlock()
+
+	var result []AccountRecoveryETA
+	for k := range allKeys {
+		result = append(result, pe.GetAccountRecoveryETA(k))
+	}
+	return result
+}
 func (pe *PredictiveEngine) GetConfig() PredictiveConfig {
 	pe.mu.RLock()
 	defer pe.mu.RUnlock()

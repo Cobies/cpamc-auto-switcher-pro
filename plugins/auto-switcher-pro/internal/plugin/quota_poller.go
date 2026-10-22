@@ -115,6 +115,12 @@ func (p *AutonomousQuotaPoller) PollAllPoolAccounts(ctx context.Context) {
 	predEngine := GetPredictiveEngine()
 	seenAccounts := make(map[string]struct{})
 
+	type pollTask struct {
+		memberFile string
+		pool       PoolDefinition
+	}
+	var tasks []pollTask
+
 	for _, pool := range pools {
 		for _, member := range pool.AllMembers() {
 			cleanMember := strings.TrimSpace(member)
@@ -125,9 +131,26 @@ func (p *AutonomousQuotaPoller) PollAllPoolAccounts(ctx context.Context) {
 				continue
 			}
 			seenAccounts[cleanMember] = struct{}{}
-
-			go p.pollSingleAccount(ctx, cleanMember, pool, predEngine)
+			tasks = append(tasks, pollTask{memberFile: cleanMember, pool: pool})
 		}
+	}
+
+	if len(tasks) == 0 {
+		return
+	}
+
+	// Concurrency Semaphore: max 3 concurrent outbound quota calls to prevent IP throttling
+	sem := make(chan struct{}, 3)
+	for _, task := range tasks {
+		go func(t pollTask) {
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+				p.pollSingleAccount(ctx, t.memberFile, t.pool, predEngine)
+			case <-ctx.Done():
+				return
+			}
+		}(task)
 	}
 }
 

@@ -18,6 +18,16 @@ func handlePredictiveHTTP(req ManagementRequestPayload) ([]byte, error) {
 	pe := GetPredictiveEngine()
 	normPath := strings.ToLower(strings.TrimSpace(req.Path))
 
+	// Sub-ruta dedicada para estimación de recuperación (/auto-switcher-pro/predictive/eta)
+	if strings.Contains(normPath, "/eta") {
+		if method == http.MethodGet {
+			return jsonManagementResponse(http.StatusOK, map[string]interface{}{
+				"ok":   true,
+				"etas": pe.GetAllRecoveryETAs(),
+			})
+		}
+	}
+
 	// Sub-ruta dedicada para telemetría viva de cuotas (/auto-switcher-pro/predictive/telemetry o /quota)
 	if strings.Contains(normPath, "/telemetry") || strings.Contains(normPath, "/quota") {
 		if method == http.MethodGet {

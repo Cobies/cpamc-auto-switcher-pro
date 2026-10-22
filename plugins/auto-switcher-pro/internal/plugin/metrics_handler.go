@@ -81,6 +81,7 @@ func enrichMetricsWithRegistry(snapshot *analytics.MetricsSnapshot, reg *PoolReg
 			existing.PoolID = pool.ID
 			existing.Family = pool.Family
 			existing.ActiveLeader = pool.ActiveLeader
+			existing.SurvivalFallback = pool.Policy.SurvivalFallback
 			if existing.TargetModel == "" {
 				existing.TargetModel = targetModel
 			}
@@ -88,19 +89,21 @@ func enrichMetricsWithRegistry(snapshot *analytics.MetricsSnapshot, reg *PoolReg
 			existing.PoolID = pool.ID
 			existing.Family = pool.Family
 			existing.ActiveLeader = pool.ActiveLeader
+			existing.SurvivalFallback = pool.Policy.SurvivalFallback
 			if existing.TargetModel == "" {
 				existing.TargetModel = targetModel
 			}
 		} else {
 			// Pool exists in registry but has 0 traffic in requested window
 			snapshot.Pools = append(snapshot.Pools, analytics.PoolStat{
-				PoolID:       pool.ID,
-				PoolPrefix:   pool.BasePrefix,
-				Family:       pool.Family,
-				TargetModel:  targetModel,
-				Requests:     0,
-				Failovers:    0,
-				ActiveLeader: pool.ActiveLeader,
+				PoolID:           pool.ID,
+				PoolPrefix:       pool.BasePrefix,
+				Family:           pool.Family,
+				TargetModel:      targetModel,
+				Requests:         0,
+				Failovers:        0,
+				ActiveLeader:     pool.ActiveLeader,
+				SurvivalFallback: pool.Policy.SurvivalFallback,
 			})
 		}
 	}
@@ -138,6 +141,20 @@ func enrichMetricsWithRegistry(snapshot *analytics.MetricsSnapshot, reg *PoolReg
 					Status:     status,
 				})
 			}
+		}
+	}
+
+	// Enrich all accounts with live predictive recovery ETAs and health score
+	pe := GetPredictiveEngine()
+	for i := range snapshot.Accounts {
+		acc := &snapshot.Accounts[i]
+		eta := pe.GetAccountRecoveryETA(acc.Email)
+		acc.EstimatedETA = eta.EstimatedETAStr
+		if eta.Window5hPct > 0 {
+			acc.HealthScore = eta.Window5hPct
+		}
+		if eta.IsCooling {
+			acc.Status = eta.EstimatedETAStr
 		}
 	}
 }

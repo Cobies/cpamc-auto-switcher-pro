@@ -555,6 +555,48 @@ func GetSessionAffinity(sessionID, poolID string) (SessionAffinity, bool) {
 	return aff, true
 }
 
+// QueryRecentRotations retrieves the latest N rotation events from pool_rotations.
+func QueryRecentRotations(limit int) ([]RotationEvent, error) {
+	db, err := InitDB()
+	if err != nil || db == nil {
+		return nil, fmt.Errorf("db unavailable: %w", err)
+	}
+
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+
+	rows, err := db.Query(`SELECT
+		timestamp, pool_id, pool_prefix, selected_account, account_email,
+		is_failover, cascade_index, target_model, status_code
+	FROM pool_rotations ORDER BY timestamp DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []RotationEvent
+	for rows.Next() {
+		var e RotationEvent
+		var isFailoverInt int
+		if err := rows.Scan(
+			&e.Timestamp,
+			&e.PoolID,
+			&e.PoolPrefix,
+			&e.SelectedAccount,
+			&e.AccountEmail,
+			&isFailoverInt,
+			&e.CascadeIndex,
+			&e.TargetModel,
+			&e.StatusCode,
+		); err == nil {
+			e.IsFailover = (isFailoverInt != 0)
+			events = append(events, e)
+		}
+	}
+	return events, nil
+}
+
 // QueryAuditEvents returns the most recent audit records.
 func QueryAuditEvents(limit int) ([]AuditEvent, error) {
 	db, err := InitDB()
