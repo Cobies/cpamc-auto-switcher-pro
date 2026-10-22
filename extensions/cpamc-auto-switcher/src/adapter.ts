@@ -70,7 +70,7 @@ function pctColor(pctStr: string): string {
 export function formatFooterRotationBlock(pair: PoolRotationPair | null, isBusy = false, originTag?: string): string {
 	const originPart = originTag ? ` ${MUTED}· ${originTag}${RESET}` : "";
 
-	if (!pair) {
+	if (!pair || !pair.active) {
 		return originTag ? `${SEP}${originPart}` : "";
 	}
 
@@ -233,7 +233,7 @@ export function formatSidebarQuotaCardLines(
 	const safeW = width;
 	const s = createThemeStyler(theme, borderColor);
 
-	if (!pair) {
+	if (!pair || !pair.active) {
 		const titleStr = truncateWithAnsi("⚡ CUENTAS CPAMC", Math.max(1, safeW - 6));
 		const titlePrefix = `${s.border("╭─ ")}${s.accent(titleStr)} ${s.border("─")}`;
 		const prefixLen = visibleLen(titlePrefix);
@@ -400,24 +400,23 @@ export class CpamcTuiAdapter {
 		}
 	}
 
+	private safeGetModel(): any {
+		if (!this.ctx) return null;
+		try {
+			return this.ctx.model ?? null;
+		} catch {
+			this.ctx = null;
+			this.currentPair = null;
+			return null;
+		}
+	}
+
 	async update(isBusy = false, freshCtx?: ExtensionContext): Promise<void> {
 		this.isBusy = isBusy;
 		if (freshCtx) {
 			this.ctx = freshCtx;
 		}
-		if (!this.ctx) return;
-
-		let model: any = null;
-		try {
-			model = this.ctx.model;
-		} catch {
-			// Context is stale or invalidated after session replacement/reload.
-			// Invalidate local reference safely without throwing uncaughtException.
-			this.ctx = null;
-			this.currentPair = null;
-			return;
-		}
-
+		const model = this.safeGetModel();
 		if (!model) {
 			this.currentPair = null;
 			return;
@@ -451,15 +450,16 @@ export class CpamcTuiAdapter {
 	}
 
 	private getModelOriginTag(): string | undefined {
-		if (!this.ctx?.model) return undefined;
+		const model = this.safeGetModel();
+		if (!model) return undefined;
 		const settings = (this.ctx as any)?.settingsManager;
 		const defaultProvider = settings?.getDefaultProvider?.() || "cpamc";
 		const defaultModelId = settings?.getDefaultModel?.();
 
 		if (
 			defaultModelId &&
-			this.ctx.model.id === defaultModelId &&
-			(this.ctx.model.provider || "cpamc") === defaultProvider
+			model.id === defaultModelId &&
+			(model.provider || "cpamc") === defaultProvider
 		) {
 			return "default";
 		}
@@ -467,36 +467,43 @@ export class CpamcTuiAdapter {
 	}
 
 	private injectIntoFooter(isBusy: boolean): void {
-		const originTag = this.getModelOriginTag();
-		const block = formatFooterRotationBlock(this.currentPair, isBusy, originTag);
-		const tui = this.tui || (this.ctx as any)?.tui;
-		const terminal = tui?.terminal as any;
-		const footer = (this.ctx as any)?.footer || terminal?.[Symbol.for("j0k3r-theme.footer")];
+		try {
+			const originTag = this.getModelOriginTag();
+			const block = formatFooterRotationBlock(this.currentPair, isBusy, originTag);
+			const tui = this.tui || (this.ctx as any)?.tui;
+			const terminal = tui?.terminal as any;
+			const footer = (this.ctx as any)?.footer || terminal?.[Symbol.for("j0k3r-theme.footer")];
 
-		if (typeof footer?.setQuota === "function") {
-			footer.setQuota(block || undefined);
-		}
+			if (typeof footer?.setQuota === "function") {
+				footer.setQuota(block || undefined);
+			}
+		} catch {}
 	}
 
 	private originalFooterPart: any = null;
 	private decoratedFooter: any = null;
 
 	private injectIntoSidebar(gentleState: any): void {
-		const currentModel = this.ctx?.model;
-		const initialPair = currentModel
-			? (getRotationPairForModelSync(currentModel.id, currentModel.provider) || this.currentPair)
-			: this.currentPair;
+		if (!gentleState?.parts) return;
 
 		gentleState.parts.set("cpamc-quota-card", {
 			render: () => {
-				const m = this.ctx?.model;
-				const p = m ? (getRotationPairForModelSync(m.id, m.provider) || this.currentPair) : this.currentPair;
-				return formatSidebarQuotaCardLines(p, 48, "\x1b[38;2;120;153;166m", this.theme, this.isBusy);
+				try {
+					const m = this.safeGetModel();
+					const p = m ? (getRotationPairForModelSync(m.id, m.provider) || this.currentPair) : this.currentPair;
+					return formatSidebarQuotaCardLines(p, 48, "\x1b[38;2;120;153;166m", this.theme, this.isBusy);
+				} catch {
+					return [];
+				}
 			},
 			digest: () => {
-				const m = this.ctx?.model;
-				const p = m ? (getRotationPairForModelSync(m.id, m.provider) || this.currentPair) : this.currentPair;
-				return `${m?.id}-${p?.poolKey}-${p?.active.prefix}-${p?.active.minAvailable}-${this.isBusy}`;
+				try {
+					const m = this.safeGetModel();
+					const p = m ? (getRotationPairForModelSync(m.id, m.provider) || this.currentPair) : this.currentPair;
+					return `${m?.id || "none"}-${p?.poolKey || "none"}-${p?.active?.prefix || "none"}-${p?.active?.minAvailable || "none"}-${this.isBusy}`;
+				} catch {
+					return "none";
+				}
 			},
 			invalidate: () => {},
 		});
@@ -515,50 +522,74 @@ export class CpamcTuiAdapter {
 		this.decoratedFooter = {
 			__isCpamcDecorated: true,
 			render: (width: number) => {
-				const baseLines = this.originalFooterPart?.render
-					? (this.originalFooterPart.render(width) ?? [])
-					: [];
+				try {
+					let baseLines: string[] = [];
+					try {
+						baseLines = this.originalFooterPart?.render
+							? (this.originalFooterPart.render(width) ?? [])
+							: [];
+					} catch {
+						baseLines = [];
+					}
 
-				const model = this.ctx?.model;
-				const pair = model
-					? (getRotationPairForModelSync(model.id, model.provider) || this.currentPair)
-					: this.currentPair;
+					const model = this.safeGetModel();
+					const pair = model
+						? (getRotationPairForModelSync(model.id, model.provider) || this.currentPair)
+						: this.currentPair;
 
-				if (!pair) {
-					return baseLines;
+					if (!pair) {
+						return baseLines;
+					}
+
+					const bColor = extractBorderColor(baseLines, this.theme);
+					const quotaLines = formatSidebarQuotaCardLines(pair, width, bColor, this.theme, this.isBusy);
+
+					if (!baseLines.length) {
+						return quotaLines;
+					}
+
+					return [...baseLines, "", ...quotaLines].map((line) => fitToWidth(line, width));
+				} catch {
+					return [];
 				}
-
-				const bColor = extractBorderColor(baseLines, this.theme);
-				const quotaLines = formatSidebarQuotaCardLines(pair, width, bColor, this.theme, this.isBusy);
-
-				if (!baseLines.length) {
-					return quotaLines;
-				}
-
-				return [...baseLines, "", ...quotaLines].map((line) => fitToWidth(line, width));
 			},
 			digest: () => {
-				const baseDigest = this.originalFooterPart?.digest
-					? this.originalFooterPart.digest()
-					: "";
+				try {
+					let baseDigest = "";
+					try {
+						baseDigest = this.originalFooterPart?.digest
+							? this.originalFooterPart.digest()
+							: "";
+					} catch {
+						baseDigest = "";
+					}
 
-				const model = this.ctx?.model;
-				const modelKey = model ? `${model.provider}:${model.id}` : "none";
-				const pair = model
-					? (getRotationPairForModelSync(model.id, model.provider) || this.currentPair)
-					: this.currentPair;
+					const model = this.safeGetModel();
+					const modelKey = model ? `${model.provider}:${model.id}` : "none";
+					const pair = model
+						? (getRotationPairForModelSync(model.id, model.provider) || this.currentPair)
+						: this.currentPair;
 
-				const cpamcDigest = pair
-					? `${pair.poolKey}-${pair.active.prefix}-${pair.active.minAvailable}-${pair.active.consumed5h}-${pair.active.consumedWeekly}`
-					: "none";
+					const cpamcDigest = pair
+						? `${pair.poolKey || ""}-${pair.active?.prefix || ""}-${pair.active?.minAvailable || ""}-${pair.active?.consumed5h || ""}-${pair.active?.consumedWeekly || ""}`
+						: "none";
 
-				return `${baseDigest}::m::${modelKey}::c::${cpamcDigest}`;
+					return `${baseDigest}::m::${modelKey}::c::${cpamcDigest}`;
+				} catch {
+					return "none";
+				}
 			},
 			invalidate: () => {
-				this.originalFooterPart?.invalidate?.();
+				try {
+					this.originalFooterPart?.invalidate?.();
+				} catch {}
 			},
 			handleMouse: (event: any) => {
-				return this.originalFooterPart?.handleMouse?.(event);
+				try {
+					return this.originalFooterPart?.handleMouse?.(event);
+				} catch {
+					return false;
+				}
 			},
 		};
 

@@ -319,6 +319,11 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 							} catch {}
 						}, 50);
 					});
+					w.on("error", () => {
+						try {
+							w.close();
+						} catch {}
+					});
 					epochWatchers.push(w);
 				}
 			} catch {}
@@ -333,9 +338,11 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 
 				// Cada ~75 segundos (3 ticks de 25s), refrescar catálogo de modelos en segundo plano
 				ticks++;
-				if (ticks % 3 === 0 && typeof ctx.modelRegistry?.refresh === "function") {
-					void ctx.modelRegistry.refresh({ allowNetwork: true }).catch(() => {});
-				}
+				try {
+					if (ticks % 3 === 0 && typeof ctx?.modelRegistry?.refresh === "function") {
+						void ctx.modelRegistry.refresh({ allowNetwork: true }).catch(() => {});
+					}
+				} catch {}
 			} catch {
 				clearTimer();
 			}
@@ -344,51 +351,63 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 
 	// Reactividad ante eventos de sesión e interacción del usuario
 	pi.on("session_info_changed", async (_event: any, ctx: ExtensionContext) => {
-		await adapter?.update(false, ctx);
+		try {
+			await adapter?.update(false, ctx);
+		} catch {}
 	});
 
 	pi.on("ui_prompt_start", async (_event: any, ctx: ExtensionContext) => {
-		await adapter?.update(false, ctx);
+		try {
+			await adapter?.update(false, ctx);
+		} catch {}
 	});
 
 	pi.on("turn_start", async (_event: any, ctx: ExtensionContext) => {
-		await adapter?.update(true, ctx);
+		try {
+			await adapter?.update(true, ctx);
+		} catch {}
 	});
 
 	pi.on("turn_end", async (_event: any, ctx: ExtensionContext) => {
-		// Mantener siempre actualizado el modelo con el que el usuario está trabajando activamente
-		if (ctx.cwd && ctx.model?.id && ctx.model?.provider) {
-			saveProjectModel(ctx.cwd, ctx.model.provider, ctx.model.id);
-		}
-
-		// Reactividad optimista en RAM: decrementar cuota estimada de la cuenta activa al terminar streaming
-		if (ctx.model?.id && ctx.model?.provider) {
-			const pair = getRotationPairForModelSync(ctx.model.id, ctx.model.provider);
-			if (pair?.active?.prefix) {
-				applyOptimisticQuotaDecrement(pair.active.prefix, 0.8);
+		try {
+			// Mantener siempre actualizado el modelo con el que el usuario está trabajando activamente
+			if (ctx?.cwd && ctx.model?.id && ctx.model?.provider) {
+				saveProjectModel(ctx.cwd, ctx.model.provider, ctx.model.id);
 			}
-		}
 
-		await adapter?.update(false, ctx);
+			// Reactividad optimista en RAM: decrementar cuota estimada de la cuenta activa al terminar streaming
+			if (ctx?.model?.id && ctx?.model?.provider) {
+				const pair = getRotationPairForModelSync(ctx.model.id, ctx.model.provider);
+				if (pair?.active?.prefix) {
+					applyOptimisticQuotaDecrement(pair.active.prefix, 0.8);
+				}
+			}
+
+			await adapter?.update(false, ctx);
+		} catch {}
 	});
 
 	// Persistir automáticamente el último modelo seleccionado por proyecto
 	pi.on("model_select", async (event: any, ctx: ExtensionContext) => {
-		const cwd = ctx.cwd;
-		const model = event?.model;
-		if (cwd && model?.id && model?.provider) {
-			saveProjectModel(cwd, model.provider, model.id);
-		}
-		await adapter?.update(false, ctx);
+		try {
+			const cwd = ctx?.cwd;
+			const model = event?.model;
+			if (cwd && model?.id && model?.provider) {
+				saveProjectModel(cwd, model.provider, model.id);
+			}
+			await adapter?.update(false, ctx);
+		} catch {}
 	});
 
 	// Limpieza en transiciones de sesión de Pi
 	pi.on("session_before_switch", async (event: any, ctx?: ExtensionContext) => {
 		clearTimer();
 		// Capturar y registrar el modelo activo antes de que la sesión sea sustituida (/new o switch)
-		if (event?.reason === "new" && ctx?.cwd && ctx?.model?.id && ctx?.model?.provider) {
-			saveProjectModel(ctx.cwd, ctx.model.provider, ctx.model.id);
-		}
+		try {
+			if (event?.reason === "new" && ctx?.cwd && ctx?.model?.id && ctx?.model?.provider) {
+				saveProjectModel(ctx.cwd, ctx.model.provider, ctx.model.id);
+			}
+		} catch {}
 		adapter?.setContext(null);
 	});
 

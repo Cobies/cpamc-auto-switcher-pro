@@ -30,7 +30,7 @@ export async function resolve(specifier, context, nextResolve) {
 
 register("data:text/javascript," + encodeURIComponent(loaderCode));
 
-const { formatFooterRotationBlock, formatSidebarQuotaCardLines, stripAnsi } = await import("./adapter.js");
+const { CpamcTuiAdapter, formatFooterRotationBlock, formatSidebarQuotaCardLines, stripAnsi } = await import("./adapter.js");
 import type { PoolRotationPair } from "./store.js";
 
 describe("Adapter Footer Formatting & Origin Indicator", () => {
@@ -140,5 +140,53 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		const text = lines.map((l: string) => stripAnsi(l)).join("\n");
 		assert.match(text, /\[● Escribiendo\]/);
 		assert.match(text, /\[CUIDANDO EL CHAT\]/);
+	});
+
+	it("handles malformed pair with missing active account safely without throwing", () => {
+		const malformedPair: any = {
+			poolKey: "Pool-01-gemini",
+			familyName: "Gemini Fleet",
+			familyIcon: "✨",
+			totalAccounts: 1,
+			active: null,
+			next: null,
+		};
+		const footer = formatFooterRotationBlock(malformedPair, false);
+		assert.equal(footer, "");
+
+		const lines = formatSidebarQuotaCardLines(malformedPair, 48);
+		assert.ok(lines.length > 0);
+		const text = lines.map((l: string) => stripAnsi(l)).join("\n");
+		assert.match(text, /Sin cuentas con rotación activa/);
+	});
+
+	it("guards sidebar widget render and digest against invalidated context and null pairs", () => {
+		let throwOnAccess = true;
+		const mockContext: any = {
+			get model() {
+				if (throwOnAccess) {
+					throw new Error("ExtensionContext is invalidated");
+				}
+				return { id: "gemini-3.8-flash-high", provider: "cpamc" };
+			},
+		};
+
+		const adapter = new CpamcTuiAdapter(mockContext);
+		const parts = new Map<string, any>();
+		const gentleState = { parts };
+
+		// Invalidate and inject
+		(adapter as any).injectIntoSidebar(gentleState);
+
+		const quotaWidget = parts.get("cpamc-quota-card");
+		assert.ok(quotaWidget, "quota widget must be registered");
+
+		// Even when accessing model throws an error, render and digest MUST return safely without throwing
+		const renderedLines = quotaWidget.render();
+		assert.ok(Array.isArray(renderedLines));
+
+		const digestStr = quotaWidget.digest();
+		assert.equal(typeof digestStr, "string");
+		assert.ok(digestStr.includes("none"));
 	});
 });
