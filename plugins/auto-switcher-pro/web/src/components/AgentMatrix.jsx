@@ -280,11 +280,39 @@ export default function AgentMatrix() {
         const updatedAgents = h.agents.map((a) => {
           if (a.agent_id !== agentId) return a;
           const updated = { ...a, [field]: value };
-          if (field === 'primary_pool' && poolCapabilities[value] === false) {
-            updated.thinking_level = 'none';
-          } else if (field === 'primary_pool' && poolCapabilities[value] !== false && updated.thinking_level === 'none') {
-            updated.thinking_level = 'medium';
+
+          // Cascada y Exclusión Mutua por Fila
+          if (field === 'primary_pool') {
+            // 1. Thinking capability sync
+            if (poolCapabilities[value] === false) {
+              updated.thinking_level = 'none';
+            } else if (poolCapabilities[value] !== false && updated.thinking_level === 'none') {
+              updated.thinking_level = 'medium';
+            }
+
+            // 2. Si el nuevo primario colisiona con el rescate actual, reasignar el rescate automáticamente
+            if (updated.fallback_pool === value) {
+              // Obtener todos los candidatos disponibles
+              const allCandidates = [
+                ...availablePools,
+                ...upstreamModels.map((u) => u.id),
+              ];
+              // Elige el primer candidato que sea diferente al nuevo primario
+              const alternative = allCandidates.find((c) => c !== value);
+              updated.fallback_pool = alternative || '';
+            }
+          } else if (field === 'fallback_pool') {
+            // Si intenta elegir el mismo que el primario, revertir o bloquear
+            if (value === updated.primary_pool) {
+              const allCandidates = [
+                ...availablePools,
+                ...upstreamModels.map((u) => u.id),
+              ];
+              const alternative = allCandidates.find((c) => c !== updated.primary_pool);
+              updated.fallback_pool = alternative || '';
+            }
           }
+
           return updated;
         });
         return { ...h, agents: updatedAgents };
@@ -417,26 +445,37 @@ export default function AgentMatrix() {
     );
   }
 
-  const renderDropdownOptions = () => (
-    <>
-      <optgroup label="── 🛡️ POOLS DE BALANCEO ACTIVO ──">
-        {availablePools.map((p) => (
-          <option key={p} value={p}>
-            {p} {poolDetails[p]?.target_model ? `(${poolDetails[p].target_model})` : ''}
-          </option>
-        ))}
-      </optgroup>
-      {upstreamModels.length > 0 && (
-        <optgroup label="── 🌐 CUENTAS SUELTAS / UPSTREAM ──">
-          {upstreamModels.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.id} ({u.displayName})
-            </option>
-          ))}
-        </optgroup>
-      )}
-    </>
-  );
+  const renderDropdownOptions = (excludedValue = null) => {
+    const pools = excludedValue ? availablePools.filter((p) => p !== excludedValue) : availablePools;
+    const upstreams = excludedValue ? upstreamModels.filter((u) => u.id !== excludedValue) : upstreamModels;
+
+    if (pools.length === 0 && upstreams.length === 0) {
+      return <option value="">(Sin opciones disponibles)</option>;
+    }
+
+    return (
+      <>
+        {pools.length > 0 && (
+          <optgroup label="── 🛡️ POOLS DE BALANCEO ACTIVO ──">
+            {pools.map((p) => (
+              <option key={p} value={p}>
+                {p} {poolDetails[p]?.target_model ? `(${poolDetails[p].target_model})` : ''}
+              </option>
+            ))}
+          </optgroup>
+        )}
+        {upstreams.length > 0 && (
+          <optgroup label="── 🌐 CUENTAS SUELTAS / UPSTREAM ──">
+            {upstreams.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.id} ({u.displayName})
+              </option>
+            ))}
+          </optgroup>
+        )}
+      </>
+    );
+  };
 
   const renderPoolTransparencyPill = (poolId) => {
     const detail = poolDetails[poolId];
@@ -546,8 +585,13 @@ export default function AgentMatrix() {
               className="matrix-select"
               value={agent.fallback_pool}
               onChange={(e) => handlePoolChange(harnessId, agent.agent_id, 'fallback_pool', e.target.value)}
+              disabled={availablePools.length + upstreamModels.length <= 1}
             >
-              {renderDropdownOptions()}
+              {availablePools.length + upstreamModels.length <= 1 ? (
+                <option value="">🚫 Sin failover (Requiere 2+ pools/cuentas)</option>
+              ) : (
+                renderDropdownOptions(agent.primary_pool)
+              )}
             </select>
             <div className="fallback-subtext">Standby · 0% tokens hasta 429</div>
           </div>
@@ -687,8 +731,13 @@ export default function AgentMatrix() {
                     className="matrix-select"
                     value={a.fallback_pool}
                     onChange={(e) => handlePoolChange(harnessId, a.agent_id, 'fallback_pool', e.target.value)}
+                    disabled={availablePools.length + upstreamModels.length <= 1}
                   >
-                    {renderDropdownOptions()}
+                    {availablePools.length + upstreamModels.length <= 1 ? (
+                      <option value="">🚫 Sin failover (Requiere 2+ pools/cuentas)</option>
+                    ) : (
+                      renderDropdownOptions(a.primary_pool)
+                    )}
                   </select>
                   <div className="fallback-subtext">Standby · 0% tokens hasta 429</div>
                 </td>

@@ -1297,6 +1297,17 @@ func postAgentMatrixResponse(body []byte) ([]byte, error) {
 
 	now := time.Now().UnixMilli()
 
+	var availablePools []string
+	if reg := activeRegistry(); reg != nil {
+		for _, p := range reg.ListPools() {
+			poolName := p.ID
+			if poolName == "" {
+				poolName = p.BasePrefix
+			}
+			availablePools = append(availablePools, poolName)
+		}
+	}
+
 	jok3rProfiles := make(map[string]any)
 	gentleProfiles := make(map[string]any)
 
@@ -1328,12 +1339,23 @@ func postAgentMatrixResponse(body []byte) ([]byte, error) {
 			concurrency = 3
 		}
 
+		// Invariant: Failover rescue pool cannot be identical to primary pool if alternatives exist
+		fallbackPool := a.FallbackPool
+		if fallbackPool == a.PrimaryPool || fallbackPool == "" {
+			for _, p := range availablePools {
+				if p != a.PrimaryPool {
+					fallbackPool = p
+					break
+				}
+			}
+		}
+
 		// 1. Persist to SQLite WAL
 		rec := analytics.AgentProfileRecord{
 			Universe:       a.Universe,
 			AgentID:        a.AgentID,
 			PrimaryPool:    a.PrimaryPool,
-			FallbackPool:   a.FallbackPool,
+			FallbackPool:   fallbackPool,
 			ThinkingLevel:  effort,
 			AutoDowngrade:  a.AutoDowngrade,
 			MaxClaudeTurns: maxClaudeTurns,
@@ -1346,7 +1368,7 @@ func postAgentMatrixResponse(body []byte) ([]byte, error) {
 		if a.Universe == "jok3r_pi" || a.Universe == "wilox_pi" {
 			jok3rProfiles[a.AgentID] = map[string]any{
 				"model":            "cpamc/" + a.PrimaryPool,
-				"fallback":         "cpamc/" + a.FallbackPool,
+				"fallback":         "cpamc/" + fallbackPool,
 				"effort":           effort,
 				"auto_downgrade":   a.AutoDowngrade,
 				"max_claude_turns": maxClaudeTurns,
@@ -1354,7 +1376,7 @@ func postAgentMatrixResponse(body []byte) ([]byte, error) {
 		} else if a.Universe == "gentle_shell" || a.Universe == "gentle_ai" || a.Universe == "gentle_pi" {
 			gentleProfiles[a.AgentID] = map[string]any{
 				"model":            "cpamc/" + a.PrimaryPool,
-				"fallback":         "cpamc/" + a.FallbackPool,
+				"fallback":         "cpamc/" + fallbackPool,
 				"effort":           effort,
 				"auto_downgrade":   a.AutoDowngrade,
 				"max_claude_turns": maxClaudeTurns,
