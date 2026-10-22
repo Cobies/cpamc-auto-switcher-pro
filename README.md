@@ -35,6 +35,47 @@
 
 ---
 
+## Multi-Project Setup & Prompt Cache Preservation
+
+Auto Switcher Pro enforces a sticky **`ActiveLeader` in RAM** per pool to maximize upstream **Prompt Caching** (KV Cache) on Google Antigravity and Claude.
+
+### ⚠️ The Risk: Prompt Cache Thrashing
+When developers route multiple simultaneous projects or repositories with completely different codebases and prompt prefixes to the same shared pool (e.g. `Pool-01-gemini`), requests alternate on the same physical leader account. This causes:
+- **KV Cache Invalidation**: The provider constantly flushes and recalculates prefix attention blocks, causing **latency spikes (x2-x4)**.
+- **Higher Token Consumption**: Turns miss the ~90% prompt caching token discount.
+- **Quota Concentration**: A single leader account depletes prematurely while sibling pools remain idle.
+
+### 💡 Best Practice: 1 Sovereign Pool per Project
+Dedicate sovereign pool identifiers in `/model` per repository or workflow (e.g. `Pool-01-gemini` for Project Alpha, `Pool-02-gemini` for Project Beta). Each project keeps its leader warm with 100% cache hit rates and zero cross-contamination.
+
+### 🛠️ Client Configuration Recipes (Pi & Gentle-Shell)
+Bind your local repositories directly to sovereign pools to eliminate manual switching:
+
+1. **Per-Repository Config (`.pi/settings.json`)**:
+   In the root of your project:
+   ```json
+   {
+     "defaultModel": "cpamc/Pool-01-gemini"
+   }
+   ```
+2. **Environment Variable / `direnv` (`.envrc`)**:
+   ```bash
+   export PI_MODEL="cpamc/Pool-02-gemini"
+   ```
+3. **Direct CLI Argument**:
+   ```bash
+   pi --model cpamc/Pool-01-gemini
+   ```
+
+### ⚡ Concurrency Spillover Mechanics
+- **Sequential Requests**: All turns share the primary `ActiveLeader` in RAM.
+- **Concurrent Bursts (`MaxInFlight = 2`)**: If parallel subagents create $\ge 2$ simultaneous active streams on the leader within a 6s window, excess requests spill over to **Reserve #1** to prevent socket drops (`ECONNRESET`) without changing the official leader in RAM.
+- **Session Affinity (5-Minute TTL)**: The spilled session is pinned via `SessionAffinity` in SQLite/RAM for 5 minutes, ensuring subsequent turns of that parallel task continue hitting the reserve and keep its KV cache warm.
+
+> 📖 **Deep Dive**: For complete architectural analysis, benchmark metrics, and telemetry diagrams, see the [Multi-Project Setup & Prompt Cache Guide](docs/architecture/multi-project-prompt-cache-guide.md).
+
+---
+
 ## Installation & Setup
 
 ### 1. Build & Install Binary

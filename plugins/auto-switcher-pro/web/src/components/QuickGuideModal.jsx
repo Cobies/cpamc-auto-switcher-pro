@@ -222,6 +222,30 @@ export default function QuickGuideModal({ isOpen, onClose, embedded = false }) {
                 </div>
               )}
             </div>
+
+            {/* SECCIÓN: Multi-Proyecto & Preservación de Prompt Caching */}
+            <div className="quick-guide-multiproject-card" data-testid="quick-guide-multiproject-section">
+              <div className="multiproject-card-header">
+                <span className="multiproject-icon">🏢</span>
+                <div>
+                  <div className="multiproject-title">Multi-Proyecto: 1 Pool por Repositorio</div>
+                  <div className="multiproject-subtitle">Preservación de Prompt Caching & Prevención de Thrashing</div>
+                </div>
+              </div>
+              <p className="multiproject-desc">
+                Si trabajas en varios proyectos simultáneos, <strong>asigna un pool soberano independiente a cada uno</strong> (ej. <code>Pool-01-gemini</code> para Alpha, <code>Pool-02-gemini</code> para Beta). Compartir un mismo pool destruye la memoria KV de prefijo en Google/Claude, causando picos de latencia (x2-x4) y agotamiento prematuro del líder.
+              </p>
+
+              <div className="multiproject-recipe-box">
+                <div className="multiproject-recipe-label">📁 Receta Pi: Fijar pool en la raíz de cada repo (<code>.pi/settings.json</code>):</div>
+                <pre className="multiproject-recipe-code">{`{\n  "defaultModel": "cpamc/Pool-01-gemini"\n}`}</pre>
+              </div>
+
+              <div className="multiproject-pill-row">
+                <span className="multiproject-badge">⚡ MaxInFlight = 2 (Desborde a Reserva)</span>
+                <span className="multiproject-badge">⏱️ Afinidad de Sesión: 5 min TTL</span>
+              </div>
+            </div>
           </div>
 
           {/* COLUMNA 2: Arquitectura y Submenús Explicados */}
