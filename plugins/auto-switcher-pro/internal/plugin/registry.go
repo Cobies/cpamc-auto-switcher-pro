@@ -66,6 +66,7 @@ type PoolPolicy struct {
 	Exclude55        bool     `json:"exclude_55"`
 	TargetModels     []string `json:"target_models,omitempty"`
 	ExcludedModels   []string `json:"excluded_models,omitempty"`
+	SurvivalFallback string   `json:"survival_fallback,omitempty"` // Optional emergency fallback pool (e.g. "Pool-01-gemini")
 }
 
 // PoolDefinition represents a logical load-balancing pool managed within Auto Switcher Pro.

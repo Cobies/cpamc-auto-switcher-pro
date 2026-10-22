@@ -20,6 +20,57 @@ import (
 var totalRotations int64
 var totalFailovers int64
 
+var (
+	inFlightMu       sync.Mutex
+	inFlightSessions = make(map[string]map[string]time.Time) // accountKey -> sessionID -> lastSeen
+)
+
+// recordInFlightSession records an active request timestamp for a session on an account.
+func recordInFlightSession(accountKey, sessionID string) {
+	if sessionID == "" {
+		sessionID = "anon"
+	}
+	inFlightMu.Lock()
+	defer inFlightMu.Unlock()
+
+	key := strings.ToLower(accountKey)
+	if inFlightSessions[key] == nil {
+		inFlightSessions[key] = make(map[string]time.Time)
+	}
+	inFlightSessions[key][sessionID] = time.Now()
+}
+
+// getActiveInFlightSessions counts concurrent active sessions on an account within window,
+// excluding the caller's session to prevent sequential turns from self-throttling.
+func getActiveInFlightSessions(accountKey, excludeSessionID string, window time.Duration) int {
+	inFlightMu.Lock()
+	defer inFlightMu.Unlock()
+
+	cutoff := time.Now().Add(-window)
+	key := strings.ToLower(accountKey)
+	sessions := inFlightSessions[key]
+	if sessions == nil {
+		return 0
+	}
+
+	count := 0
+	for sessID, t := range sessions {
+		if sessID == excludeSessionID && sessID != "anon" {
+			continue
+		}
+		if t.After(cutoff) {
+			count++
+		}
+	}
+	return count
+}
+
+func resetInFlightForTest() {
+	inFlightMu.Lock()
+	defer inFlightMu.Unlock()
+	inFlightSessions = make(map[string]map[string]time.Time)
+}
+
 func init() {
 	license.SetTelemetryProvider(func() license.TelemetryInfo {
 		var prefixes []string
@@ -1052,36 +1103,58 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 	}
 
 	// Adaptive Pacing: Si el pool completo experimenta fatiga colectiva severa
-	// (el líder y todas las reservas disponibles tienen >= 80% fatiga o enfriamiento),
-	// inyectar una micro-pausa adaptativa (350ms) para que el RPM de Google se recupere
-	// sin bloquear al usuario ni provocar un 429 fatal.
+	// O el líder individual supera el 80% de fatiga RPM pero conserva cuota de 5h:
+	// inyectar una micro-pausa adaptativa (250-350ms con jitter) para que el RPM de Google
+	// respire sin forzar una rotación innecesaria ni destruir el Prompt Cache.
 	if len(cascade) > 0 {
 		allFatigued := true
-		for _, member := range cascade {
+		leaderFatigued := false
+		for idx, member := range cascade {
 			if _, isAvail := available[strings.ToLower(member)]; isAvail {
 				mEmail := strings.TrimSuffix(strings.TrimPrefix(member, "antigravity-"), ".json")
 				fatiguePct, isCooling, _ := predEngine.GetAccountStatus(mEmail)
+				if idx == 0 && (fatiguePct >= 80.0 || isCooling) {
+					leaderFatigued = true
+				}
 				if fatiguePct < 80.0 && !isCooling && !predEngine.ShouldPreventiveCool(mEmail) {
 					allFatigued = false
-					break
+					if idx > 0 {
+						break
+					}
 				}
 			}
 		}
 		if allFatigued {
 			time.Sleep(350 * time.Millisecond)
+		} else if leaderFatigued {
+			// Micro-pacing suave para salvar el Prompt Cache ante ráfagas cortas
+			time.Sleep(250*time.Millisecond + time.Duration(time.Now().UnixNano()%70)*time.Millisecond)
 		}
 	}
 
+	hasConcurrencyOverflow := false
 	for i, authFile := range orderedCascade {
 		// Si el motor predictivo decidió enfriar al líder actual y estamos en i == 0, rotar al siguiente miembro
 		if i == 0 && skipLeaderPredictive {
 			continue
 		}
 
+		// Concurrency Guard (MaxInFlight = 2): Si el líder en i == 0 ya tiene >= 2 peticiones concurrentes
+		// en vuelo de otras sesiones en paralelo (ventana de 6s) y existen reservas sanas en el pool,
+		// delegar temporalmente la petición a la Reserva #1 para evitar caídas de socket
+		// (ECONNRESET/UND_ERR_BODY_TERMINATED) sin cambiar el líder oficial en RAM.
+		if i == 0 && len(orderedCascade) > 1 && !skipLeaderPredictive {
+			mEmail := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(authFile, "antigravity-"), ".json"))
+			if activeStreams := getActiveInFlightSessions(mEmail, sessionID, 6*time.Second); activeStreams >= 2 {
+				hasConcurrencyOverflow = true
+				continue
+			}
+		}
+
 		if exactID, ok := available[strings.ToLower(authFile)]; ok {
 			isFailover := (i > 0) // Si i > 0 significa que hubo rotación de líder (por 429 o balanceo predictivo)
-			if isFailover && registry != nil {
-				// Actualizar el Líder Dinámico Ficticio en RAM hacia el nuevo miembro activo
+			if isFailover && registry != nil && !hasConcurrencyOverflow {
+				// Actualizar el Líder Dinámico Ficticio en RAM hacia el nuevo miembro activo SOLO si no fue overflow temporal
 				registry.SetActiveLeader(pool.BasePrefix, exactID)
 			}
 			reqs, fail := license.RecordRotation(isFailover)
@@ -1092,6 +1165,9 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 			email := exactID
 			email = strings.TrimPrefix(email, "antigravity-")
 			email = strings.TrimSuffix(email, ".json")
+
+			// Registrar sesión activa en vuelo para control de concurrencia
+			recordInFlightSession(email, sessionID)
 
 			// Registrar actividad en el motor predictivo para control de fatiga
 			predEngine.RecordActivity(email)
@@ -1199,7 +1275,65 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 		}
 	}
 
-	// 4) No cascade member available: delegate to the builtin scheduler.
+	// 4) Modo Supervivencia (Graceful Degradation):
+	// Si el 100% de los miembros del pool están colapsados o sin disponibilidad en CPAMC,
+	// desviar automáticamente hacia el fallback configurado (SurvivalFallback) o al pool
+	// base de contingencia (Pool-01-gemini / gemini) para evitar la interrupción de la sesión.
+	var survivalPool *PoolDefinition
+	if pool != nil && strings.TrimSpace(pool.Policy.SurvivalFallback) != "" && registry != nil {
+		if fb, ok := registry.GetPool(pool.Policy.SurvivalFallback); ok && fb.IsEnabled() {
+			survivalPool = &fb
+		}
+	}
+	if survivalPool == nil && registry != nil {
+		for _, p := range registry.ListPools() {
+			if p.IsEnabled() && p.ID != pool.ID && (strings.Contains(strings.ToLower(p.ID), "gemini") || strings.Contains(strings.ToLower(p.Family), "gemini")) {
+				survivalPool = &p
+				break
+			}
+		}
+	}
+
+	if survivalPool != nil {
+		for _, member := range survivalPool.AllMembers() {
+			if exactID, ok := available[strings.ToLower(member)]; ok {
+				email := strings.TrimSuffix(strings.TrimPrefix(exactID, "antigravity-"), ".json")
+				analytics.RecordAuditEvent(analytics.AuditEvent{
+					PoolID:         pool.ID,
+					EventType:      "SURVIVAL_MODE_ENGAGED",
+					TriggerReason:  "all_primary_members_exhausted",
+					PreviousLeader: pool.ID,
+					NewLeader:      exactID,
+					LatencyMs:      1,
+					StatusCode:     200,
+					DetailsJSON:    fmt.Sprintf(`{"primary_pool":"%s","survival_pool":"%s","selected_auth":"%s"}`, pool.ID, survivalPool.ID, exactID),
+				})
+
+				resolvedModel := ResolveActiveModelFallback(survivalPool.ActiveModelForAccount(exactID))
+				if strings.TrimSpace(resolvedModel) == "" {
+					resolvedModel = ResolveActiveModelFallback(originalModel)
+				}
+
+				analytics.RecordEvent(analytics.RotationEvent{
+					PoolID:          survivalPool.ID,
+					PoolPrefix:      survivalPool.BasePrefix,
+					SelectedAccount: exactID,
+					AccountEmail:    email,
+					IsFailover:      true,
+					CascadeIndex:    99,
+					TargetModel:     resolvedModel,
+					StatusCode:      200,
+				})
+
+				return schedulerPickResponse{
+					Handled: true,
+					AuthID:  exactID,
+				}
+			}
+		}
+	}
+
+	// 5) No cascade member available: delegate to the builtin scheduler.
 	return schedulerPickResponse{Handled: false}
 }
 

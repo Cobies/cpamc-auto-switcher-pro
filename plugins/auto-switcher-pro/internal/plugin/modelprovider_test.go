@@ -14,6 +14,7 @@ import (
 func testModelProviderRegistry(t *testing.T) *PoolRegistry {
 	t.Helper()
 	GetPredictiveEngine().ResetForTest()
+	resetInFlightForTest()
 	r := NewPoolRegistry(t.TempDir() + "/state.json")
 	_ = r.SavePool(PoolDefinition{
 		ID:         "pool-agy-1",
@@ -1003,22 +1004,115 @@ func TestSchedulerPickCircuitBreakerLoopProtector(t *testing.T) {
 		t.Errorf("expected diverted AuthID antigravity-a@gmail.com.json, got %s", resp.AuthID)
 	}
 
-	time.Sleep(150 * time.Millisecond)
-
-	// Verify CIRCUIT_BREAKER_LOOP_PREVENTED audit event
-	events, err := analytics.QueryAuditEvents(10)
-	if err != nil {
-		t.Fatalf("QueryAuditEvents failed: %v", err)
-	}
 	foundBreaker := false
-	for _, e := range events {
-		if e.EventType == "CIRCUIT_BREAKER_LOOP_PREVENTED" {
-			foundBreaker = true
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		events, err := analytics.QueryAuditEvents(10)
+		if err == nil {
+			for _, e := range events {
+				if e.EventType == "CIRCUIT_BREAKER_LOOP_PREVENTED" {
+					foundBreaker = true
+					break
+				}
+			}
+		}
+		if foundBreaker {
 			break
 		}
+		time.Sleep(50 * time.Millisecond)
 	}
 	if !foundBreaker {
 		t.Errorf("expected CIRCUIT_BREAKER_LOOP_PREVENTED event recorded")
+	}
+}
+
+func TestSchedulerPick_ConcurrencyOverflow_MaxInFlight(t *testing.T) {
+	registry := testModelProviderRegistry(t)
+	previous := activeRegistry
+	activeRegistry = func() *PoolRegistry { return registry }
+	t.Cleanup(func() {
+		activeRegistry = previous
+		resetInFlightForTest()
+	})
+
+	resetInFlightForTest()
+
+	// Simulate 2 active in-flight streams on leader 'a@gmail.com' from parallel subagents
+	recordInFlightSession("a@gmail.com", "subagent-task-1")
+	recordInFlightSession("a@gmail.com", "subagent-task-2")
+
+	// Third concurrent subagent comes in
+	req := schedulerPickRequest{
+		Provider: "antigravity",
+		Model:    "gemini-3.8-flash-high",
+		Options: schedulerOptions{
+			Metadata: map[string]any{
+				"requested_model": "agy/gemini-3.8-flash-high",
+				"session_id":      "subagent-task-3",
+			},
+		},
+		Candidates: []schedulerCandidate{
+			{ID: "antigravity-a@gmail.com.json", Provider: "antigravity", Status: "active"},
+			{ID: "antigravity-b@gmail.com.json", Provider: "antigravity", Status: "active"},
+		},
+	}
+
+	resp := handleSchedulerPick(req)
+	if !resp.Handled {
+		t.Fatalf("expected handled pick, got %+v", resp)
+	}
+
+	// Because leader 'a@gmail.com' is at MaxInFlight=2 from tasks 1 and 2, task 3 overflows to reserve 'b@gmail.com'
+	if resp.AuthID != "antigravity-b@gmail.com.json" {
+		t.Errorf("expected overflow pick to reserve antigravity-b@gmail.com.json, got %s", resp.AuthID)
+	}
+
+	// Verify the permanent ActiveLeader in RAM was NOT displaced by the transient concurrency overflow
+	p, _ := registry.GetPool("agy")
+	if p.ActiveLeader != "antigravity-a@gmail.com.json" {
+		t.Errorf("expected leader to remain antigravity-a@gmail.com.json, got %s", p.ActiveLeader)
+	}
+}
+
+func TestSchedulerPick_SurvivalMode(t *testing.T) {
+	registry := testModelProviderRegistry(t)
+	previous := activeRegistry
+	activeRegistry = func() *PoolRegistry { return registry }
+	t.Cleanup(func() { activeRegistry = previous })
+
+	// Create exhausted isolated pool whose members are not in candidates
+	_ = registry.SavePool(PoolDefinition{
+		ID:         "Pool-99-exhausted",
+		BasePrefix: "exh",
+		Family:     "gemini_pure",
+		Members:    []string{"antigravity-exhausted-1.json", "antigravity-exhausted-2.json"},
+		Policy: PoolPolicy{
+			TargetModels:     []string{"gemini-3.8-flash-high"},
+			SurvivalFallback: "Pool-01-gemini",
+		},
+	})
+
+	req := schedulerPickRequest{
+		Provider: "antigravity",
+		Model:    "gemini-3.8-flash-high",
+		Options: schedulerOptions{
+			Metadata: map[string]any{"requested_model": "exh/gemini-3.8-flash-high"},
+		},
+		// Candidates only contains pool-agy-1 accounts, NONE of the exhausted pool accounts
+		Candidates: []schedulerCandidate{
+			{ID: "antigravity-a@gmail.com.json", Provider: "antigravity", Status: "active"},
+			{ID: "antigravity-b@gmail.com.json", Provider: "antigravity", Status: "active"},
+		},
+	}
+
+	resp := handleSchedulerPick(req)
+	if !resp.Handled {
+		t.Fatalf("expected survival mode to handle request, got %+v", resp)
+	}
+
+	// Should select a fallback account from Pool-01-gemini
+	if resp.AuthID != "antigravity-a@gmail.com.json" && resp.AuthID != "antigravity-b@gmail.com.json" {
+		t.Errorf("expected survival mode to select fallback candidate, got %s", resp.AuthID)
 	}
 }
 

@@ -2,6 +2,7 @@ package license
 
 import (
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -229,24 +231,85 @@ type TelemetryInfo struct {
 	ActivePools    []string `json:"active_pools"`
 }
 
-var telemetryProvider func() TelemetryInfo
-var lastSyncUnix int64
-var syncMutex sync.Mutex
+var (
+	telemetryProvider func() TelemetryInfo
+	lastSyncUnix      int64
+	syncMutex         sync.Mutex
 
-// RecordRotation atomically increments and persists request and failover metrics.
-func RecordRotation(isFailover bool) (int64, int64) {
-	path := getLicenseStoragePath()
-	lf, _ := LoadOrInitLicense()
-	lf.TotalRequests++
-	if isFailover {
-		lf.TotalFailovers++
+	memRequests    atomic.Int64
+	memFailovers   atomic.Int64
+	memUsageInited atomic.Bool
+	flushMu        sync.Mutex
+	lastFlushUnix  atomic.Int64
+)
+
+func initUsageCountersIfNeeded() {
+	if memUsageInited.Load() {
+		return
 	}
-	_ = saveLicenseFile(path, lf)
-	return lf.TotalRequests, lf.TotalFailovers
+	flushMu.Lock()
+	defer flushMu.Unlock()
+	if memUsageInited.Load() {
+		return
+	}
+	lf, err := LoadOrInitLicense()
+	if err == nil && lf != nil {
+		memRequests.Store(lf.TotalRequests)
+		memFailovers.Store(lf.TotalFailovers)
+	}
+	memUsageInited.Store(true)
+}
+
+// FlushUsage synchronously persists in-memory usage metrics to the license file.
+func FlushUsage() {
+	if !memUsageInited.Load() {
+		return
+	}
+	flushMu.Lock()
+	defer flushMu.Unlock()
+
+	path := getLicenseStoragePath()
+	lf, err := LoadOrInitLicense()
+	if err != nil || lf == nil {
+		return
+	}
+
+	reqs := memRequests.Load()
+	fails := memFailovers.Load()
+
+	if reqs != lf.TotalRequests || fails != lf.TotalFailovers {
+		lf.TotalRequests = reqs
+		lf.TotalFailovers = fails
+		_ = saveLicenseFile(path, lf)
+	}
+	lastFlushUnix.Store(time.Now().Unix())
+}
+
+// RecordRotation atomically increments and persists request and failover metrics in RAM
+// with amortized asynchronous flush to disk, eliminating per-turn disk I/O latency.
+func RecordRotation(isFailover bool) (int64, int64) {
+	initUsageCountersIfNeeded()
+	reqs := memRequests.Add(1)
+	var fails int64
+	if isFailover {
+		fails = memFailovers.Add(1)
+	} else {
+		fails = memFailovers.Load()
+	}
+
+	now := time.Now().Unix()
+	if reqs%50 == 0 || now-lastFlushUnix.Load() > 30 {
+		go FlushUsage()
+	}
+
+	return reqs, fails
 }
 
 // GetPersistedUsage returns the stored requests and failover metrics.
 func GetPersistedUsage() (int64, int64) {
+	if memUsageInited.Load() {
+		return memRequests.Load(), memFailovers.Load()
+	}
 	lf, _ := LoadOrInitLicense()
 	return lf.TotalRequests, lf.TotalFailovers
 }
@@ -254,6 +317,17 @@ func GetPersistedUsage() (int64, int64) {
 // SetTelemetryProvider registers a provider function for usage telemetry.
 func SetTelemetryProvider(provider func() TelemetryInfo) {
 	telemetryProvider = provider
+}
+
+// anonymizeIdentifier creates a 16-character pseudonymous hash of hardware identifiers
+// to protect user privacy against cleartext eavesdropping in transit.
+func anonymizeIdentifier(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	h := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(h[:8])
 }
 
 // SyncWithCloudHub contacts the central Contabo VPS to verify/update status in background.
@@ -267,7 +341,10 @@ func SyncWithCloudHub(machineID string) {
 	lastSyncUnix = now
 	syncMutex.Unlock()
 
-	hubURL := os.Getenv("CPAMC_LICENSE_HUB_URL")
+	hubURL := os.Getenv("AUTO_SWITCHER_HUB_URL")
+	if hubURL == "" {
+		hubURL = os.Getenv("CPAMC_LICENSE_HUB_URL")
+	}
 	if hubURL == "" {
 		hubURL = DefaultHubURL
 	}
@@ -288,8 +365,8 @@ func SyncWithCloudHub(machineID string) {
 
 		payload := pingPayload{
 			MachineID:  machineID,
-			MACAddress: GetMACAddress(),
-			ClientName: GetSystemIdentity(),
+			MACAddress: anonymizeIdentifier(GetMACAddress()),
+			ClientName: anonymizeIdentifier(GetSystemIdentity()),
 			OS:         runtime.GOOS,
 		}
 		if telemetryProvider != nil {

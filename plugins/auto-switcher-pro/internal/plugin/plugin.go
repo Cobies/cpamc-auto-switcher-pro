@@ -8,8 +8,11 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"time"
 
+	"auto-switcher-pro/internal/analytics"
 	"auto-switcher-pro/internal/handlers"
+	"auto-switcher-pro/internal/license"
 	"auto-switcher-pro/internal/version"
 	"auto-switcher-pro/internal/web"
 )
@@ -51,6 +54,8 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 	switch method {
 	case "plugin.shutdown":
 		GetAutonomousQuotaPoller().Stop()
+		license.FlushUsage()
+		analytics.Shutdown(2 * time.Second)
 		return OKEnvelope([]byte(`{"ok":true}`)), nil
 
 	case "plugin.register", "plugin.reconfigure":

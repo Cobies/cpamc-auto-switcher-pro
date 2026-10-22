@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -262,19 +263,30 @@ type writeTask struct {
 }
 
 var (
-	writeQueue     chan writeTask
-	writeQueueOnce sync.Once
+	writeQueue      chan writeTask
+	writeQueueOnce  sync.Once
+	writeWorkerDone chan struct{}
+	isShuttingDown  atomic.Bool
+
+	vacuumTicker *time.Ticker
+	vacuumStopCh chan struct{}
+	vacuumMu     sync.Mutex
 )
 
 func initWriteWorker() {
 	writeQueueOnce.Do(func() {
 		writeQueue = make(chan writeTask, 2048)
+		writeWorkerDone = make(chan struct{})
+		vacuumStopCh = make(chan struct{})
 		go runWriteWorker()
 		go startAutoVacuumDaemon()
 	})
 }
 
 func enqueueWrite(task writeTask) {
+	if isShuttingDown.Load() {
+		return
+	}
 	initWriteWorker()
 	select {
 	case writeQueue <- task:
@@ -284,6 +296,11 @@ func enqueueWrite(task writeTask) {
 }
 
 func runWriteWorker() {
+	defer func() {
+		if writeWorkerDone != nil {
+			close(writeWorkerDone)
+		}
+	}()
 	for task := range writeQueue {
 		dbMu.RLock()
 		db := dbInstance
@@ -811,10 +828,59 @@ func startAutoVacuumDaemon() {
 	// Ejecutar checkpoint y vaciado inicial inmediato en startup para compactar registros antiguos
 	_ = AutoVacuumCheckpoint(30)
 
-	// Repetir periódicamente cada 6 horas
-	ticker := time.NewTicker(6 * time.Hour)
-	defer ticker.Stop()
-	for range ticker.C {
-		_ = AutoVacuumCheckpoint(30)
+	vacuumMu.Lock()
+	vacuumTicker = time.NewTicker(6 * time.Hour)
+	t := vacuumTicker
+	stopCh := vacuumStopCh
+	vacuumMu.Unlock()
+
+	defer t.Stop()
+	for {
+		select {
+		case <-t.C:
+			_ = AutoVacuumCheckpoint(30)
+		case <-stopCh:
+			return
+		}
+	}
+}
+
+// Shutdown cooperatively stops the auto-vacuum daemon, drains pending writeQueue tasks,
+// consolidates the SQLite WAL journal (TRUNCATE), and closes the database connection.
+func Shutdown(timeout time.Duration) {
+	isShuttingDown.Store(true)
+
+	// 1. Stop vacuum daemon
+	vacuumMu.Lock()
+	if vacuumTicker != nil {
+		vacuumTicker.Stop()
+	}
+	if vacuumStopCh != nil {
+		select {
+		case <-vacuumStopCh:
+		default:
+			close(vacuumStopCh)
+		}
+	}
+	vacuumMu.Unlock()
+
+	// 2. Drain pending tasks in writeQueue
+	if writeQueue != nil {
+		close(writeQueue)
+		if writeWorkerDone != nil {
+			select {
+			case <-writeWorkerDone:
+			case <-time.After(timeout):
+			}
+		}
+	}
+
+	// 3. Truncate WAL to main database file and close
+	dbMu.Lock()
+	defer dbMu.Unlock()
+	if dbInstance != nil {
+		_, _ = dbInstance.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+		_ = dbInstance.Close()
+		dbInstance = nil
 	}
 }

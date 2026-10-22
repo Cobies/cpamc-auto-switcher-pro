@@ -76,16 +76,24 @@ func handleLicenseHTTP(req ManagementRequestPayload) ([]byte, error) {
 			})
 		}
 
-		key := getLocalManagementKey()
-		return jsonManagementResponse(http.StatusOK, map[string]interface{}{
+		payload := map[string]interface{}{
 			"ok":             true,
 			"authorized":     true,
 			"status":         status.Status,
 			"machine_id":     status.MachineID,
 			"mac_address":    status.MACAddress,
 			"days_remaining": status.DaysRemaining,
-			"management_key": key,
-		})
+		}
+
+		// Security: Do not leak CPAMC management_key over unauthenticated HTTP by default.
+		// Only expose local management key if explicitly enabled via opt-in environment variable.
+		if os.Getenv("AUTO_SWITCHER_ALLOW_LOCAL_HANDSHAKE") == "1" || strings.EqualFold(os.Getenv("AUTO_SWITCHER_ALLOW_LOCAL_HANDSHAKE"), "true") {
+			if key := getLocalManagementKey(); key != "" {
+				payload["management_key"] = key
+			}
+		}
+
+		return jsonManagementResponse(http.StatusOK, payload)
 
 	case strings.HasSuffix(cleanPath, "/status"):
 		if method != http.MethodGet {

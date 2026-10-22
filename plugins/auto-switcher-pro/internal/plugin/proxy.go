@@ -196,7 +196,9 @@ func (h *sseProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for {
 			n, readErr := resp.Body.Read(buf)
 			if n > 0 {
-				dataCh <- buf[:n]
+				chunk := make([]byte, n)
+				copy(chunk, buf[:n])
+				dataCh <- chunk
 			}
 			if readErr != nil {
 				if readErr != io.EOF {
@@ -341,36 +343,16 @@ func isLicenseValid(lic *license.StatusReport) bool {
 	return lic != nil && lic.Status != "expired" && lic.CanRotate
 }
 
-// handleHealthHTTP handles GET /healthz - full health check including upstream.
+// handleHealthHTTP handles GET /healthz - fast in-memory health check without blocking outbound network calls.
 func handleHealthHTTP(req ManagementRequestPayload) ([]byte, error) {
 	method := strings.ToUpper(strings.TrimSpace(req.Method))
 	if method != http.MethodGet && method != http.MethodHead {
 		return jsonManagementResponse(http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
 	}
 
-	// Check license
+	// Check license status in memory
 	licStatus := license.GetLicenseStatus()
-
-	// Check upstream connectivity with a quick HEAD request
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	upstreamLatency := int64(-1)
-	upstreamHealthy := false
-
-	// Try a lightweight request to upstream
-	checkURL := sseProxy.config.UpstreamBaseURL + "/$discovery/rest?version=v1beta"
-	checkReq, _ := http.NewRequestWithContext(ctx, http.MethodHead, checkURL, nil)
-	start := time.Now()
-	resp, err := sseProxy.client.Do(checkReq)
-	latency := time.Since(start).Milliseconds()
-	if err == nil && resp.StatusCode < 500 {
-		upstreamHealthy = true
-		upstreamLatency = latency
-		resp.Body.Close()
-	}
-
-	healthy := isLicenseValid(licStatus) && upstreamHealthy
+	licValid := isLicenseValid(licStatus)
 
 	activePools := 0
 	if registry := activeRegistry(); registry != nil {
@@ -382,9 +364,19 @@ func handleHealthHTTP(req ManagementRequestPayload) ([]byte, error) {
 		}
 	}
 
+	// In-memory readiness: if quota poller is active, verify it is operational
+	upstreamHealthy := true
+	if poller := GetAutonomousQuotaPoller(); poller != nil {
+		poller.mu.Lock()
+		upstreamHealthy = poller.running || activePools == 0
+		poller.mu.Unlock()
+	}
+
+	healthy := licValid && upstreamHealthy
+
 	status := HealthStatus{
 		Healthy:         healthy,
-		UpstreamLatency: upstreamLatency,
+		UpstreamLatency: 0, // Fast in-memory resolution (sub-millisecond)
 		ActivePools:     activePools,
 		LicenseStatus:   mapLicenseStatus(licStatus),
 		Timestamp:       time.Now().UTC().Format(time.RFC3339),

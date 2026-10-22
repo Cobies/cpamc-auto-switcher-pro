@@ -102,4 +102,30 @@ func TestLicenseVerificationAndMachineLock(t *testing.T) {
 			t.Fatalf("expected error on tampered key, got nil")
 		}
 	})
+
+	t.Run("RecordRotation and FlushUsage atomic metrics in RAM", func(t *testing.T) {
+		reqBefore, failBefore := GetPersistedUsage()
+		reqAfter, failAfter := RecordRotation(false)
+		if reqAfter != reqBefore+1 {
+			t.Errorf("expected request count %d, got %d", reqBefore+1, reqAfter)
+		}
+		if failAfter != failBefore {
+			t.Errorf("expected failover count unchanged %d, got %d", failBefore, failAfter)
+		}
+
+		reqFail, failFail := RecordRotation(true)
+		if reqFail != reqAfter+1 {
+			t.Errorf("expected request count %d, got %d", reqAfter+1, reqFail)
+		}
+		if failFail != failBefore+1 {
+			t.Errorf("expected failover count %d, got %d", failBefore+1, failFail)
+		}
+
+		// Flush usage should persist cleanly
+		FlushUsage()
+		persistedReq, persistedFail := GetPersistedUsage()
+		if persistedReq != reqFail || persistedFail != failFail {
+			t.Errorf("expected persisted (%d, %d), got (%d, %d)", reqFail, failFail, persistedReq, persistedFail)
+		}
+	})
 }

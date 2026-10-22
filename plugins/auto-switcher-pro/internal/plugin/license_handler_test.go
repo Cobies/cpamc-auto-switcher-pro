@@ -87,5 +87,35 @@ func TestLicenseHTTP_StatusAndValidation(t *testing.T) {
 		if res["machine_id"] == nil || res["machine_id"] == "" {
 			t.Errorf("expected machine_id in session payload")
 		}
+		if res["management_key"] != nil {
+			t.Errorf("expected management_key to be excluded by default for security, got %v", res["management_key"])
+		}
+	})
+
+	t.Run("GET /auto-switcher-pro/license/session with opt-in handshake exposes key if configured", func(t *testing.T) {
+		t.Setenv("AUTO_SWITCHER_ALLOW_LOCAL_HANDSHAKE", "true")
+		t.Setenv("CLIPROXY_MANAGEMENT_KEY", "test-secret-management-key")
+
+		req := ManagementRequestPayload{
+			Method: http.MethodGet,
+			Path:   "/auto-switcher-pro/license/session",
+		}
+		rawReq, _ := json.Marshal(req)
+		out, err := HandleManagementHTTP(rawReq)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		var env Envelope
+		_ = json.Unmarshal(out, &env)
+		var resp ManagementResponsePayload
+		_ = json.Unmarshal(env.Result, &resp)
+
+		bodyBytes, _ := base64.StdEncoding.DecodeString(resp.Body)
+		var res map[string]interface{}
+		_ = json.Unmarshal(bodyBytes, &res)
+		if res["management_key"] != "test-secret-management-key" {
+			t.Errorf("expected test-secret-management-key, got %v", res["management_key"])
+		}
 	})
 }
