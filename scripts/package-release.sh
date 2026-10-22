@@ -150,16 +150,24 @@ else
 ⚡ CPAMC AUTO-SWITCHER PRO · GUÍA RÁPIDA DE INSTALACIÓN (LINUX)
 ==============================================================================
 
-Para instalar el plugin y la extensión automáticamente:
+NOTAS ARQUITECTURALES IMPORTANTES:
+1. Este paquete NO contiene ni ejecuta ningún CLI legacy destructivo.
+2. NO realiza mutaciones físicas de prefijos en disco (cero llamadas PatchAuthPrefix).
+3. Es un Plugin Dinámico Go CGO (.so) diseñado para ejecutarse sobre CPAMC v8 (v8.0.13+):
+   - Funciona 100% en RAM con Aislamiento Virtual Puro (ActiveLeader).
+   - Respeta íntegramente las credenciales y el config.yaml existente.
+4. Es completamente plug-and-play tanto en Docker como en servicios nativos Systemd.
 
+Para instalar automáticamente:
 1. Abre tu terminal en esta carpeta.
 2. Ejecuta el instalador:
    bash instalar.sh
 
 El script:
-- Detectará tu contenedor Docker de CPAMC e instalará el plugin.
+- Detectará automáticamente si CPAMC corre en Systemd o en Docker.
+- Instalará el plugin .so en la carpeta plugins/.
 - Instalará y enlazará la extensión en tu Pi / Gentle-Shell (~/.pi o ~/.gentle-shell).
-- Reiniciará el contenedor automáticamente.
+- Reiniciará el servicio suavemente para aplicar los cambios.
 
 Listo! Abre Pi o Gentle-Shell y escribe /model para comenzar.
 ==============================================================================
