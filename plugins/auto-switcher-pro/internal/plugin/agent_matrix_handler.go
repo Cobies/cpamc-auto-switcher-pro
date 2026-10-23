@@ -936,7 +936,7 @@ func discoverUpstreamModels(pools []string) []DiscoveredUpstreamModel {
 
 			for _, mod := range accountModels {
 				targetID := "account/" + cleanName + "/" + mod
-				displayLabel := cleanName + " (" + mod + ")"
+				displayLabel := mod + " (" + cleanName + ")"
 				if !seen[targetID] {
 					seen[targetID] = true
 					list = append(list, DiscoveredUpstreamModel{
@@ -1017,10 +1017,11 @@ func discoverUpstreamModels(pools []string) []DiscoveredUpstreamModel {
 			if models, ok := providerModelsMap[provLower]; ok && len(models) > 0 {
 				for _, mItem := range models {
 					targetID := provLower + "/" + mItem.ID
-					displayLabel := strings.ToUpper(provLower) + ": " + mItem.Name + " (" + mItem.ID + ")"
-					if mItem.Name == "" {
-						displayLabel = strings.ToUpper(provLower) + ": " + mItem.ID
+					cleanModelName := mItem.Name
+					if cleanModelName == "" {
+						cleanModelName = mItem.ID
 					}
+					displayLabel := cleanModelName + " (" + strings.ToUpper(provLower) + ")"
 					if !seen[targetID] {
 						seen[targetID] = true
 						list = append(list, DiscoveredUpstreamModel{

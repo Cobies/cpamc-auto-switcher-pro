@@ -450,6 +450,34 @@ export default function AgentMatrix() {
     return availablePools.includes(targetId);
   };
 
+  const formatPoolLabel = (poolId) => {
+    const detail = poolDetails[poolId];
+    if (detail?.target_model) {
+      return `${poolId} (${detail.target_model})`;
+    }
+    return poolId;
+  };
+
+  const formatUpstreamLabel = (u) => {
+    if ((u.id || '').startsWith('account/')) {
+      const parts = u.id.split('/');
+      if (parts.length >= 3) {
+        const email = parts[1];
+        const model = parts.slice(2).join('/');
+        return `${model} (${email})`;
+      }
+    }
+    if (u.provider === 'local_harness' || (u.id || '').includes('/')) {
+      const parts = (u.id || '').split('/');
+      if (parts.length > 1) {
+        const prov = parts[0].toUpperCase();
+        const model = parts.slice(1).join('/');
+        return `${model} (${prov})`;
+      }
+    }
+    return u.display_name || u.displayName || u.id;
+  };
+
   const renderDropdownOptions = (excludedValue = null) => {
     const pools = excludedValue ? availablePools.filter((p) => p !== excludedValue) : availablePools;
     const freeAccounts = (upstreamModels || []).filter((u) => u.provider !== 'local_harness' && u.id !== excludedValue);
@@ -466,7 +494,7 @@ export default function AgentMatrix() {
           <optgroup label="── 🛡️ POOLS DE BALANCEO ACTIVO ──">
             {pools.map((p) => (
               <option key={p} value={p}>
-                {p}
+                {formatPoolLabel(p)}
               </option>
             ))}
           </optgroup>
@@ -475,7 +503,7 @@ export default function AgentMatrix() {
           <optgroup label="── 📋 CUENTAS LIBRES CPAMC (SIN POOL) ──">
             {freeAccounts.map((u) => (
               <option key={u.id} value={u.id}>
-                {u.displayName || u.id}
+                {formatUpstreamLabel(u)}
               </option>
             ))}
           </optgroup>
@@ -484,7 +512,7 @@ export default function AgentMatrix() {
           <optgroup label="── 📟 MODELOS DE LOGINS LOCALES (NVIDIA, ETC.) ──">
             {localLogins.map((u) => (
               <option key={u.id} value={u.id}>
-                {u.displayName || u.id}
+                {formatUpstreamLabel(u)}
               </option>
             ))}
           </optgroup>
