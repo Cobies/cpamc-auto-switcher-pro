@@ -360,3 +360,126 @@ func TestAgentMatrix_RealPingDiagnostics(t *testing.T) {
 		t.Errorf("expected verification status message, got: %s", res.Message)
 	}
 }
+
+func TestAgentMatrix_DirectUpstreamModelPersistence(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("cannot access home directory")
+	}
+
+	profilesPath := filepath.Join(home, ".gentle-shell", "agent", "profiles.json")
+	var backup []byte
+	if data, err := os.ReadFile(profilesPath); err == nil {
+		backup = data
+		defer func() {
+			_ = os.WriteFile(profilesPath, backup, 0644)
+		}()
+	}
+
+	// 1. Save an upstream model selection (e.g. openai-codex/gpt-5.1-sol) for orchestrator in gentle_shell
+	input := map[string]any{
+		"agents": []AgentInfo{
+			{
+				Universe:       "gentle_shell",
+				AgentID:        "orchestrator",
+				DisplayName:    "👑 ORQUESTADOR GENTLE-SHELL",
+				RoleType:       "orchestrator",
+				IsOrchestrator: true,
+				PrimaryPool:    "openai-codex/gpt-5.1-sol",
+				FallbackPool:   "Pool-01-gemini",
+				ThinkingLevel:  "none",
+				Concurrency:    1,
+			},
+		},
+	}
+	body, _ := json.Marshal(input)
+	postReq := ManagementRequestPayload{
+		Method: http.MethodPost,
+		Path:   "/v0/management/auto-switcher-pro/agent-matrix",
+		Body:   body,
+	}
+	rawPost, err := handleAgentMatrixHTTP(postReq)
+	if err != nil {
+		t.Fatalf("POST agent-matrix failed: %v", err)
+	}
+	var envPost Envelope
+	_ = json.Unmarshal(rawPost, &envPost)
+	var respPost ManagementResponsePayload
+	_ = json.Unmarshal(envPost.Result, &respPost)
+	if respPost.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK from POST, got %d", respPost.StatusCode)
+	}
+
+	// 2. Verify profiles.json on disk contains "active": "current", the exact model without double "cpamc/" prefix, and "thinking"
+	savedDisk, err := os.ReadFile(profilesPath)
+	if err != nil {
+		t.Fatalf("could not read %s: %v", profilesPath, err)
+	}
+	var diskStruct struct {
+		Kind     string `json:"kind"`
+		Version  int    `json:"version"`
+		Active   string `json:"active"`
+		Profiles struct {
+			Current map[string]struct {
+				Model    string `json:"model"`
+				Fallback string `json:"fallback"`
+				Thinking string `json:"thinking"`
+				Effort   string `json:"effort"`
+			} `json:"current"`
+		} `json:"profiles"`
+	}
+	if err := json.Unmarshal(savedDisk, &diskStruct); err != nil {
+		t.Fatalf("failed to unmarshal profiles.json: %v", err)
+	}
+	if diskStruct.Active != "current" {
+		t.Errorf("expected active='current', got '%s'", diskStruct.Active)
+	}
+	orchEntry, ok := diskStruct.Profiles.Current["orchestrator"]
+	if !ok {
+		t.Fatalf("expected orchestrator in profiles.current")
+	}
+	if orchEntry.Model != "openai-codex/gpt-5.1-sol" {
+		t.Errorf("expected model='openai-codex/gpt-5.1-sol' without cpamc/ prefix, got '%s'", orchEntry.Model)
+	}
+	if orchEntry.Fallback != "cpamc/Pool-01-gemini" {
+		t.Errorf("expected fallback='cpamc/Pool-01-gemini', got '%s'", orchEntry.Fallback)
+	}
+	if orchEntry.Thinking != "none" || orchEntry.Effort != "none" {
+		t.Errorf("expected thinking=none and effort=none, got thinking=%s effort=%s", orchEntry.Thinking, orchEntry.Effort)
+	}
+
+	// 3. Perform GET and verify the model selection is NOT reverted by containsPool
+	getReq := ManagementRequestPayload{
+		Method: http.MethodGet,
+		Path:   "/v0/management/auto-switcher-pro/agent-matrix",
+	}
+	rawGet, err := handleAgentMatrixHTTP(getReq)
+	if err != nil {
+		t.Fatalf("GET agent-matrix failed: %v", err)
+	}
+	var envGet Envelope
+	_ = json.Unmarshal(rawGet, &envGet)
+	var respGet ManagementResponsePayload
+	_ = json.Unmarshal(envGet.Result, &respGet)
+	var dataGet AgentMatrixPayload
+	bodyBytes, _ := base64.StdEncoding.DecodeString(respGet.Body)
+	_ = json.Unmarshal(bodyBytes, &dataGet)
+
+	foundOrch := false
+	for _, h := range dataGet.Harnesses {
+		if h.ID == "gentle_shell" {
+			for _, a := range h.Agents {
+				if a.AgentID == "orchestrator" {
+					foundOrch = true
+					if a.PrimaryPool != "openai-codex/gpt-5.1-sol" {
+						t.Errorf("CRITICAL REVERSION BUG: expected PrimaryPool='openai-codex/gpt-5.1-sol', but got reverted to '%s'", a.PrimaryPool)
+					}
+				}
+			}
+		}
+	}
+	if !foundOrch {
+		t.Errorf("gentle_shell orchestrator not found in GET response")
+	}
+}
+

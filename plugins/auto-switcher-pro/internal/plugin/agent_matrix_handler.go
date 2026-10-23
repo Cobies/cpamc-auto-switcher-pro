@@ -519,6 +519,7 @@ func reconcileExternalFileChanges() {
 								Model          string `json:"model"`
 								Fallback       string `json:"fallback"`
 								Effort         string `json:"effort"`
+								Thinking       string `json:"thinking"`
 								MaxClaudeTurns int    `json:"max_claude_turns"`
 							} `json:"current"`
 						} `json:"profiles"`
@@ -528,16 +529,35 @@ func reconcileExternalFileChanges() {
 						for agentID, prof := range parsed.Profiles.Current {
 							cleanModel := strings.TrimPrefix(prof.Model, "cpamc/")
 							cleanFallback := strings.TrimPrefix(prof.Fallback, "cpamc/")
+							effort := prof.Effort
+							if effort == "" {
+								effort = prof.Thinking
+							}
+							if effort == "" {
+								effort = "medium"
+							}
 							maxTurns := prof.MaxClaudeTurns
 							if maxTurns <= 0 {
 								maxTurns = 3
 							}
+							// Upsert both gentle_shell and gentle_ai to maintain consistency across manifests and legacy lookups
+							_ = analytics.UpsertAgentProfile(analytics.AgentProfileRecord{
+								Universe:       "gentle_shell",
+								AgentID:        agentID,
+								PrimaryPool:    cleanModel,
+								FallbackPool:   cleanFallback,
+								ThinkingLevel:  effort,
+								AutoDowngrade:  true,
+								MaxClaudeTurns: maxTurns,
+								Concurrency:    1,
+								UpdatedAtMs:    now,
+							})
 							_ = analytics.UpsertAgentProfile(analytics.AgentProfileRecord{
 								Universe:       "gentle_ai",
 								AgentID:        agentID,
 								PrimaryPool:    cleanModel,
 								FallbackPool:   cleanFallback,
-								ThinkingLevel:  prof.Effort,
+								ThinkingLevel:  effort,
 								AutoDowngrade:  true,
 								MaxClaudeTurns: maxTurns,
 								Concurrency:    1,
@@ -685,6 +705,9 @@ func loadManifestOrDiscover(availablePools []string, poolCapabilities map[string
 				saved, _ := analytics.GetAgentProfiles(h.ID)
 				if len(saved) == 0 && (h.ID == "gentle_shell" || h.ID == "gentle_ai") {
 					saved, _ = analytics.GetAgentProfiles("gentle_ai")
+					if len(saved) == 0 {
+						saved, _ = analytics.GetAgentProfiles("gentle_shell")
+					}
 				}
 				savedMap := make(map[string]analytics.AgentProfileRecord)
 				for _, p := range saved {
@@ -706,10 +729,10 @@ func loadManifestOrDiscover(availablePools []string, poolCapabilities map[string
 					seenAgent[a.AgentID] = true
 					a.Universe = h.ID
 					if rec, ok := savedMap[a.AgentID]; ok {
-						if rec.PrimaryPool != "" && containsPool(availablePools, rec.PrimaryPool) {
+						if rec.PrimaryPool != "" {
 							a.PrimaryPool = rec.PrimaryPool
 						}
-						if rec.FallbackPool != "" && containsPool(availablePools, rec.FallbackPool) {
+						if rec.FallbackPool != "" {
 							a.FallbackPool = rec.FallbackPool
 						}
 						if rec.ThinkingLevel != "" {
@@ -726,11 +749,11 @@ func loadManifestOrDiscover(availablePools []string, poolCapabilities map[string
 						}
 					}
 
-					// Ensure agent has a valid pool matching its role if not yet set or not in availablePools
-					if a.PrimaryPool == "" || !containsPool(availablePools, a.PrimaryPool) {
+					// Ensure agent has a valid pool matching its role if not yet set
+					if a.PrimaryPool == "" {
 						defP, defF := resolveBestPoolForRole(a.RoleType, a.AgentID, availablePools)
 						a.PrimaryPool = defP
-						if a.FallbackPool == "" || !containsPool(availablePools, a.FallbackPool) {
+						if a.FallbackPool == "" {
 							a.FallbackPool = defF
 						}
 					}
@@ -744,7 +767,11 @@ func loadManifestOrDiscover(availablePools []string, poolCapabilities map[string
 						a.AutoDowngrade = true
 					}
 
-					if poolCapabilities[a.PrimaryPool] == false {
+					if capVal, ok := poolCapabilities[a.PrimaryPool]; ok {
+						if !capVal {
+							a.ThinkingLevel = "none"
+						}
+					} else if strings.Contains(strings.ToLower(a.PrimaryPool), "codex") {
 						a.ThinkingLevel = "none"
 					}
 					agentsWithState = append(agentsWithState, a)
@@ -754,7 +781,11 @@ func loadManifestOrDiscover(availablePools []string, poolCapabilities map[string
 				for _, da := range dynamicDiscovered {
 					if !seenAgent[da.AgentID] {
 						seenAgent[da.AgentID] = true
-						if poolCapabilities[da.PrimaryPool] == false {
+						if capVal, ok := poolCapabilities[da.PrimaryPool]; ok {
+							if !capVal {
+								da.ThinkingLevel = "none"
+							}
+						} else if strings.Contains(strings.ToLower(da.PrimaryPool), "codex") {
 							da.ThinkingLevel = "none"
 						}
 						agentsWithState = append(agentsWithState, da)
@@ -1504,23 +1535,23 @@ func postAgentMatrixResponse(body []byte) ([]byte, error) {
 		}
 		_ = analytics.UpsertAgentProfile(rec)
 
-		// 2. Prepare file sync payloads
+		// 2. Prepare file sync payloads with normalized model references
+		modelRef := formatModelRef(a.PrimaryPool)
+		fallbackRef := formatModelRef(fallbackPool)
+
+		profileEntry := map[string]any{
+			"model":            modelRef,
+			"fallback":         fallbackRef,
+			"effort":           effort,
+			"thinking":         effort,
+			"auto_downgrade":   a.AutoDowngrade,
+			"max_claude_turns": maxClaudeTurns,
+		}
+
 		if a.Universe == "jok3r_pi" || a.Universe == "wilox_pi" {
-			jok3rProfiles[a.AgentID] = map[string]any{
-				"model":            "cpamc/" + a.PrimaryPool,
-				"fallback":         "cpamc/" + fallbackPool,
-				"effort":           effort,
-				"auto_downgrade":   a.AutoDowngrade,
-				"max_claude_turns": maxClaudeTurns,
-			}
+			jok3rProfiles[a.AgentID] = profileEntry
 		} else if a.Universe == "gentle_shell" || a.Universe == "gentle_ai" || a.Universe == "gentle_pi" {
-			gentleProfiles[a.AgentID] = map[string]any{
-				"model":            "cpamc/" + a.PrimaryPool,
-				"fallback":         "cpamc/" + fallbackPool,
-				"effort":           effort,
-				"auto_downgrade":   a.AutoDowngrade,
-				"max_claude_turns": maxClaudeTurns,
-			}
+			gentleProfiles[a.AgentID] = profileEntry
 		}
 	}
 
@@ -1533,15 +1564,30 @@ func postAgentMatrixResponse(body []byte) ([]byte, error) {
 	})
 }
 
+// formatModelRef ensures pool identifiers carry the "cpamc/" prefix while direct upstream models
+// (e.g. "openai-codex/gpt-5.1-sol", "opencode-go/...") retain their canonical provider identifier.
+func formatModelRef(target string) string {
+	if target == "" {
+		return ""
+	}
+	if strings.HasPrefix(target, "cpamc/") {
+		return target
+	}
+	if strings.Contains(target, "/") {
+		return target
+	}
+	return "cpamc/" + target
+}
+
 func getVal(m map[string]analytics.AgentProfileRecord, id, field, def string, availablePools []string) string {
 	if r, ok := m[id]; ok {
 		switch field {
 		case "primary":
-			if r.PrimaryPool != "" && (len(availablePools) == 0 || containsPool(availablePools, r.PrimaryPool)) {
+			if r.PrimaryPool != "" {
 				return r.PrimaryPool
 			}
 		case "fallback":
-			if r.FallbackPool != "" && (len(availablePools) == 0 || containsPool(availablePools, r.FallbackPool)) {
+			if r.FallbackPool != "" {
 				return r.FallbackPool
 			}
 		case "thinking":
@@ -1575,9 +1621,19 @@ func syncDiskProfiles(jok3rProfiles, gentleProfiles map[string]any) {
 
 	for _, jok3rPath := range jok3rTargets {
 		if data, err := os.ReadFile(jok3rPath); err == nil {
+			if len(jok3rProfiles) == 0 {
+				break
+			}
 			var parsed map[string]any
 			if err := json.Unmarshal(data, &parsed); err == nil {
-				parsed["model_profiles"] = jok3rProfiles
+				existingModels, _ := parsed["model_profiles"].(map[string]any)
+				if existingModels == nil {
+					existingModels = make(map[string]any)
+				}
+				for k, v := range jok3rProfiles {
+					existingModels[k] = v
+				}
+				parsed["model_profiles"] = existingModels
 				if out, err := json.MarshalIndent(parsed, "", "  "); err == nil {
 					if err := atomicWriteFile(jok3rPath, out, 0644); err == nil {
 						if info, err := os.Stat(jok3rPath); err == nil {
@@ -1609,12 +1665,44 @@ func syncDiskProfiles(jok3rProfiles, gentleProfiles map[string]any) {
 	for _, pPath := range gentleTargets {
 		dir := filepath.Dir(pPath)
 		if _, err := os.Stat(dir); err == nil {
+			if len(gentleProfiles) == 0 {
+				break
+			}
+			profilesMap := make(map[string]any)
+			activeProfile := "current"
+			if existingData, err := os.ReadFile(pPath); err == nil && len(existingData) > 0 {
+				var existingPayload struct {
+					Active   string                    `json:"active"`
+					Profiles map[string]map[string]any `json:"profiles"`
+				}
+				if err := json.Unmarshal(existingData, &existingPayload); err == nil {
+					if existingPayload.Active != "" {
+						activeProfile = existingPayload.Active
+					}
+					if existingPayload.Profiles != nil {
+						for k, v := range existingPayload.Profiles {
+							profilesMap[k] = v
+						}
+					}
+				}
+			}
+
+			currentMap := make(map[string]any)
+			if existingCurrent, ok := profilesMap["current"].(map[string]any); ok {
+				for k, v := range existingCurrent {
+					currentMap[k] = v
+				}
+			}
+			for k, v := range gentleProfiles {
+				currentMap[k] = v
+			}
+			profilesMap["current"] = currentMap
+
 			payload := map[string]any{
-				"kind":    "gentle-pi.agent_model_profiles",
-				"version": 1,
-				"profiles": map[string]any{
-					"current": gentleProfiles,
-				},
+				"kind":     "gentle-pi.agent_model_profiles",
+				"version":  1,
+				"active":   activeProfile,
+				"profiles": profilesMap,
 			}
 			if out, err := json.MarshalIndent(payload, "", "  "); err == nil {
 				if err := atomicWriteFile(pPath, out, 0644); err == nil {
