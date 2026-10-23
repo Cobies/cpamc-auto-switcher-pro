@@ -49,7 +49,7 @@ func modelIDs(models []pluginModelInfo) []string {
 }
 
 func TestModelCatalogForAuthWithoutPoolsReturnsBaseline(t *testing.T) {
-	models := modelCatalogForAuth("", nil)
+	models := modelCatalogForAuth(antigravityProviderKey, "", nil)
 	ids := modelIDs(models)
 	if len(ids) != len(baselineAntigravityModels) {
 		t.Fatalf("baseline catalog size mismatch: got %d want %d", len(ids), len(baselineAntigravityModels))
@@ -68,7 +68,7 @@ func TestModelCatalogForAuthWithoutPoolsReturnsBaseline(t *testing.T) {
 func TestModelCatalogForAuthDiskBackedPoolServesBareTargets(t *testing.T) {
 	// Auth prefixed "agy" (disk-backed member of the agy pool) serving two pools:
 	// the gemini pool is disk-backed; the claude pool is registry-only (2N dual family).
-	models := modelCatalogForAuth("agy", []PoolDefinition{
+	models := modelCatalogForAuth(antigravityProviderKey, "agy", []PoolDefinition{
 		{
 			BasePrefix: "agy",
 			LeaderAuth: "antigravity-a@gmail.com.json",
@@ -111,7 +111,7 @@ func TestModelCatalogForAuthDiskBackedPoolServesBareTargets(t *testing.T) {
 }
 
 func TestModelCatalogForAuthDeduplicatesAndSorts(t *testing.T) {
-	models := modelCatalogForAuth("clau", []PoolDefinition{
+	models := modelCatalogForAuth(antigravityProviderKey, "clau", []PoolDefinition{
 		{
 			BasePrefix: "clau",
 			LeaderAuth: "antigravity-a@gmail.com.json",
@@ -257,6 +257,29 @@ func TestHandleModelForAuthUsesRegistryMembership(t *testing.T) {
 	})
 	if len(resp.Models) != len(baselineAntigravityModels) {
 		t.Fatalf("unknown auth must receive baseline, got %v", modelIDs(resp.Models))
+	}
+
+	// Codex auth receives the baselineCodexModels catalog with Astra and Sol.
+	resp = handleModelForAuth(modelForAuthRequest{
+		AuthID:       "codex-account@gmail.com.json",
+		AuthProvider: "codex",
+		StorageJSON:  []byte(`{"prefix":"codex"}`),
+	})
+	if resp.Provider != "codex" {
+		t.Fatalf("codex provider mismatch: got %q", resp.Provider)
+	}
+	codexIDs := modelIDs(resp.Models)
+	for _, want := range []string{"gpt-6-astra", "gpt-6-sol", "gpt-5.6-sol"} {
+		found := false
+		for _, id := range codexIDs {
+			if id == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("codex catalog missing flagship model %q: %v", want, codexIDs)
+		}
 	}
 }
 

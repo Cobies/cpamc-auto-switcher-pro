@@ -13,6 +13,7 @@ import {
   CANONICAL_PROVIDER_MODELS,
   extractPoolNumber,
   sortPoolsByNumber,
+  getAuthFileModels,
 } from '../api/managementClient';
 import '../GroupManager.css';
 
@@ -137,7 +138,18 @@ function matchesFamilyModel(base, modelId, exclude55 = false) {
     return id.includes('gemini');
   }
   if (b.startsWith('codex')) {
-    return id.includes('codex');
+    return (
+      id.includes('codex') ||
+      id.includes('astra') ||
+      id.includes('sol') ||
+      id.includes('terra') ||
+      id.includes('luna') ||
+      id.includes('chatgpt') ||
+      /^gpt/.test(id.replace(/^[a-z0-9_-]+\//, '')) ||
+      id.includes('o1') ||
+      id.includes('o3') ||
+      id.includes('o4')
+    );
   }
   return true;
 }
@@ -201,7 +213,35 @@ export default function GroupManager({
   const [adoptAccountNodeId, setAdoptAccountNodeId] = useState('');
   const [adoptSpecialistModel, setAdoptSpecialistModel] = useState('');
   const [cardAdoptSelections, setCardAdoptSelections] = useState({});
+  const [selectedAuthModels, setSelectedAuthModels] = useState([]);
   const feedbackTimeoutRef = useRef(null);
+
+  // Sincronizar dinámicamente los modelos nativos de la credencial física seleccionada (CPAMC auth-file)
+  useEffect(() => {
+    if (!selectedActiveNodeId) {
+      setSelectedAuthModels([]);
+      return;
+    }
+    const activeNode = nodes.find((n) => n.id === selectedActiveNodeId);
+    const fileName = activeNode?.data?.fileName || activeNode?.name || activeNode?.id;
+    if (!fileName || !fileName.endsWith('.json')) {
+      setSelectedAuthModels([]);
+      return;
+    }
+    let cancelled = false;
+    getAuthFileModels(fileName)
+      .then((models) => {
+        if (!cancelled && Array.isArray(models)) {
+          setSelectedAuthModels(models);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setSelectedAuthModels([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedActiveNodeId, nodes]);
 
   useEffect(() => {
     return () => {
@@ -324,7 +364,7 @@ export default function GroupManager({
   // 1. Managed pool cards abstraction (N -> 2N scalable model sincronizado con Auto Auth Files)
   const managedCards = useMemo(() => buildManagedPoolCards(nodes), [nodes]);
 
-  // Rol de familia objetivo según la selección (gemini vs claude)
+  // Rol de familia objetivo según la selección (gemini vs claude vs codex)
   const targetFamilyRole = useMemo(() => {
     if (!effectiveFamily) return null;
     if (effectiveFamily.key === 'gemini_pure') return 'gemini';
@@ -336,6 +376,9 @@ export default function GroupManager({
     ) {
       return 'claude';
     }
+    if (effectiveFamily.key === 'codex' || effectiveFamily.provider === 'codex') {
+      return 'codex';
+    }
     return null;
   }, [effectiveFamily]);
 
@@ -345,6 +388,9 @@ export default function GroupManager({
     const sourceModels = Array.isArray(catalogModels) && catalogModels.length > 0
       ? catalogModels
       : [];
+    if (selectedAuthModels.length > 0) {
+      sourceModels.push(...selectedAuthModels);
+    }
     const dummyCard = {
       familyRole: targetFamilyRole || 'gemini',
       assignedPrefix: effectiveFamily.hintPrefix,
@@ -377,7 +423,40 @@ export default function GroupManager({
           'claude-opus-4-6-thinking',
         ];
       } else if (effectiveFamily.key === 'codex') {
-        models = ['gpt-4o', 'gpt-4o-mini', 'o1-preview', 'o3-mini'];
+        models = [
+          'gpt-6-astra',
+          'gpt-6-sol',
+          'gpt-6-luna',
+          'gpt-5.6-sol',
+          'gpt-5.6-terra',
+          'gpt-5.6-luna',
+          'gpt-5.5',
+          'gpt-5.5-pro',
+          'gpt-5.4',
+          'gpt-5.4-mini',
+          'gpt-5.4-nano',
+          'gpt-5.4-pro',
+          'gpt-5.3-codex',
+          'gpt-5.3-codex-spark',
+          'gpt-5.2',
+          'gpt-5.2-pro',
+          'gpt-5.1',
+          'gpt-5',
+          'o4-mini',
+          'o3',
+          'o3-mini',
+          'o3-pro',
+          'o1',
+          'o1-mini',
+          'o1-pro',
+          'o1-preview',
+          'chatgpt-4o-latest',
+          'gpt-4o',
+          'gpt-4o-mini',
+          'gpt-4.1',
+          'gpt-4-turbo',
+          'gpt-4',
+        ];
       }
     }
 
@@ -385,8 +464,9 @@ export default function GroupManager({
       models = models.filter((m) => !m.includes('5-5') && !m.includes('5.5'));
     }
 
-    // Ordenar con 3.8 primero para gemini, o A-Z para claude/otros
+    // Ordenar con 3.8 primero para gemini, o A-Z para claude/otros (Astra y Sol preservan prioridad en codex)
     const isGemini = (targetFamilyRole || '') === 'gemini';
+    const isCodex = (targetFamilyRole || '') === 'codex';
     return [...models].sort((a, b) => {
       if (isGemini) {
         const a38 = a.includes('3.8');
@@ -394,9 +474,24 @@ export default function GroupManager({
         if (a38 && !b38) return -1;
         if (!a38 && b38) return 1;
       }
+      if (isCodex) {
+        const priorityOrder = [
+          'gpt-6-astra',
+          'gpt-6-sol',
+          'gpt-6-luna',
+          'gpt-5.6-sol',
+          'gpt-5.6-terra',
+          'gpt-5.6-luna',
+        ];
+        const aIdx = priorityOrder.indexOf(a);
+        const bIdx = priorityOrder.indexOf(b);
+        if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
+        if (aIdx !== -1) return -1;
+        if (bIdx !== -1) return 1;
+      }
       return a.localeCompare(b);
     });
-  }, [effectiveFamily, catalogModels, targetFamilyRole, excludeVersion55]);
+  }, [effectiveFamily, catalogModels, selectedAuthModels, targetFamilyRole, excludeVersion55]);
 
   // Actualizar el modelo especialista predeterminado cuando cambie la familia o subtipo
   useEffect(() => {

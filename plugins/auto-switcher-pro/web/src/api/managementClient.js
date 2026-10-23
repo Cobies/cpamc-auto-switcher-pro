@@ -618,6 +618,32 @@ export async function downloadAuthFilePrefix(fileName, options = {}) {
 }
 
 /**
+ * Retrieves the models associated with an individual auth credential via GET /v0/management/auth-files/models?name=...
+ *
+ * @param {string} fileName - Exact physical filename of the auth file
+ * @param {Object} [options] - Options passed to apiFetch
+ * @returns {Promise<string[]>} Array of model IDs reported by native CPAMC
+ */
+export async function getAuthFileModels(fileName, options = {}) {
+  if (!fileName || typeof fileName !== 'string' || !fileName.trim()) {
+    return [];
+  }
+  const cleanName = fileName.trim();
+  const endpoint = `/v0/management/auth-files/models?name=${encodeURIComponent(cleanName)}`;
+  try {
+    const res = await apiFetch(endpoint, options);
+    const data = await res.json();
+    if (Array.isArray(data?.models)) {
+      return data.models.map((m) => m?.id || m?.name || String(m)).filter(Boolean);
+    }
+    return [];
+  } catch (err) {
+    console.warn(`[VisualProfile] getAuthFileModels failed for "${cleanName}":`, err.message);
+    return [];
+  }
+}
+
+/**
  * Fetches all auth files and their prefixes from the Management API.
  *
  * FAIL-CLOSED SAFETY CONTRACT:
@@ -1524,10 +1550,38 @@ export const CANONICAL_PROVIDER_MODELS = {
     'claude-opus-5-5-high',
   ],
   codex: [
+    'gpt-6-astra',
+    'gpt-6-sol',
+    'gpt-6-luna',
+    'gpt-5.6-sol',
+    'gpt-5.6-terra',
+    'gpt-5.6-luna',
+    'gpt-5.5',
+    'gpt-5.5-pro',
+    'gpt-5.4',
+    'gpt-5.4-mini',
+    'gpt-5.4-nano',
+    'gpt-5.4-pro',
+    'gpt-5.3-codex',
+    'gpt-5.3-codex-spark',
+    'gpt-5.2',
+    'gpt-5.2-pro',
+    'gpt-5.1',
+    'gpt-5',
+    'o4-mini',
+    'o3',
+    'o3-mini',
+    'o3-pro',
+    'o1',
+    'o1-mini',
+    'o1-pro',
+    'o1-preview',
+    'chatgpt-4o-latest',
     'gpt-4o',
     'gpt-4o-mini',
-    'o1-preview',
-    'o3-mini',
+    'gpt-4.1',
+    'gpt-4-turbo',
+    'gpt-4',
   ],
 };
 
@@ -2029,9 +2083,15 @@ export function resolveInheritedCardModels(card, catalogModels = [], globalDisab
     } else if (effectiveFamily === 'codex') {
       matches =
         lower.includes('codex') ||
+        lower.includes('astra') ||
+        lower.includes('sol') ||
+        lower.includes('terra') ||
+        lower.includes('luna') ||
+        lower.includes('chatgpt') ||
         /^gpt/.test(lower) ||
         lower.includes('o1') ||
-        lower.includes('o3');
+        lower.includes('o3') ||
+        lower.includes('o4');
     }
 
     if (matches) {

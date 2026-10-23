@@ -112,10 +112,11 @@ const (
 	methodSchedulerPick = "scheduler.pick"
 )
 
-// antigravityProviderKey is the built-in provider key that owns the physical
-// Antigravity OAuth credentials. The plugin registers its virtual pool models
-// under this provider so the host resolves and schedules them natively.
-const antigravityProviderKey = "antigravity"
+// antigravityProviderKey and codexProviderKey are the built-in provider keys.
+const (
+	antigravityProviderKey = "antigravity"
+	codexProviderKey       = "codex"
+)
 
 // poolPrefixTargetPattern matches the reserve numbering convention of a pool
 // base prefix (e.g. "clau_1" for base "clau"). Alphabetic suffixes belong to
@@ -222,6 +223,27 @@ var baselineAntigravityModels = []pluginModelInfo{
 	{ID: "gemini-3.5-flash-lite", Object: "model", OwnedBy: antigravityProviderKey, DisplayName: "Gemini 3.5 Flash Lite"},
 	{ID: "gemini-3.1-flash-lite", Object: "model", OwnedBy: antigravityProviderKey, DisplayName: "Gemini 3.1 Flash Lite"},
 	{ID: "gemini-3-flash", Object: "model", OwnedBy: antigravityProviderKey, DisplayName: "Gemini 3 Flash"},
+}
+
+// baselineCodexModels is the standard OpenAI/Codex catalog published natively
+// for credentials belonging to the codex provider family, featuring the flagship Astra and Sol series.
+var baselineCodexModels = []pluginModelInfo{
+	{ID: "gpt-6-astra", Object: "model", OwnedBy: codexProviderKey, DisplayName: "GPT-6 Astra"},
+	{ID: "gpt-6-sol", Object: "model", OwnedBy: codexProviderKey, DisplayName: "GPT-6 Sol"},
+	{ID: "gpt-6-luna", Object: "model", OwnedBy: codexProviderKey, DisplayName: "GPT-6 Luna"},
+	{ID: "gpt-5.6-sol", Object: "model", OwnedBy: codexProviderKey, DisplayName: "GPT-5.6 Sol"},
+	{ID: "gpt-5.6-terra", Object: "model", OwnedBy: codexProviderKey, DisplayName: "GPT-5.6 Terra"},
+	{ID: "gpt-5.6-luna", Object: "model", OwnedBy: codexProviderKey, DisplayName: "GPT-5.6 Luna"},
+	{ID: "gpt-5.5", Object: "model", OwnedBy: codexProviderKey, DisplayName: "GPT-5.5"},
+	{ID: "gpt-5.4", Object: "model", OwnedBy: codexProviderKey, DisplayName: "GPT-5.4"},
+	{ID: "gpt-5.3-codex", Object: "model", OwnedBy: codexProviderKey, DisplayName: "GPT-5.3 Codex"},
+	{ID: "o4-mini", Object: "model", OwnedBy: codexProviderKey, DisplayName: "o4-mini"},
+	{ID: "o3", Object: "model", OwnedBy: codexProviderKey, DisplayName: "o3"},
+	{ID: "o3-mini", Object: "model", OwnedBy: codexProviderKey, DisplayName: "o3-mini"},
+	{ID: "o1", Object: "model", OwnedBy: codexProviderKey, DisplayName: "o1"},
+	{ID: "chatgpt-4o-latest", Object: "model", OwnedBy: codexProviderKey, DisplayName: "ChatGPT-4o Latest"},
+	{ID: "gpt-4o", Object: "model", OwnedBy: codexProviderKey, DisplayName: "GPT-4o"},
+	{ID: "gpt-4o-mini", Object: "model", OwnedBy: codexProviderKey, DisplayName: "GPT-4o mini"},
 }
 
 // deprecatedModelFallbacks maps retired or discontinued upstream model names
@@ -477,14 +499,19 @@ func sortModelsByID(models []pluginModelInfo) {
 
 // modelCatalogForAuth computes the complete model catalog the host must
 // register for one auth, derived from its pool memberships and baseline models:
-//   - Preserves all native baseline models (gemini-3.8-flash-high, gemini-3.7-flash-high, etc.)
+//   - Preserves all native baseline models (gemini-3.8-flash-high, gemini-3.7-flash-high, or gpt-6-astra, gpt-6-sol, etc.)
 //     so the native CPAMC "Auth Files Management" credential modal displays its full native catalog.
 //   - Includes bare targets for pools the account serves (e.g. claude-sonnet-4-6).
 //   - Strictly excludes virtual pool facades (Pool-01-gemini) and prefixed routes (agy/...)
 //     to prevent contamination of the native credential inspection modal.
-func modelCatalogForAuth(diskPrefix string, memberPools []PoolDefinition) []pluginModelInfo {
+func modelCatalogForAuth(provider, diskPrefix string, memberPools []PoolDefinition) []pluginModelInfo {
 	seen := make(map[string]struct{})
 	models := make([]pluginModelInfo, 0, 32)
+	provKey := antigravityProviderKey
+	if strings.EqualFold(strings.TrimSpace(provider), codexProviderKey) || strings.HasPrefix(strings.ToLower(diskPrefix), "codex") {
+		provKey = codexProviderKey
+	}
+
 	add := func(id string) {
 		id = strings.TrimSpace(id)
 		if id == "" {
@@ -501,14 +528,20 @@ func modelCatalogForAuth(diskPrefix string, memberPools []PoolDefinition) []plug
 		models = append(models, pluginModelInfo{
 			ID:          id,
 			Object:      "model",
-			OwnedBy:     antigravityProviderKey,
+			OwnedBy:     provKey,
 			DisplayName: display,
 		})
 	}
 
-	// Always seed with the complete native Antigravity baseline catalog
-	for _, m := range baselineAntigravityModels {
-		add(m.ID)
+	if provKey == codexProviderKey {
+		for _, m := range baselineCodexModels {
+			add(m.ID)
+		}
+	} else {
+		// Always seed with the complete native Antigravity baseline catalog
+		for _, m := range baselineAntigravityModels {
+			add(m.ID)
+		}
 	}
 
 	// Add any bare pool targets (e.g. claude-sonnet-4-6), never virtual pool facades or prefixed routes
@@ -694,9 +727,17 @@ func handleModelForAuth(req modelForAuthRequest) modelResponse {
 	authID := strings.TrimSpace(req.AuthID)
 	diskPrefix := parseAuthDiskPrefix(req.StorageJSON)
 	memberPools := memberPoolsForAuth(activeRegistry(), authID)
+	prov := req.AuthProvider
+	if prov == "" {
+		if strings.Contains(strings.ToLower(authID), "codex") || strings.HasPrefix(strings.ToLower(diskPrefix), "codex") {
+			prov = codexProviderKey
+		} else {
+			prov = antigravityProviderKey
+		}
+	}
 	return modelResponse{
-		Provider: antigravityProviderKey,
-		Models:   modelCatalogForAuth(diskPrefix, memberPools),
+		Provider: prov,
+		Models:   modelCatalogForAuth(prov, diskPrefix, memberPools),
 	}
 }
 
