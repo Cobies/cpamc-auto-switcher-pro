@@ -129,8 +129,8 @@ func TestHandlePluginMethod_ManagementRegister(t *testing.T) {
 		}
 		if res.Path == "/audit-log" {
 			foundAuditLogRoute = true
-			if res.Menu != "📜 Bitácora & Caja Negra" {
-				t.Errorf("expected Menu '📜 Bitácora & Caja Negra', got %q", res.Menu)
+			if res.Menu != "📜 Bitácora · Caja Negra" {
+				t.Errorf("expected Menu '📜 Bitácora · Caja Negra', got %q", res.Menu)
 			}
 		}
 	}

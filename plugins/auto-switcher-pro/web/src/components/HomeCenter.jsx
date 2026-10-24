@@ -1,6 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './HomeCenter.css';
 import logoImg from '../assets/auto-switcher-pro-logo.png';
+import {
+  fetchPluginVersion,
+  fetchPluginHealth,
+  fetchManifest,
+  fetchLicenseStatus,
+  fetchAuditLog,
+  fetchAgentMatrix,
+} from '../api/managementClient';
 
 export default function HomeCenter({ onNavigateTab, onOpenLicenseModal }) {
   const [copied, setCopied] = useState(false);
@@ -9,24 +17,119 @@ export default function HomeCenter({ onNavigateTab, onOpenLicenseModal }) {
     status: 'trial',
     tier: 'trial',
     days_remaining: 30,
-    is_pro: false
+    is_pro: false,
   });
 
-  // Cargar estado real de la licencia desde el backend de CPAMC
-  React.useEffect(() => {
+  const [versionData, setVersionData] = useState({
+    current_version: '0.1.1',
+    current_tag: 'v0.1.1',
+    latest_tag: 'v0.1.1',
+    update_available: false,
+    github_repo: 'WiloxDev/cpamc-auto-switcher-pro',
+    releases_url: 'https://github.com/WiloxDev/cpamc-auto-switcher-pro/releases',
+  });
+
+  const [healthData, setHealthData] = useState({
+    healthy: true,
+    status: 'Online',
+    active_pools: 0,
+  });
+
+  const [manifestData, setManifestData] = useState({
+    pools: [],
+    accounts: [],
+    telemetry: [],
+  });
+
+  const [auditStats, setAuditStats] = useState({
+    total_events: 0,
+    failovers: 0,
+  });
+
+  const [harnessCount, setHarnessCount] = useState(0);
+
+  // Cargar telemetría viva de todos los subsistemas del motor
+  useEffect(() => {
     let active = true;
-    fetch('/v0/management/plugins/auto-switcher-pro/license')
-      .then(r => r.json())
-      .then(d => {
-        if (active && d && d.machine_id) {
-          setLicenseData(d);
-        }
+
+    // 1. Licencia & Machine ID real
+    fetchLicenseStatus()
+      .then((data) => {
+        if (!active || !data) return;
+        setLicenseData({
+          machine_id: data.machine_id || 'CPA-...',
+          status: data.status || 'trial',
+          tier: data.tier || 'PRO',
+          days_remaining: data.days_remaining ?? 30,
+          is_pro: data.status === 'active' || data.tier === 'PRO_LIFETIME',
+        });
       })
       .catch(() => {});
-    return () => { active = false; };
+
+    // 2. Versión del Plugin y comparación con GitHub Releases
+    fetchPluginVersion()
+      .then((data) => {
+        if (!active || !data) return;
+        setVersionData(data);
+      })
+      .catch(() => {});
+
+    // 3. Salud del motor /healthz
+    fetchPluginHealth()
+      .then((data) => {
+        if (!active || !data) return;
+        setHealthData({
+          healthy: data.healthy ?? true,
+          status: (data.healthy ?? true) ? 'Online' : 'Degradado',
+          active_pools: data.active_pools ?? 0,
+        });
+      })
+      .catch(() => {
+        if (active) {
+          setHealthData({ healthy: false, status: 'Desconectado', active_pools: 0 });
+        }
+      });
+
+    // 4. Manifest agregado O(1) en RAM
+    fetchManifest()
+      .then((data) => {
+        if (!active || !data) return;
+        setManifestData({
+          pools: Array.isArray(data.pools) ? data.pools : [],
+          accounts: Array.isArray(data.accounts) ? data.accounts : [],
+          telemetry: Array.isArray(data.telemetry) ? data.telemetry : [],
+        });
+      })
+      .catch(() => {});
+
+    // 5. Auditoría y eventos de rescate
+    fetchAuditLog()
+      .then((data) => {
+        if (!active || !data) return;
+        const timeline = Array.isArray(data.timeline) ? data.timeline : [];
+        const fails = timeline.filter((e) => e.type === 'failover' || e.type === 'rotation').length;
+        setAuditStats({
+          total_events: timeline.length,
+          failovers: fails,
+        });
+      })
+      .catch(() => {});
+
+    // 6. Matriz de agentes
+    fetchAgentMatrix()
+      .then((data) => {
+        if (!active || !data) return;
+        const hList = Array.isArray(data.harnesses) ? data.harnesses : [];
+        setHarnessCount(hList.length);
+      })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+    };
   }, []);
 
-  const machineId = licenseData.machine_id || 'CPA-2F60-969A-CA1D';
+  const machineId = licenseData.machine_id || 'CPA-...';
 
   const handleCopyMachineId = () => {
     if (navigator?.clipboard?.writeText) {
@@ -36,6 +139,10 @@ export default function HomeCenter({ onNavigateTab, onOpenLicenseModal }) {
     }
   };
 
+  const poolCount = manifestData.pools.length;
+  const totalAccounts = manifestData.accounts.length;
+  const coolingCount = manifestData.accounts.filter((a) => a.is_cooling).length;
+
   const menuItems = [
     {
       id: 'create-groups',
@@ -43,6 +150,7 @@ export default function HomeCenter({ onNavigateTab, onOpenLicenseModal }) {
       title: 'Crear Group / Perfiles',
       desc: 'Orquestador central: arma o disuelve grupos y pools de balanceo. Configura el líder y cuentas de respaldo.',
       badge: 'Principal',
+      liveBadge: poolCount > 0 ? `${poolCount} Pools` : null,
     },
     {
       id: 'auto-auth-files',
@@ -50,6 +158,7 @@ export default function HomeCenter({ onNavigateTab, onOpenLicenseModal }) {
       title: 'Auto Auth Files',
       desc: 'Visor de cuentas físicas OAuth. Gestiona la trazabilidad y la Tuerca ⚙️ de Modo Especialista virtual.',
       badge: 'Trazabilidad',
+      liveBadge: totalAccounts > 0 ? `${totalAccounts} Cuentas` : null,
     },
     {
       id: 'switcher',
@@ -57,6 +166,7 @@ export default function HomeCenter({ onNavigateTab, onOpenLicenseModal }) {
       title: 'Control Switcher',
       desc: 'Monitoreo en tiempo real: muestra qué cuenta está activa y cuáles en fila de reserva con sus cuotas.',
       badge: 'En Vivo',
+      liveBadge: coolingCount > 0 ? `${coolingCount} Enfriando` : 'Flota Óptima',
     },
     {
       id: 'profiles',
@@ -99,6 +209,7 @@ export default function HomeCenter({ onNavigateTab, onOpenLicenseModal }) {
       title: 'Bitácora & Caja Negra',
       desc: 'Historial forense de rotaciones, rescates 429 e incidentes en disco (SQLite WAL).',
       badge: 'Forense',
+      liveBadge: auditStats.total_events > 0 ? `${auditStats.total_events} Eventos` : null,
     },
     {
       id: 'agent-matrix',
@@ -106,6 +217,7 @@ export default function HomeCenter({ onNavigateTab, onOpenLicenseModal }) {
       title: 'Matriz de Agentes & Orquestación',
       desc: 'Control unificado de orquestadores y subagentes para Gentle-AI (OpenCode) y j0k3r-pi.',
       badge: 'Orquestación',
+      liveBadge: harnessCount > 0 ? `${harnessCount} Arneses` : null,
     },
   ];
 
@@ -139,7 +251,7 @@ export default function HomeCenter({ onNavigateTab, onOpenLicenseModal }) {
         </div>
       </div>
 
-      {/* 4 TARJETAS PRINCIPALES DE ESTADO (KPIs) */}
+      {/* 6 TARJETAS PRINCIPALES DE ESTADO (KPIs OPERATIVOS) */}
       <div className="home-kpi-grid">
         {/* KPI 1: Licencia */}
         <div className="home-kpi-card" data-testid="kpi-license">
@@ -187,24 +299,79 @@ export default function HomeCenter({ onNavigateTab, onOpenLicenseModal }) {
           <div className="kpi-caption">Identificador de hardware para vincular tu clave PRO</div>
         </div>
 
-        {/* KPI 3: Versión */}
+        {/* KPI 3: Versión Dinámica & GitHub Sync */}
         <div className="home-kpi-card" data-testid="kpi-version">
           <div className="kpi-header">
-            <span className="kpi-title">Versión Instalada</span>
-            <span className="kpi-status-badge badge-blue">C-ABI Estable</span>
+            <span className="kpi-title">Versión del Plugin</span>
+            <span className={`kpi-status-badge ${versionData.update_available ? 'badge-amber' : 'badge-green'}`}>
+              {versionData.update_available ? (
+                <a
+                  href={versionData.releases_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="badge-update-link"
+                >
+                  ⚡ Actualizar a {versionData.latest_tag}
+                </a>
+              ) : (
+                '✓ Al día'
+              )}
+            </span>
           </div>
-          <div className="kpi-value text-white">v2.4.0</div>
-          <div className="kpi-caption">Compilado nativo Linux amd64 para CPAMC</div>
+          <div className="kpi-value text-white">{versionData.current_tag || `v${versionData.current_version}`}</div>
+          <div className="kpi-caption">
+            {versionData.update_available
+              ? 'Nueva versión oficial disponible en GitHub'
+              : 'Sincronizado con releases oficiales de GitHub'}
+          </div>
         </div>
 
-        {/* KPI 4: Conexión */}
+        {/* KPI 4: Estado del Motor */}
         <div className="home-kpi-card" data-testid="kpi-status">
           <div className="kpi-header">
             <span className="kpi-title">Estado del Motor</span>
-            <span className="kpi-status-badge badge-green">Online</span>
+            <span className={`kpi-status-badge ${healthData.healthy ? 'badge-green' : 'badge-amber'}`}>
+              {healthData.status}
+            </span>
           </div>
-          <div className="kpi-value text-green">Conectado</div>
-          <div className="kpi-caption">Enrutamiento reactivo de pools en funcionamiento</div>
+          <div className={`kpi-value ${healthData.healthy ? 'text-green' : 'text-amber'}`}>
+            {healthData.healthy ? 'Conectado' : 'Revisar'}
+          </div>
+          <div className="kpi-caption">
+            {healthData.healthy
+              ? 'Enrutamiento reactivo de pools en funcionamiento'
+              : 'Motor operando con advertencias o sin upstream'}
+          </div>
+        </div>
+
+        {/* KPI 5: Pools Soberanos Activos */}
+        <div className="home-kpi-card" data-testid="kpi-pools">
+          <div className="kpi-header">
+            <span className="kpi-title">Pools Soberanos</span>
+            <span className="kpi-status-badge badge-purple">
+              {poolCount > 0 ? `${poolCount} Activos` : 'Sin Pools'}
+            </span>
+          </div>
+          <div className="kpi-value text-purple">{poolCount} Pools</div>
+          <div className="kpi-caption">
+            {poolCount > 0
+              ? `${totalAccounts} cuentas totales balanceadas en RAM`
+              : 'Estructura tu primer pool en Crear Group / Perfiles'}
+          </div>
+        </div>
+
+        {/* KPI 6: Rescates 429 & Telemetría */}
+        <div className="home-kpi-card" data-testid="kpi-telemetry">
+          <div className="kpi-header">
+            <span className="kpi-title">Rotaciones & Rescates</span>
+            <span className="kpi-status-badge badge-blue">
+              {auditStats.failovers} Rescates
+            </span>
+          </div>
+          <div className="kpi-value text-accent">{auditStats.total_events} Eventos</div>
+          <div className="kpi-caption">
+            Historial de balanceo y protección ante caídas registrado en SQLite WAL
+          </div>
         </div>
       </div>
 
@@ -229,7 +396,12 @@ export default function HomeCenter({ onNavigateTab, onOpenLicenseModal }) {
             >
               <div className="home-menu-header">
                 <span className="home-menu-icon">{item.icon}</span>
-                <span className="home-menu-badge">{item.badge}</span>
+                <div className="home-menu-badge-group">
+                  {item.liveBadge && (
+                    <span className="home-menu-live-badge">{item.liveBadge}</span>
+                  )}
+                  <span className="home-menu-badge">{item.badge}</span>
+                </div>
               </div>
               <h3 className="home-menu-title">{item.title}</h3>
               <p className="home-menu-desc">{item.desc}</p>

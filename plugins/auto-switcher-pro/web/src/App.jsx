@@ -31,6 +31,9 @@ export default function App() {
 
     // 1. Prioridad: Inspección de pathname exacto del documento (esencial para iframe de CPAMC)
     const pathname = (window.location.pathname || '').toLowerCase();
+    if (pathname.includes('00-home') || pathname.includes('/home') || pathname.includes('/center') || pathname.endsWith('/00-home')) {
+      return 'home';
+    }
     if (pathname.includes('agent-matrix') || pathname.includes('matriz')) {
       return 'agent-matrix';
     }
@@ -73,30 +76,32 @@ export default function App() {
     // CPAMC Native Menus index mapping:
     // CPAMC expone páginas como #/plugin-pages/<plugin-name>/<index>
     // En CPAMC los menús se ordenan alfabéticamente por path:
-    // 0: /agent-matrix
-    // 1: /audit-log
-    // 2: /auto-auth-files
-    // 3: /control-switcher
-    // 4: /create-groups
-    // 5: /create-prefixes
-    // 6: /maintenance
-    // 7: /profiles
-    // 8: /pulse-tokens
-    // 9: /quick-guide
+    // 0: /00-home
+    // 1: /agent-matrix
+    // 2: /audit-log
+    // 3: /auto-auth-files
+    // 4: /control-switcher
+    // 5: /create-groups
+    // 6: /create-prefixes
+    // 7: /maintenance
+    // 8: /profiles
+    // 9: /pulse-tokens
+    // 10: /quick-guide
     const numIndexMatch = hash.match(/\/(\d+)(?:\b|\?|$)/);
     if (numIndexMatch) {
       const idx = parseInt(numIndexMatch[1], 10);
       switch (idx) {
-        case 0: return 'agent-matrix';
-        case 1: return 'audit-log';
-        case 2: return 'auto-auth-files';
-        case 3: return 'switcher';
-        case 4: return 'create-groups';
-        case 5: return 'create-prefixes';
-        case 6: return 'maintenance';
-        case 7: return 'profiles';
-        case 8: return 'tokens';
-        case 9: return 'quick-guide';
+        case 0: return 'home';
+        case 1: return 'agent-matrix';
+        case 2: return 'audit-log';
+        case 3: return 'auto-auth-files';
+        case 4: return 'switcher';
+        case 5: return 'create-groups';
+        case 6: return 'create-prefixes';
+        case 7: return 'maintenance';
+        case 8: return 'profiles';
+        case 9: return 'tokens';
+        case 10: return 'quick-guide';
         default: break;
       }
     }

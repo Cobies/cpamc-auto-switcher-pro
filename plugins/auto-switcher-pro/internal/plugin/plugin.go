@@ -228,8 +228,18 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 					"Path":        agentMatrixVersionRoutePath,
 					"Description": "Audita y compara la versión del arnés (instalación local vs npm oficial vs GitHub main)",
 				},
+				{
+					"Method":      http.MethodGet,
+					"Path":        versionRoutePath,
+					"Description": "Audita la versión instalada del plugin y sincronización con GitHub Releases",
+				},
 			},
 			"resources": []map[string]any{
+				{
+					"Path":        "/00-home",
+					"Menu":        "🏠 Inicio y Portada",
+					"Description": "Centro integral de control, métricas, estado de pools y accesos rápidos",
+				},
 				{
 					"Path":        "/create-groups",
 					"Menu":        "🛠️ Crear Group/Pefiles",
@@ -262,7 +272,7 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 				},
 				{
 					"Path":        "/maintenance",
-					"Menu":        "🩺 CPAMC Salud & Mantenimiento",
+					"Menu":        "🩺 CPAMC Salud y Mantenimiento",
 					"Description": "Diagnóstico, depuración de residuos y actualización segura de CPAMC Console",
 				},
 				{
@@ -272,12 +282,12 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 				},
 				{
 					"Path":        "/audit-log",
-					"Menu":        "📜 Bitácora & Caja Negra",
+					"Menu":        "📜 Bitácora · Caja Negra",
 					"Description": "Historial forense de rotaciones, rescates 429 e incidentes en disco (SQLite WAL)",
 				},
 				{
 					"Path":        "/agent-matrix",
-					"Menu":        "🎛️ Matriz de Agentes & Orquestación",
+					"Menu":        "🎛️ Matriz de Agentes · Orquestación",
 					"Description": "Control unificado de orquestadores y subagentes para Gentle-AI (OpenCode) y j0k3r-pi",
 				},
 			},
@@ -372,7 +382,7 @@ func MatchProfilesRoute(rawPath string) (subpath string, matched bool) {
 
 	matchedIdx := -1
 	for i, seg := range segments {
-		if seg == "home" || seg == "profiles" || seg == "center" || seg == "control-switcher" || seg == "pulse-tokens" || seg == "pulso-tokens" || seg == "create-prefixes" || seg == "create-groups" || seg == "auto-auth-files" || seg == "maintenance" || seg == "quick-guide" || seg == "audit-log" || seg == "agent-matrix" {
+		if seg == "00-home" || seg == "home" || seg == "profiles" || seg == "center" || seg == "control-switcher" || seg == "pulse-tokens" || seg == "pulso-tokens" || seg == "create-prefixes" || seg == "create-groups" || seg == "auto-auth-files" || seg == "maintenance" || seg == "quick-guide" || seg == "audit-log" || seg == "agent-matrix" {
 			matchedIdx = i
 			break
 		}
@@ -442,6 +452,11 @@ func HandleManagementHTTP(request []byte) ([]byte, error) {
 	// License management routes
 	if isLicensePath(req.Path) {
 		return handleLicenseHTTP(req)
+	}
+
+	// Plugin version and GitHub sync routes
+	if isVersionPath(req.Path) {
+		return handleVersionHTTP(req)
 	}
 
 	// Metrics telemetry routes

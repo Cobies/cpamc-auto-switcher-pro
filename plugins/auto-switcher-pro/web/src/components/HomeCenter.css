@@ -112,7 +112,7 @@
 /* KPI GRID */
 .home-kpi-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 16px;
 }
 
@@ -139,7 +139,7 @@
 }
 
 .kpi-title {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -152,6 +152,9 @@
   padding: 2px 8px;
   border-radius: 999px;
   text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .badge-green {
@@ -164,6 +167,26 @@
   background: rgba(56, 189, 248, 0.15);
   color: #38bdf8;
   border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.badge-amber {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.badge-purple {
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+.badge-update-link {
+  color: inherit;
+  text-decoration: none;
+}
+.badge-update-link:hover {
+  text-decoration: underline;
 }
 
 .kpi-copy-btn {
@@ -191,7 +214,7 @@
 
 .kpi-value.mono {
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  font-size: 16px;
+  font-size: 15px;
   letter-spacing: 0.5px;
 }
 
@@ -209,6 +232,14 @@
 
 .text-green {
   color: #10b981;
+}
+
+.text-amber {
+  color: #f59e0b;
+}
+
+.text-purple {
+  color: #a855f7;
 }
 
 .kpi-caption {
@@ -278,14 +309,30 @@
 
 .home-menu-icon {
   font-size: 24px;
-  line-height: 1;
+}
+
+.home-menu-badge-group {
+  display: flex;
+  gap: 6px;
+  align-items: center;
 }
 
 .home-menu-badge {
   font-size: 10px;
   font-weight: 700;
+  background: rgba(51, 65, 85, 0.8);
   color: #cbd5e1;
-  background: rgba(51, 65, 85, 0.6);
+  padding: 3px 8px;
+  border-radius: 6px;
+  letter-spacing: 0.3px;
+}
+
+.home-menu-live-badge {
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
   padding: 2px 7px;
   border-radius: 6px;
 }
@@ -294,7 +341,7 @@
   margin: 0;
   font-size: 15px;
   font-weight: 700;
-  color: #ffffff;
+  color: #f1f5f9;
 }
 
 .home-menu-desc {
@@ -308,17 +355,19 @@
 .home-menu-action {
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
   font-size: 12px;
   font-weight: 600;
   color: #38bdf8;
   margin-top: 4px;
-}
-
-.home-menu-card:hover .action-arrow {
-  transform: translateX(4px);
+  padding-top: 8px;
+  border-top: 1px solid rgba(51, 65, 85, 0.4);
 }
 
 .action-arrow {
   transition: transform 0.2s ease;
+}
+
+.home-menu-card:hover .action-arrow {
+  transform: translateX(4px);
 }

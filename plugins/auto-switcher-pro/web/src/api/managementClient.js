@@ -3070,10 +3070,56 @@ export async function fetchHarnessVersion(harnessId = 'gentle_shell', options = 
     throw new Error(data?.message || 'Error al obtener versión del arnés');
   }
   return data.data;
+}/**
+ * Consulta la versión del plugin Auto Switcher Pro y sincronización con GitHub Releases.
+ *
+ * @param {Object} [options]
+ */
+export async function fetchPluginVersion(options = {}) {
+  const res = await apiFetch('/v0/management/auto-switcher-pro/version', {
+    ...options,
+    method: 'GET',
+  });
+  return res.json();
 }
 
+/**
+ * Consulta el estado y salud del motor (Healthz check).
+ *
+ * @param {Object} [options]
+ */
+export async function fetchPluginHealth(options = {}) {
+  const res = await apiFetch('/v0/management/auto-switcher-pro/healthz', {
+    ...options,
+    method: 'GET',
+  });
+  return res.json();
+}
 
+/**
+ * Consulta el resumen agregador O(1) de pools, cuentas, telemetría y líderes en RAM.
+ *
+ * @param {Object} [options]
+ */
+export async function fetchManifest(options = {}) {
+  const res = await apiFetch('/v0/management/auto-switcher-pro/manifest', {
+    ...options,
+    method: 'GET',
+  });
+  return res.json();
+}
 
-
+/**
+ * Consulta el estado de licencia y Machine ID de hardware.
+ *
+ * @param {Object} [options]
+ */
+export async function fetchLicenseStatus(options = {}) {
+  const res = await apiFetch('/v0/management/auto-switcher-pro/license/status', {
+    ...options,
+    method: 'GET',
+  });
+  return res.json();
+}
 
 
