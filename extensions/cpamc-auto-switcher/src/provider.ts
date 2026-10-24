@@ -149,6 +149,7 @@ let cachedFilterData: {
     activeBareProviders: Set<string>;
     bareExclusions: Set<string>;
     registeredPoolBases: Set<string>;
+    confirmedActivePools: Set<string>;
 } | null = null;
 let lastKnownEpoch: string | null = null;
 
@@ -1014,7 +1015,9 @@ export function initDynamicProvider(pi: ExtensionAPI): void {
                 if (Array.isArray(models) && models.length > 0) {
                     saveCachedModels(models);
                 }
-            } catch {}
+            } catch {
+                // Background hot-reload failures are transient and safe to ignore
+            }
         }, 75);
         debounceTimer.unref?.();
     };
@@ -1046,7 +1049,9 @@ export function initDynamicProvider(pi: ExtensionAPI): void {
         if (cwd) {
             projectIdentity = createHash("sha256").update(cwd).digest("hex").slice(0, 16);
         }
-    } catch {}
+    } catch {
+        // Fallback to empty project identity if cwd is unresolvable
+    }
 
     pi.registerProvider(PROVIDER_ID, {
         name: "CPAMC",
