@@ -4,12 +4,16 @@ on:
   push:
     branches:
       - main
-    paths:
-      - 'plugins/auto-switcher-pro/internal/version/version.go'
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
+      - '.gitattributes'
+      - 'LICENSE'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'New release version tag (e.g. v0.1.0, must strictly match vX.Y.Z)'
+        description: 'Explicit release version tag (e.g. v0.1.2 or v0.2.0, must strictly match vX.Y.Z)'
         required: false
         type: string
 
@@ -18,7 +22,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -26,18 +30,19 @@ jobs:
     runs-on: ubuntu-latest
     if: (github.repository == 'WiloxDev/cpamc-auto-switcher-pro' || github.repository == 'gonzalez962/cpamc-auto-switcher') && github.ref == 'refs/heads/main'
     permissions:
-      contents: read
+      contents: write
     outputs:
-      tag: ${{ steps.validate.outputs.tag }}
-      version: ${{ steps.validate.outputs.version }}
-      commit_sha: ${{ steps.validate.outputs.commit_sha }}
+      tag: ${{ steps.resolve_tag.outputs.tag }}
+      version: ${{ steps.resolve_tag.outputs.version }}
+      commit_sha: ${{ steps.resolve_tag.outputs.commit_sha }}
+      should_release: ${{ steps.resolve_tag.outputs.should_release }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Verify repository, branch, and resolve tag
+      - name: Verify repository, branch, and resolve tag via semantic commits
         id: resolve_tag
         env:
           REPO: ${{ github.repository }}
@@ -56,9 +61,54 @@ jobs:
 
           if [ -n "${INPUT_TAG}" ]; then
             RESOLVED_TAG="${INPUT_TAG}"
+            echo "Using manual input tag: ${RESOLVED_TAG}"
           else
-            DETECTED_VER=$(grep -E 'const Version = "[^"]+"' plugins/auto-switcher-pro/internal/version/version.go | sed -E 's/.*"([^"]+)".*/\1/')
-            RESOLVED_TAG="v${DETECTED_VER}"
+            # Fetch all tags from origin
+            git fetch --tags --force origin 2>/dev/null || true
+            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.1.0")
+            echo "Latest existing git tag: ${LATEST_TAG}"
+
+            BASE_VER="${LATEST_TAG#v}"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "${BASE_VER}"
+
+            COMMITS=$(git log "${LATEST_TAG}..HEAD" --format="%s")
+            if [ -z "${COMMITS}" ]; then
+              echo "No new commits since ${LATEST_TAG}. Skipping release."
+              echo "should_release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            BUMP="patch"
+            while IFS= read -r line; do
+              [ -z "$line" ] && continue
+              if [[ "$line" =~ BREAKING[[:space:]]CHANGE || "$line" =~ ^[a-z]+(\([^\)]+\))?!: ]]; then
+                BUMP="major"
+                break
+              elif [[ "$line" =~ ^feat(\([^\)]+\))?: ]]; then
+                if [ "$BUMP" != "major" ]; then
+                  BUMP="minor"
+                fi
+              elif [[ "$line" =~ ^fix(\([^\)]+\))?: || "$line" =~ ^perf(\([^\)]+\))?: || "$line" =~ ^refactor(\([^\)]+\))?: ]]; then
+                if [ "$BUMP" != "major" ] && [ "$BUMP" != "minor" ]; then
+                  BUMP="patch"
+                fi
+              fi
+            done <<< "${COMMITS}"
+
+            echo "Calculated SemVer bump type: ${BUMP}"
+            case "${BUMP}" in
+              major)
+                NEW_VERSION="$((MAJOR + 1)).0.0"
+                ;;
+              minor)
+                NEW_VERSION="${MAJOR}.$((MINOR + 1)).0"
+                ;;
+              patch)
+                NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+                ;;
+            esac
+
+            RESOLVED_TAG="v${NEW_VERSION}"
           fi
 
           if [[ ! "${RESOLVED_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -66,13 +116,20 @@ jobs:
             exit 1
           fi
 
-          echo "resolved_tag=${RESOLVED_TAG}" >> "$GITHUB_OUTPUT"
-          echo "Resolved release tag: ${RESOLVED_TAG}"
+          VERSION="${RESOLVED_TAG#v}"
+          COMMIT_SHA=$(git rev-parse HEAD)
 
-      - name: Validate tag, pin commit to main, check parity and collisions
+          echo "tag=${RESOLVED_TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "commit_sha=${COMMIT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+          echo "Resolved release tag: ${RESOLVED_TAG} (version: ${VERSION})"
+
+      - name: Validate tag collision and commit ancestry
         id: validate
+        if: steps.resolve_tag.outputs.should_release == 'true'
         env:
-          RESOLVED_TAG: ${{ steps.resolve_tag.outputs.resolved_tag }}
+          TAG: ${{ steps.resolve_tag.outputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           DISPATCH_SHA: ${{ github.sha }}
@@ -80,17 +137,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          TAG="${RESOLVED_TAG}"
-
-          # 1. Validate tag format strictly matching vX.Y.Z
-          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Tag '${TAG}' does not match expected format vX.Y.Z (e.g. v0.1.0)"
-            exit 1
-          fi
-
-          VERSION="${TAG#v}"
-
-          # 2. Pin checked-out commit SHA and verify alignment with workflow SHA on main
+          # 1. Pin checked-out commit SHA and verify alignment with workflow SHA on main
           COMMIT_SHA=$(git rev-parse HEAD)
           if [ -n "${DISPATCH_SHA}" ] && [ "${COMMIT_SHA}" != "${DISPATCH_SHA}" ]; then
             echo "::error::Checked-out SHA ${COMMIT_SHA} does not match dispatch SHA ${DISPATCH_SHA}."
@@ -105,7 +152,7 @@ jobs:
             exit 1
           fi
 
-          # 3. Check for existing remote tag collision (fail-closed)
+          # 2. Check for existing remote tag collision (fail-closed)
           set +e
           TAG_CHECK_OUTPUT=$(git ls-remote --exit-code origin "refs/tags/${TAG}" "refs/tags/${TAG}^{}" 2>&1)
           TAG_CHECK_EXIT=$?
@@ -126,7 +173,7 @@ jobs:
             exit 1
           fi
 
-          # 4. Check for existing GitHub Release collision (no-clobber, fail-closed)
+          # 3. Check for existing GitHub Release collision (no-clobber, fail-closed)
           set +e
           RELEASE_API_OUTPUT=$(gh api "repos/${REPO}/releases/tags/${TAG}" 2>&1)
           API_EXIT=$?
@@ -142,24 +189,55 @@ jobs:
             exit 1
           fi
 
-          # 5. Check internal Go plugin version
-          GO_VERSION=$(grep -E 'const Version = "[^"]+"' plugins/auto-switcher-pro/internal/version/version.go | sed -E 's/.*"([^"]+)".*/\1/')
-          if [ "${GO_VERSION}" != "${VERSION}" ]; then
-            echo "::error::Version mismatch: tag specifies '${VERSION}', but plugins/auto-switcher-pro/internal/version/version.go specifies '${GO_VERSION}'"
-            exit 1
-          fi
+          echo "Validation succeeded for new tag ${TAG} at commit ${COMMIT_SHA}"
 
-          # 6. Check web package.json version
-          WEB_VERSION=$(node -p "require('./plugins/auto-switcher-pro/web/package.json').version" 2>/dev/null || grep -E '"version":' plugins/auto-switcher-pro/web/package.json | head -n 1 | sed -E 's/.*"version": "([^"]+)".*/\1/')
-          if [ "${WEB_VERSION}" != "${VERSION}" ]; then
-            echo "::error::Version mismatch: tag specifies '${VERSION}', but plugins/auto-switcher-pro/web/package.json specifies '${WEB_VERSION}'"
-            exit 1
-          fi
+      - name: Synchronize version files across Go and Web
+        if: steps.resolve_tag.outputs.should_release == 'true'
+        env:
+          NEW_VERSION: ${{ steps.resolve_tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          echo "==> Synchronizing project versions to ${NEW_VERSION}..."
 
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "commit_sha=${COMMIT_SHA}" >> "$GITHUB_OUTPUT"
-          echo "Validation succeeded for new tag ${TAG} (version ${VERSION}) at commit ${COMMIT_SHA}"
+          # Update Go internal version
+          sed -i -E "s/const Version = \"[^\"]+\"/const Version = \"${NEW_VERSION}\"/" plugins/auto-switcher-pro/internal/version/version.go
+
+          # Update Web package.json
+          node -e "
+            const fs = require('fs');
+            const p = './plugins/auto-switcher-pro/web/package.json';
+            const pkg = JSON.parse(fs.readFileSync(p, 'utf8'));
+            pkg.version = '${NEW_VERSION}';
+            fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+          # Update Web package-lock.json if present
+          node -e "
+            const fs = require('fs');
+            const p = './plugins/auto-switcher-pro/web/package-lock.json';
+            if (fs.existsSync(p)) {
+              const pkg = JSON.parse(fs.readFileSync(p, 'utf8'));
+              pkg.version = '${NEW_VERSION}';
+              if (pkg.packages && pkg.packages['']) {
+                pkg.packages[''].version = '${NEW_VERSION}';
+              }
+              fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + '\n');
+            }
+          "
+
+          # Update Extension package.json if present
+          node -e "
+            const fs = require('fs');
+            const p = './extensions/cpamc-auto-switcher/package.json';
+            if (fs.existsSync(p)) {
+              const pkg = JSON.parse(fs.readFileSync(p, 'utf8'));
+              pkg.version = '${NEW_VERSION}';
+              fs.writeFileSync(p, JSON.stringify(pkg, null, 2) + '\n');
+            }
+          "
+
+          echo "Synchronized version to ${NEW_VERSION}:"
+          git diff plugins/auto-switcher-pro/internal/version/version.go plugins/auto-switcher-pro/web/package.json
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -183,37 +261,41 @@ jobs:
         run: npm test -- --run
 
       - name: Build web assets
+        if: steps.resolve_tag.outputs.should_release == 'true'
         working-directory: plugins/auto-switcher-pro/web
         run: npm run build
 
-      - name: Verify committed web assets match generated UI
-        run: git diff --exit-code -- plugins/auto-switcher-pro/internal/web/assets/index.html
-
       - name: Run Go tests
+        if: steps.resolve_tag.outputs.should_release == 'true'
         working-directory: plugins/auto-switcher-pro
         run: go test -v ./...
 
       - name: Build Linux amd64 shared library
+        if: steps.resolve_tag.outputs.should_release == 'true'
         run: |
           ./scripts/build-plugin.sh amd64
           test -f bin/auto-switcher-pro-linux-amd64.so
 
       - name: Install arm64 and windows cross-compilation toolchains
+        if: steps.resolve_tag.outputs.should_release == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross gcc-mingw-w64-x86-64
 
       - name: Build Linux arm64 shared library
+        if: steps.resolve_tag.outputs.should_release == 'true'
         run: |
           ./scripts/build-plugin.sh arm64
           test -f bin/auto-switcher-pro-linux-arm64.so
 
       - name: Build Windows amd64 shared library (.dll)
+        if: steps.resolve_tag.outputs.should_release == 'true'
         run: |
           ./scripts/build-plugin.sh windows-amd64
           test -f bin/auto-switcher-pro-windows-amd64.dll
 
       - name: Verify ELF binary architecture and glibc linkage
+        if: steps.resolve_tag.outputs.should_release == 'true'
         working-directory: bin
         run: |
           set -euo pipefail
@@ -253,6 +335,7 @@ jobs:
           echo "Binary verification succeeded for Linux amd64, Linux arm64, and Windows amd64."
 
       - name: Upload Linux amd64 binary artifact (.so only)
+        if: steps.resolve_tag.outputs.should_release == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: auto-switcher-pro-linux-amd64
@@ -260,6 +343,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload Linux arm64 binary artifact (.so only)
+        if: steps.resolve_tag.outputs.should_release == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: auto-switcher-pro-linux-arm64
@@ -267,6 +351,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload Windows amd64 binary artifact (.dll only)
+        if: steps.resolve_tag.outputs.should_release == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: auto-switcher-pro-windows-amd64
@@ -279,7 +364,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    if: github.repository == 'WiloxDev/cpamc-auto-switcher-pro' || github.repository == 'gonzalez962/cpamc-auto-switcher'
+    if: (github.repository == 'WiloxDev/cpamc-auto-switcher-pro' || github.repository == 'gonzalez962/cpamc-auto-switcher') && needs.build.outputs.should_release == 'true'
     steps:
       - name: Verify repository authorization
         env:
