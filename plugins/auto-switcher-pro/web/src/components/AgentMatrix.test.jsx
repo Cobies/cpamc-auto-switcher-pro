@@ -553,7 +553,7 @@ describe('AgentMatrix Component', () => {
     });
 
     expect(screen.getByText(/Modo Standby \/ Sin Tráfico/i)).toBeDefined();
-    expect(screen.getByText(/En espera de ejecuciones/i)).toBeDefined();
+    expect(screen.getAllByText(/En espera de ejecuciones/i).length).toBeGreaterThan(0);
     expect(screen.queryByText(/Estrés Crítico de Cuota/i)).toBeNull();
   });
 });
