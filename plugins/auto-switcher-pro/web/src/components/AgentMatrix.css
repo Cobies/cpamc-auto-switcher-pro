@@ -548,12 +548,34 @@
 .agent-name-cell {
   font-weight: 600;
   color: #e2e8f0;
+  cursor: help;
+  vertical-align: middle;
 }
 
-.agent-desc-sub {
+.agent-name-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: nowrap;
+}
+
+.agent-title-text {
+  font-weight: 700;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.agent-info-tip {
   font-size: 11px;
-  color: #64748b;
-  margin-top: 2px;
+  opacity: 0.45;
+  cursor: help;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  user-select: none;
+}
+
+.agent-name-cell:hover .agent-info-tip {
+  opacity: 1;
+  transform: scale(1.15);
 }
 
 /* Custom Select Dropdowns */

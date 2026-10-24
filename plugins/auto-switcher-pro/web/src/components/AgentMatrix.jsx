@@ -738,17 +738,18 @@ export default function AgentMatrix() {
             const meta = getAgentHumanMeta(a);
             const isWriter = isWriterAgent(a);
             const isOrch = a.is_orchestrator;
+            const agentDesc = a.description || meta.summary;
 
             return (
               <tr key={a.agent_id} className={isOrch ? 'orchestrator-row' : ''}>
-                <td className="agent-name-cell">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                    <span style={{ fontWeight: 700, color: isOrch ? '#f59e0b' : '#e2e8f0' }}>
+                <td className="agent-name-cell" title={agentDesc}>
+                  <div className="agent-name-wrap">
+                    <span className="agent-title-text" style={{ color: isOrch ? '#f59e0b' : '#e2e8f0' }}>
                       {a.displayName || a.agent_id}
                     </span>
                     <span className={`agent-role-chip ${meta.badgeClass}`}>{meta.badge}</span>
+                    <span className="agent-info-tip" title={agentDesc}>ℹ️</span>
                   </div>
-                  <div className="agent-desc-sub">{a.description || meta.summary}</div>
                 </td>
                 <td>
                   <select
