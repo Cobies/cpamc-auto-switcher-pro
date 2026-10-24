@@ -484,6 +484,11 @@ func HandleManagementHTTP(request []byte) ([]byte, error) {
 		return handleHealthHTTP(req)
 	}
 
+	// Self-healing integrity audit routes
+	if isSelfHealingPath(req.Path) {
+		return handleSelfHealingHTTP(req)
+	}
+
 	// Readiness check routes
 	if isReadyPath(req.Path) {
 		return handleReadyHTTP(req)
@@ -497,6 +502,11 @@ func HandleManagementHTTP(request []byte) ([]byte, error) {
 	// Audit log & flight recorder routes
 	if isAuditLogPath(req.Path) {
 		return handleAuditLogHTTP(req)
+	}
+
+	// Telemetry anonymous trace export for deterministic 429 replay
+	if isTelemetryTracePath(req.Path) {
+		return handleTelemetryTraceHTTP(req)
 	}
 
 	// Agent matrix & orchestration routes

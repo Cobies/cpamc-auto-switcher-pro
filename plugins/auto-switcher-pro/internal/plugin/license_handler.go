@@ -2,11 +2,14 @@ package plugin
 
 import (
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/user"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"auto-switcher-pro/internal/license"
 )
@@ -15,21 +18,41 @@ func isLicensePath(path string) bool {
 	return strings.Contains(path, "/auto-switcher-pro/license/")
 }
 
-// getLocalManagementKey resolves the local management key from env or disk storage.
+var (
+	mgmtKeyWarnOnce sync.Once
+)
+
+// getLocalManagementKey resolves the local management key from env or disk storage,
+// logging explicit audit diagnostics when operating in degraded fallback mode.
 func getLocalManagementKey() string {
+	key, source, warnMsg := getLocalManagementKeyResolution()
+	if warnMsg != "" {
+		mgmtKeyWarnOnce.Do(func() {
+			log.Printf("[AutoSwitcher] %s", warnMsg)
+		})
+	} else if source != "" {
+		mgmtKeyWarnOnce.Do(func() {
+			log.Printf("[AutoSwitcher] Clave de gestión local resuelta con éxito (origen: %s)", source)
+		})
+	}
+	return key
+}
+
+// getLocalManagementKeyResolution evaluates candidates returning the resolved key, its source and audit warning.
+func getLocalManagementKeyResolution() (key string, source string, warnMsg string) {
 	// 1. Environment variables
 	if k := os.Getenv("CLIPROXY_MANAGEMENT_KEY"); strings.TrimSpace(k) != "" {
-		return strings.TrimSpace(k)
+		return strings.TrimSpace(k), "env:CLIPROXY_MANAGEMENT_KEY", ""
 	}
 	if k := os.Getenv("CPAMC_MANAGEMENT_KEY"); strings.TrimSpace(k) != "" {
-		return strings.TrimSpace(k)
+		return strings.TrimSpace(k), "env:CPAMC_MANAGEMENT_KEY", ""
 	}
 
-	// 2. ~/.cliproxy_management_key
+	// 2. ~/.cliproxy_management_key (canonical user home)
 	if u, err := user.Current(); err == nil && u.HomeDir != "" {
 		p := filepath.Join(u.HomeDir, ".cliproxy_management_key")
 		if data, err := os.ReadFile(p); err == nil && len(strings.TrimSpace(string(data))) > 0 {
-			return strings.TrimSpace(string(data))
+			return strings.TrimSpace(string(data)), "disk:home", ""
 		}
 	}
 
@@ -40,11 +63,13 @@ func getLocalManagementKey() string {
 		"/tmp/.cliproxy_management_key",
 	} {
 		if data, err := os.ReadFile(p); err == nil && len(strings.TrimSpace(string(data))) > 0 {
-			return strings.TrimSpace(string(data))
+			return strings.TrimSpace(string(data)), fmt.Sprintf("disk_fallback:%s", p),
+				fmt.Sprintf("ℹ️ Operando con clave de gestión desde ruta de fallback: %s. En Docker, se recomienda definir CLIPROXY_MANAGEMENT_KEY o montar el volumen de usuario.", p)
 		}
 	}
 
-	return ""
+	return "", "none", "⚠️ [MODO DEGRADADO] No se encontró la clave de gestión local de CPAMC. " +
+		"Verifique que ~/.cliproxy_management_key exista o configure CLIPROXY_MANAGEMENT_KEY en el entorno para evitar fallbacks silenciosos."
 }
 
 func handleLicenseHTTP(req ManagementRequestPayload) ([]byte, error) {

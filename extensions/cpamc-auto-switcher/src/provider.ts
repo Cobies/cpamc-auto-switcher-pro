@@ -444,17 +444,34 @@ function toPiModelFromOpenAI(model: FallbackOpenAIModel, poolLabels?: Map<string
     };
 }
 
-function resolveManagementKey(): string {
+let mgmtKeyWarningLogged = false;
+
+export type ManagementKeyResolution = {
+    key: string;
+    source: "disk_canonical" | "disk_agent" | "env" | "none";
+    resolvedPath?: string;
+    warning?: string;
+};
+
+export function resolveManagementKeyWithDiagnostics(): ManagementKeyResolution {
+    const home = homedir();
+    const canonicalPath = join(home, ".cliproxy_management_key");
+    if (existsSync(canonicalPath)) {
+        try {
+            const diskKey = readFileSync(canonicalPath, "utf-8").trim();
+            if (diskKey) {
+                return { key: diskKey, source: "disk_canonical", resolvedPath: canonicalPath };
+            }
+        } catch {}
+    }
+
     const keyCandidates = new Set<string>();
     if (process.env.PI_CODING_AGENT_DIR) {
         keyCandidates.add(join(process.env.PI_CODING_AGENT_DIR, ".cliproxy_management_key"));
     }
-    const home = homedir();
-    keyCandidates.add(join(home, ".cliproxy_management_key"));
     keyCandidates.add(join(home, ".gentle-shell", "agent", ".cliproxy_management_key"));
     keyCandidates.add(join(home, ".pi", "agent", ".cliproxy_management_key"));
 
-    // Búsqueda dinámica en cualquier subdirectorio agent* de ~/.pi/ sin nombres de usuario hardcodeados
     const piDir = join(home, ".pi");
     if (existsSync(piDir)) {
         try {
@@ -471,11 +488,46 @@ function resolveManagementKey(): string {
         try {
             if (existsSync(keyFile)) {
                 const diskKey = readFileSync(keyFile, "utf-8").trim();
-                if (diskKey) return diskKey;
+                if (diskKey) {
+                    return {
+                        key: diskKey,
+                        source: "disk_agent",
+                        resolvedPath: keyFile,
+                        warning: `Operando con clave de gestión desde subdirectorio secundario: ${keyFile}`,
+                    };
+                }
             }
         } catch {}
     }
-    return (process.env.CLIPROXYAPI_MANAGEMENT_KEY || "").trim();
+
+    const envKey = (process.env.CLIPROXYAPI_MANAGEMENT_KEY || process.env.CLIPROXY_MANAGEMENT_KEY || "").trim();
+    if (envKey) {
+        return {
+            key: envKey,
+            source: "env",
+            warning: "Operando con clave de gestión provista exclusivamente por variable de entorno.",
+        };
+    }
+
+    return {
+        key: "",
+        source: "none",
+        warning: "[MODO DEGRADADO] No se encontró clave de gestión de CPAMC (.cliproxy_management_key ni CLIPROXYAPI_MANAGEMENT_KEY). " +
+                 "Si corre en Docker: monte ~/.cliproxy_management_key o declare CLIPROXYAPI_MANAGEMENT_KEY para evitar fallbacks silenciosos.",
+    };
+}
+
+export function resolveManagementKey(): string {
+    const res = resolveManagementKeyWithDiagnostics();
+    if (res.warning && !mgmtKeyWarningLogged) {
+        mgmtKeyWarningLogged = true;
+        if (res.source === "none") {
+            console.warn(`[AutoSwitcher] ⚠️ ${res.warning}`);
+        } else {
+            console.info(`[AutoSwitcher] ℹ️ ${res.warning}`);
+        }
+    }
+    return res.key;
 }
 
 type AuthFileSummary = {

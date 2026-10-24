@@ -23,12 +23,13 @@ const (
 
 // HealthStatus represents the health check response.
 type HealthStatus struct {
-	Healthy         bool   `json:"healthy"`
-	UpstreamLatency int64  `json:"upstream_latency_ms,omitempty"`
-	ActivePools     int    `json:"active_pools"`
-	LicenseStatus   string `json:"license"`
-	Reason          string `json:"reason,omitempty"`
-	Timestamp       string `json:"timestamp"`
+	Healthy         bool               `json:"healthy"`
+	UpstreamLatency int64              `json:"upstream_latency_ms,omitempty"`
+	ActivePools     int                `json:"active_pools"`
+	LicenseStatus   string             `json:"license"`
+	Reason          string             `json:"reason,omitempty"`
+	Timestamp       string             `json:"timestamp"`
+	SelfHealing     *SelfHealingReport `json:"self_healing,omitempty"`
 }
 
 // ReadyStatus represents the readiness check response.
@@ -384,12 +385,15 @@ func handleHealthHTTP(req ManagementRequestPayload) ([]byte, error) {
 
 	healthy := licValid && upstreamHealthy
 
+	selfHealing := GenerateSelfHealingReport()
+
 	status := HealthStatus{
 		Healthy:         healthy,
 		UpstreamLatency: 0, // Fast in-memory resolution (sub-millisecond)
 		ActivePools:     activePools,
 		LicenseStatus:   mapLicenseStatus(licStatus),
 		Timestamp:       time.Now().UTC().Format(time.RFC3339),
+		SelfHealing:     &selfHealing,
 	}
 
 	if !healthy {

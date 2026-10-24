@@ -118,4 +118,18 @@ func TestLicenseHTTP_StatusAndValidation(t *testing.T) {
 			t.Errorf("expected test-secret-management-key, got %v", res["management_key"])
 		}
 	})
+
+	t.Run("getLocalManagementKeyResolution explicit audit logging", func(t *testing.T) {
+		t.Setenv("CLIPROXY_MANAGEMENT_KEY", "env-test-key-123")
+		k, src, warn := getLocalManagementKeyResolution()
+		if k != "env-test-key-123" {
+			t.Errorf("expected env-test-key-123, got %s", k)
+		}
+		if src != "env:CLIPROXY_MANAGEMENT_KEY" {
+			t.Errorf("expected env:CLIPROXY_MANAGEMENT_KEY, got %s", src)
+		}
+		if warn != "" {
+			t.Errorf("expected empty warning on direct env match, got %s", warn)
+		}
+	})
 }

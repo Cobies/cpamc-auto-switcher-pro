@@ -9,10 +9,36 @@ import (
 	"auto-switcher-pro/internal/analytics"
 )
 
-const auditLogRoutePath = "/auto-switcher-pro/audit-log"
+const (
+	auditLogRoutePath       = "/auto-switcher-pro/audit-log"
+	telemetryTraceRoutePath = "/auto-switcher-pro/telemetry/export-trace"
+)
 
 func isAuditLogPath(path string) bool {
 	return strings.Contains(path, auditLogRoutePath)
+}
+
+func isTelemetryTracePath(path string) bool {
+	return strings.Contains(path, telemetryTraceRoutePath)
+}
+
+func handleTelemetryTraceHTTP(req ManagementRequestPayload) ([]byte, error) {
+	method := strings.ToUpper(strings.TrimSpace(req.Method))
+	if method != http.MethodGet && method != http.MethodHead {
+		return jsonManagementResponse(http.StatusMethodNotAllowed, map[string]string{
+			"error":   "method_not_allowed",
+			"message": "only GET and HEAD methods are supported",
+		})
+	}
+
+	trace, err := analytics.ExportAnonymousTrace(100)
+	if err != nil {
+		return jsonManagementResponse(http.StatusInternalServerError, map[string]string{
+			"error":   "export_failed",
+			"message": err.Error(),
+		})
+	}
+	return jsonManagementResponse(http.StatusOK, trace)
 }
 
 // TimelineItem represents a unified time-machine event for session observability.

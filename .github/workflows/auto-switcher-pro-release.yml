@@ -471,10 +471,56 @@ jobs:
           fi
           echo "Verified target commit ${TARGET_COMMIT} is contained in origin/main (${MAIN_COMMIT})."
 
-          # 4. Generate release notes
+          # 4. Generate forensic categorized changelog
+          PREV_TAG=$(git describe --tags --abbrev=0 "${TARGET_COMMIT}^" 2>/dev/null || true)
+          if [ -n "${PREV_TAG}" ]; then
+            CHANGELOG_RANGE="${PREV_TAG}..${TARGET_COMMIT}"
+          else
+            CHANGELOG_RANGE="${TARGET_COMMIT}"
+          fi
+
+          COMMITS_RAW=$(git log ${CHANGELOG_RANGE} --pretty=format:"%h - %s (%an)" 2>/dev/null || true)
+
+          SEC_COMMITS=""
+          RAM_COMMITS=""
+          COMMUNITY_COMMITS=""
+          MAINT_COMMITS=""
+
+          while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            lower=$(echo "$line" | tr '[:upper:]' '[:lower:]')
+            if [[ "$lower" =~ sec|license|ring|token|auth|caddy|hardening|ed25519 ]]; then
+              SEC_COMMITS="${SEC_COMMITS}- ${line}\n"
+            elif [[ "$lower" =~ pool|routing|ram|quota|matrix|cache|failover|affinity|predictive ]]; then
+              RAM_COMMITS="${RAM_COMMITS}- ${line}\n"
+            elif [[ "$lower" =~ cobies|totopo|gonzalez|pull\ request|\#[0-9]+ ]]; then
+              COMMUNITY_COMMITS="${COMMUNITY_COMMITS}- ${line}\n"
+            else
+              MAINT_COMMITS="${MAINT_COMMITS}- ${line}\n"
+            fi
+          done <<< "${COMMITS_RAW}"
+
+          # 5. Generate release notes
           {
             printf '## Auto Switcher Pro Plugin %s\n\n' "${RELEASE_TAG}"
             printf 'Pre-built Linux amd64/arm64 (.so), Windows amd64 (.dll), and macOS Apple Silicon M1-M4 (.dylib) shared libraries for CLIProxyAPI `auto-switcher-pro` plugin.\n\n'
+            printf '### 🔬 Changelog Forense & Trazabilidad de Ingeniería\n\n'
+            if [ -n "${SEC_COMMITS}" ]; then
+              printf '#### 🛡️ Seguridad & Anillo Criptográfico (Ed25519 Ring)\n'
+              printf '%b\n' "${SEC_COMMITS}"
+            fi
+            if [ -n "${RAM_COMMITS}" ]; then
+              printf '#### ⚡ Ruteo en RAM & Prompt Cache (Zero Disk Mutation)\n'
+              printf '%b\n' "${RAM_COMMITS}"
+            fi
+            if [ -n "${COMMUNITY_COMMITS}" ]; then
+              printf '#### 🤝 Contribuciones de la Comunidad & Gobernanza\n'
+              printf '%b\n' "${COMMUNITY_COMMITS}"
+            fi
+            if [ -n "${MAINT_COMMITS}" ]; then
+              printf '#### 🛠️ Mantenimiento, CI & Calidad\n'
+              printf '%b\n' "${MAINT_COMMITS}"
+            fi
             printf '### Artifacts\n'
             printf -- '- `auto-switcher-pro-linux-amd64.so`: Linux amd64 shared library plugin (`-buildmode=c-shared`)\n'
             printf -- '- `auto-switcher-pro-linux-amd64.so.sha256`: SHA-256 checksum for Linux amd64 binary\n'
@@ -495,7 +541,10 @@ jobs:
             printf -- '- **Branch**: `main`\n'
             printf -- '- **Go Version**: 1.22\n'
             printf -- '- **Node Version**: 20\n\n'
-            printf '### Verification\n'
+            printf '### 📋 Hashes SHA-256 Verificados\n```\n'
+            cat release-assets/*.sha256
+            printf '```\n\n'
+            printf '### Verification Instructions\n'
             printf '```bash\n'
             printf '# For Linux amd64:\n'
             printf 'sha256sum -c auto-switcher-pro-linux-amd64.so.sha256\n\n'

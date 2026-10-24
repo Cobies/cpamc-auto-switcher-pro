@@ -28,7 +28,7 @@ export async function resolve(specifier, context, nextResolve) {
 
 register("data:text/javascript," + encodeURIComponent(loaderCode));
 
-const { isCleanIncludedModel, buildPoolLabelMap, reconcileActivePoolFacades, initDynamicProvider } = await import("./provider.js");
+const { isCleanIncludedModel, buildPoolLabelMap, reconcileActivePoolFacades, initDynamicProvider, resolveManagementKeyWithDiagnostics } = await import("./provider.js");
 
 describe("Dynamic Provider Filtering & Granular Coexistence", () => {
     const mockFilterData = {
@@ -168,5 +168,21 @@ describe("Dynamic Provider Filtering & Granular Coexistence", () => {
         assert.equal(registeredProviderConfig.headers["x-workspace-root"], process.cwd());
         assert.equal(typeof registeredProviderConfig.headers["x-project-identity"], "string");
         assert.equal(registeredProviderConfig.headers["x-project-identity"].length, 16);
+    });
+
+    it("evaluates management key resolution and detects env fallback and none cleanly", () => {
+        const originalEnv = process.env.CLIPROXYAPI_MANAGEMENT_KEY;
+        try {
+            process.env.CLIPROXYAPI_MANAGEMENT_KEY = "test-env-key-secret";
+            const res = resolveManagementKeyWithDiagnostics();
+            assert.ok(res.key, "key should be resolved");
+            assert.ok(res.source, "source should be defined");
+        } finally {
+            if (originalEnv) {
+                process.env.CLIPROXYAPI_MANAGEMENT_KEY = originalEnv;
+            } else {
+                delete process.env.CLIPROXYAPI_MANAGEMENT_KEY;
+            }
+        }
     });
 });

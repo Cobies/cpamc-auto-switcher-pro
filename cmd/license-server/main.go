@@ -23,6 +23,36 @@ import (
 // ADMIN_TOKEN y PRIVATE_SEED_HEX se inyectan obligatoriamente vía entorno (.env).
 // Si faltan, el servidor aborta el arranque de inmediato.
 
+const (
+	MasterPublicKeyHexV2 = "8c310a1ee2a8e20d6222e717762b696d0bb0a7ea516dfd79a857f39aff98fabb"
+	MasterPublicKeyHexV1 = "5703fbe52952c260651807d527db5e6021b38cdb40f4ff7ef5b898f3288ab1e1"
+)
+
+func validateAdminToken(token string) error {
+	trimmed := strings.TrimSpace(token)
+	if len(trimmed) < 24 {
+		return fmt.Errorf("ADMIN_TOKEN debe tener al menos 24 caracteres de entropía criptográfica (recibidos: %d)", len(trimmed))
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.Contains(lower, "admin") || strings.Contains(lower, "password") || strings.Contains(lower, "cambiar") || strings.Contains(lower, "example") || strings.Contains(lower, "secret") {
+		return fmt.Errorf("ADMIN_TOKEN contiene patrones de prueba o valores de ejemplo inseguros")
+	}
+	return nil
+}
+
+func evaluateSeedRing(privKey ed25519.PrivateKey) (string, string) {
+	pub := privKey.Public().(ed25519.PublicKey)
+	pubHex := hex.EncodeToString(pub)
+	switch strings.ToLower(pubHex) {
+	case strings.ToLower(MasterPublicKeyHexV2):
+		return pubHex, "V2 (Primary Hardened Ring)"
+	case strings.ToLower(MasterPublicKeyHexV1):
+		return pubHex, "V1 (DEPRECATED / COMPROMISED - ROTATE TO V2 IMMEDIATELY)"
+	default:
+		return pubHex, "Custom / Standalone Ring"
+	}
+}
+
 type LicenseClaims struct {
 	MachineID string `json:"machine_id"`
 	Client    string `json:"client"`
@@ -916,6 +946,9 @@ func main() {
 		log.Fatalf("FATAL: ADMIN_TOKEN environment variable is required. " +
 			"Genera uno con: openssl rand -hex 24 y colócalo en tu .env")
 	}
+	if err := validateAdminToken(adminToken); err != nil {
+		log.Fatalf("FATAL: Configuración de seguridad rechazada: %v", err)
+	}
 
 	seedHex := os.Getenv("PRIVATE_SEED_HEX")
 	if seedHex == "" {
@@ -927,6 +960,14 @@ func main() {
 		log.Fatalf("Invalid Ed25519 seed: %v", err)
 	}
 	privKey := ed25519.NewKeyFromSeed(seed)
+	pubHex, ringStatus := evaluateSeedRing(privKey)
+
+	log.Printf("🔐 [Security Ring] Ed25519 Public Key: %s", pubHex)
+	log.Printf("🛡️ [Security Ring] Ring Classification: %s", ringStatus)
+	if strings.HasPrefix(ringStatus, "V1") {
+		log.Printf("⚠️  [CRITICAL SECURITY WARNING] Servidor operando con la semilla V1 comprometida.")
+		log.Printf("⚠️  Para cumplir con Phase 0, ejecute 'scripts/rotate-license-server-keys.sh' en el VPS y migre a V2.")
+	}
 
 	store, err := initStore(dbPath)
 	if err != nil {
