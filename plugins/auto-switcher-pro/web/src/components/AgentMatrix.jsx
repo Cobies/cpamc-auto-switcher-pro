@@ -1062,23 +1062,21 @@ export default function AgentMatrix() {
 
         return (
           <div key={harness.id} className="universe-section">
-            <div className="universe-header">
-              <div>
-                <h3>
-                  <span>{harness.icon}</span>
-                  <span>{harness.name.toUpperCase()}</span>
-                  <span className="dual-runtime-badge">
-                    <span className="chip-shell">{harness.badge || harness.name}</span>
-                  </span>
-                </h3>
-                <p className="universe-clarity-callout">
-                  {harness.subtitle}
-                </p>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
-                <span className="universe-meta">
+            <div className="universe-header" title={harness.subtitle}>
+              <div className="universe-header-left">
+                <span className="universe-icon">{harness.icon}</span>
+                <span className="universe-title">{harness.name.toUpperCase()}</span>
+                {harness.badge && (
+                  <span className="chip-shell">{harness.badge}</span>
+                )}
+                <span className="universe-meta" title={`Ruta de configuración: ${harness.config_path}`}>
                   📁 {harness.config_path}
                 </span>
+                <span className="universe-clarity-callout" style={{ display: 'none' }}>
+                  {harness.subtitle}
+                </span>
+              </div>
+              <div className="universe-header-right">
                 <button
                   type="button"
                   className={`matrix-save-harness-btn ${dirtyHarnesses[harness.id] ? 'dirty' : ''}`}
@@ -1091,7 +1089,7 @@ export default function AgentMatrix() {
                     {saving
                       ? 'Guardando...'
                       : dirtyHarnesses[harness.id]
-                      ? `Guardar Cambios Pendientes (${harness.name})`
+                      ? `Guardar Cambios (${harness.name})`
                       : `Guardar ${harness.name}`}
                   </span>
                 </button>
