@@ -172,10 +172,10 @@ describe('GroupManager Component - Dedicated Full Screen Pool & Group Engine', (
     expect(selectActive.textContent).toContain('Elige primero la familia');
 
     // Reserves section also stays empty without family
-    fireEvent.click(screen.getByTestId('family-claude'));
+    fireEvent.click(screen.getByTestId('family-gemini'));
     expect(selectActive.disabled).toBe(false);
 
-    // Claude family: only antigravity accounts, codex hidden
+    // Gemini family: only antigravity accounts, codex hidden
     fireEvent.change(selectActive, { target: { value: 'free1' } });
     expect(selectActive.value).toBe('free1');
     const reserveList = screen.getByTestId('reserves-container');
@@ -189,7 +189,7 @@ describe('GroupManager Component - Dedicated Full Screen Pool & Group Engine', (
     expect(screen.getByTestId('reserves-container').textContent).toContain('free1@test.com');
 
     // Changing family invalidates the previous account selection
-    fireEvent.click(screen.getByTestId('family-gemini'));
+    fireEvent.click(screen.getByTestId('family-codex'));
     expect(screen.getByTestId('select-active-account').value).toBe('');
   });
 
@@ -1625,6 +1625,50 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
 
       // Verify warning message is rendered
       expect(screen.getByText(/No hay cuentas vinculadas ni modelos disponibles en CPAMC/i)).toBeTruthy();
+    });
+
+    it('disables specialist selector for Anthropic Claude when ONLY Antigravity accounts are logged in (zero official clau* accounts)', () => {
+      // Setup nodes with ONLY Antigravity accounts (no direct Anthropic Claude accounts)
+      const nodesWithOnlyAntigravity = [
+        {
+          id: 'antigravity-infosoytec@gmail.com.json',
+          name: 'antigravity-infosoytec@gmail.com.json',
+          data: {
+            fileName: 'antigravity-infosoytec@gmail.com.json',
+            prefix: '',
+            provider: 'antigravity',
+            email: 'infosoytec@gmail.com',
+          },
+        },
+        {
+          id: 'antigravity-infowilsonlavio@gmail.com.json',
+          name: 'antigravity-infowilsonlavio@gmail.com.json',
+          data: {
+            fileName: 'antigravity-infowilsonlavio@gmail.com.json',
+            prefix: '',
+            provider: 'antigravity',
+            email: 'infowilsonlavio@gmail.com',
+          },
+        },
+      ];
+
+      render(<GroupManager nodes={nodesWithOnlyAntigravity} />);
+
+      // Click on Anthropic Claude family (which has 0 direct clau* accounts logged in)
+      const claudeChip = screen.getByTestId('family-claude');
+      fireEvent.click(claudeChip);
+
+      // Verify specialist selector is disabled and shows empty state
+      const specialistSelect = screen.getByTestId('select-specialist-model');
+      expect(specialistSelect.disabled).toBe(true);
+      expect(specialistSelect.value).toBe('');
+
+      // Verify it does NOT populate hardcoded Claude models when no physical clau* accounts exist
+      const specialistOptions = Array.from(specialistSelect.querySelectorAll('option')).map((o) => o.value);
+      expect(specialistOptions).toEqual(['']);
+
+      // Verify honest alert notice is displayed
+      expect(screen.getByText(/No hay cuentas vinculadas ni modelos disponibles en CPAMC para Anthropic Claude/i)).toBeTruthy();
     });
   });
 });

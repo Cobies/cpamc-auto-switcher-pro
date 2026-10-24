@@ -78,7 +78,7 @@ const MODEL_FAMILIES = {
     label: 'Anthropic Claude',
     icon: '🤖',
     hintPrefix: 'clau',
-    provider: 'antigravity',
+    provider: 'claude',
     quota: 'Claude and GPT models',
     note: 'Cuentas directas oficiales Anthropic (prefijo clau*). Convención: clau, clau2...',
   },
@@ -607,6 +607,16 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
       if (famProvider === 'antigravity') {
         return prov === 'antigravity' || fileName.startsWith('antigravity');
       }
+      if (famProvider === 'claude') {
+        // Cuentas directas oficiales Anthropic (CPAMC nativo o auth-files con clau*)
+        // NUNCA confundir con el paquete de Google Antigravity
+        return (
+          prov === 'claude' ||
+          fileName.startsWith('claude') ||
+          fileName.startsWith('clau-') ||
+          p.startsWith('clau')
+        );
+      }
       return (
         prov === famProvider ||
         prov.includes(famProvider) ||
@@ -739,7 +749,7 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
     const famProvider = effectiveFamily.provider;
 
     if (famProvider !== 'antigravity') {
-      return nodes
+      const candidates = nodes
         .filter((n) => {
           const prov = (n.data?.provider || n.data?.accountType || '').toLowerCase();
           const fileName = n.data?.fileName || n.name || n.id || '';
@@ -754,6 +764,43 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
           return !pref || pref.startsWith('unlinked_');
         })
         .map((node) => ({ node, virtual: false }));
+
+      // Si la familia es Claude pero no hay cuentas directas de Anthropic (famProvider !== 'antigravity'),
+      // permitir a las cuentas de Google Antigravity servir bajo el modelo dual 2N si están disponibles
+      if (candidates.length === 0 && effectiveFamily.key === 'claude' && freeCardsInTargetRole.length > 0) {
+        return freeCardsInTargetRole.map((card) => {
+          let backingNode = null;
+          if (card.virtualFileName) {
+            backingNode = nodes.find(
+              (n) => n.data?.fileName === card.virtualFileName || n.id === card.virtualFileName
+            );
+          }
+          if (!backingNode && card.masterFileName) {
+            backingNode = nodes.find(
+              (n) => n.data?.fileName === card.masterFileName || n.id === card.masterFileName
+            );
+          }
+
+          const node = backingNode || {
+            id: card.virtualFileName || card.masterFileName,
+            data: {
+              fileName: card.virtualFileName || card.masterFileName,
+              email: card.maskedEmail,
+              prefix: card.assignedPrefix,
+              provider: 'antigravity',
+            },
+          };
+
+          const needsVirtualize = isVirtualSource(node);
+          return { node, card, virtual: needsVirtualize };
+        }).filter(({ node }) => {
+          const fileName = node.data?.fileName || node.name || node.id || '';
+          const sameRoleMembers = registryMembersByRole.get(targetFamilyRole);
+          return !(sameRoleMembers && sameRoleMembers.has(fileName));
+        });
+      }
+
+      return candidates;
     }
 
     return freeCardsInTargetRole.map((card) => {
@@ -1939,21 +1986,45 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
                 <div className="group-field">
                   <label className="group-label">① Familia de modelos (define qué cuota se vigila):</label>
                   <div className="group-family-segmented" role="group">
-                    {Object.entries(allModelFamilies).map(([key, fam]) => (
-                      <button
-                        key={key}
-                        type="button"
-                        className={`group-family-chip ${family === key ? 'active' : ''}`}
-                        onClick={() => handleSelectFamily(key)}
-                        data-testid={`family-${key}`}
-                      >
-                        <span className="group-family-icon">{fam.icon}</span>
-                        <span className="group-family-label">{fam.label}</span>
-                        <span className="group-family-hint">
-                          {key === 'gemini' ? 'Gemini: agy* · Claude: agy_son*, agy_opus*, agy_clau*' : `prefijo ${fam.hintPrefix}*`}
-                        </span>
-                      </button>
-                    ))}
+                    {Object.entries(allModelFamilies).map(([key, fam]) => {
+                      const famProvider = fam.provider;
+                      const hasAccounts = Array.isArray(nodes) && nodes.some((n) => {
+                        const prov = (n.data?.provider || n.data?.accountType || '').toLowerCase();
+                        const p = (n.data?.prefix || '').toLowerCase();
+                        const fileName = (n.data?.fileName || n.name || n.id || '').toLowerCase();
+                        if (famProvider === 'antigravity') {
+                          return prov === 'antigravity' || fileName.startsWith('antigravity');
+                        }
+                        if (famProvider === 'claude') {
+                          return prov === 'claude' || fileName.startsWith('claude') || fileName.startsWith('clau-') || p.startsWith('clau');
+                        }
+                        return (
+                          prov === famProvider ||
+                          prov.includes(famProvider) ||
+                          p.startsWith(fam.hintPrefix) ||
+                          fileName.startsWith(`${fam.hintPrefix}-`)
+                        );
+                      });
+
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          className={`group-family-chip ${family === key ? 'active' : ''} ${!hasAccounts ? 'family-empty' : ''}`}
+                          onClick={() => handleSelectFamily(key)}
+                          data-testid={`family-${key}`}
+                          style={!hasAccounts ? { opacity: 0.75 } : {}}
+                        >
+                          <span className="group-family-icon">{fam.icon}</span>
+                          <span className="group-family-label">
+                            {fam.label} {!hasAccounts && <span style={{ fontSize: 10, color: '#f59e0b', fontWeight: 600 }}>(0)</span>}
+                          </span>
+                          <span className="group-family-hint">
+                            {key === 'gemini' ? 'Gemini: agy* · Claude: agy_son*, agy_opus*, agy_clau*' : `prefijo ${fam.hintPrefix}*`}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
 
                   {/* Sub-selector en la misma columna para el Paquete Gemini */}
