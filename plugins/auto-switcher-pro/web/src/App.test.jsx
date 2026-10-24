@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import App from './App';
+import App, { TABS, resolveTabFromLocation } from './App';
 import * as managementClient from './api/managementClient';
 
 // Mock resize observer for JSDOM
@@ -371,4 +371,118 @@ describe('App Host Component Integration', () => {
       expect(screen.queryByTestId('toast-auto-update-console')).toBeNull();
     });
   });
+
+  describe('Persistent Navigation & Header Contract (S4)', () => {
+    it('maintains the app-header visible when switching between views', async () => {
+      vi.spyOn(managementClient, 'getManagementKey').mockReturnValue('valid-key-123');
+      vi.spyOn(managementClient, 'loadAuthFilesWithPrefixes').mockResolvedValue([]);
+
+      render(<App />);
+
+      // Initially on profiles
+      expect(await screen.findByTestId('tab-visual-profile')).toBeTruthy();
+      expect(screen.getByTestId('tab-visual-profile').className).toContain('active');
+
+      // Navigate to Home tab
+      const homeTab = screen.getByTestId('tab-home');
+      fireEvent.click(homeTab);
+
+      // Header MUST remain visible on Home tab (no ghost header)
+      expect(screen.getByTestId('tab-home')).toBeTruthy();
+      expect(screen.getByTestId('tab-home').className).toContain('active');
+      expect(screen.getByTestId('tab-visual-profile')).toBeTruthy();
+      expect(screen.getByTestId('tab-visual-profile').className).not.toContain('active');
+
+      // Global actions must remain available
+      expect(screen.getByTestId('btn-open-quick-guide')).toBeTruthy();
+      expect(screen.getByTestId('btn-open-license-modal')).toBeTruthy();
+      expect(screen.getByTestId('btn-header-force-check')).toBeTruthy();
+      expect(screen.getByTestId('btn-reload-profiles')).toBeTruthy();
+    });
+
+    it('allows opening quick guide and license modals from non-profile views', async () => {
+      vi.spyOn(managementClient, 'getManagementKey').mockReturnValue('valid-key-123');
+      vi.spyOn(managementClient, 'loadAuthFilesWithPrefixes').mockResolvedValue([]);
+
+      render(<App />);
+
+      // Switch to Directorio Cuentas
+      const prefixTab = await screen.findByTestId('tab-create-prefixes');
+      fireEvent.click(prefixTab);
+
+      // Header is still there, open Quick Guide Modal
+      const guideBtn = screen.getByTestId('btn-open-quick-guide');
+      fireEvent.click(guideBtn);
+      expect(await screen.findByText(/Auto Switcher Pro · Guía Rápida/i)).toBeTruthy();
+
+      // Close guide modal
+      const closeGuideBtn = screen.getByTestId('btn-close-guide');
+      fireEvent.click(closeGuideBtn);
+
+      // Open License Modal from persistent header
+      const licenseBtn = screen.getByTestId('btn-open-license-modal');
+      fireEvent.click(licenseBtn);
+      expect(await screen.findByText(/Licencia & Activación de Auto Switcher Pro/i)).toBeTruthy();
+    });
+
+    it('exposes a clean TABS structure with 11 standard tabs', () => {
+      expect(Array.isArray(TABS)).toBe(true);
+      expect(TABS.length).toBe(11);
+      const tabIds = TABS.map((t) => t.id);
+      expect(tabIds).toEqual([
+        'home',
+        'create-groups',
+        'auto-auth-files',
+        'switcher',
+        'profiles',
+        'tokens',
+        'create-prefixes',
+        'maintenance',
+        'quick-guide',
+        'audit-log',
+        'agent-matrix',
+      ]);
+    });
+
+    it('resolves tabs cleanly from window.location without window.parent sniffing', () => {
+      const origLocation = window.location;
+
+      // Test hash #/switcher
+      delete window.location;
+      window.location = { pathname: '/', hash: '#/switcher' };
+      expect(resolveTabFromLocation()).toBe('switcher');
+
+      // Test hash #tab-maintenance
+      window.location = { pathname: '/', hash: '#tab-maintenance' };
+      expect(resolveTabFromLocation()).toBe('maintenance');
+
+      // Test pathname /create-groups
+      window.location = { pathname: '/create-groups', hash: '' };
+      expect(resolveTabFromLocation()).toBe('create-groups');
+
+      // Test fallback to home
+      window.location = { pathname: '/', hash: '' };
+      expect(resolveTabFromLocation()).toBe('home');
+
+      window.location = origLocation;
+    });
+
+    it('updates route badge in header when switching tabs', async () => {
+      vi.spyOn(managementClient, 'getManagementKey').mockReturnValue('valid-key-123');
+      vi.spyOn(managementClient, 'loadAuthFilesWithPrefixes').mockResolvedValue([]);
+
+      render(<App />);
+
+      expect(await screen.findByTestId('tab-visual-profile')).toBeTruthy();
+      expect(screen.getByText('/profiles')).toBeTruthy();
+
+      const switcherTab = screen.getByTestId('tab-control-switcher');
+      await act(async () => {
+        fireEvent.click(switcherTab);
+      });
+
+      expect(screen.getByText('/control-switcher')).toBeTruthy();
+    });
+  });
 });
+

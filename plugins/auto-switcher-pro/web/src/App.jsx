@@ -24,121 +24,43 @@ import {
 import './App.css';
 import './ControlSwitcher.css';
 
-export default function App() {
-  const resolveTabFromLocation = () => {
-    if (typeof window === 'undefined' || !window.location) return 'home';
+export const TABS = [
+  { id: 'home', label: 'Inicio & Info', icon: '🏠', testId: 'tab-home', route: '/center', matches: ['tab-home', 'tab=home', '#home', 'center', 'home'] },
+  { id: 'create-groups', label: 'Crear Group/Perfiles', icon: '🛠️', testId: 'tab-create-groups', route: '/create-groups', matches: ['tab-create-groups', 'create-groups', 'groups'] },
+  { id: 'auto-auth-files', label: 'Auto Auth Files', icon: '🗂️', testId: 'tab-auto-auth-files', route: '/auto-auth-files', matches: ['tab-auto-auth-files', 'auto-auth-files', 'auth-files'] },
+  { id: 'switcher', label: 'Control Switcher', icon: '♊', testId: 'tab-control-switcher', route: '/control-switcher', matches: ['tab-control-switcher', 'control-switcher', 'switcher'] },
+  { id: 'profiles', label: 'Visual Profile', icon: '🔵', testId: 'tab-visual-profile', route: '/profiles', matches: ['tab-profiles', 'profiles'] },
+  { id: 'tokens', label: 'Pulse Tokens', icon: '🏷️', testId: 'tab-pulse-tokens', route: '/pulse-tokens', matches: ['tab-pulse-tokens', 'pulse-tokens', 'tokens'] },
+  { id: 'create-prefixes', label: 'Directorio Cuentas', icon: '📋', testId: 'tab-create-prefixes', route: '/create-prefixes', matches: ['tab-create-prefixes', 'create-prefixes', 'prefixes'] },
+  { id: 'maintenance', label: 'Salud & Mant.', icon: '🩺', testId: 'tab-maintenance', route: '/maintenance', matches: ['tab-maintenance', 'maintenance', 'salud'] },
+  { id: 'quick-guide', label: 'Guía Rápida', icon: '❓', testId: 'tab-quick-guide', route: '/quick-guide', matches: ['tab-quick-guide', 'quick-guide', 'guide'] },
+  { id: 'audit-log', label: 'Bitácora & Caja Negra', icon: '📜', testId: 'tab-audit-log', route: '/audit-log', matches: ['tab-audit-log', 'audit-log', 'bitacora', 'caja-negra'] },
+  { id: 'agent-matrix', label: 'Matriz de Agentes', icon: '🎛️', testId: 'tab-agent-matrix', route: '/agent-matrix', matches: ['tab-agent-matrix', 'agent-matrix', 'matriz'] },
+];
 
-    // 1. Prioridad: Inspección de pathname exacto del documento (esencial para iframe de CPAMC)
-    const pathname = (window.location.pathname || '').toLowerCase();
-    if (pathname.includes('agent-matrix') || pathname.includes('matriz')) {
-      return 'agent-matrix';
-    }
-    if (pathname.includes('audit-log') || pathname.includes('bitacora') || pathname.includes('caja-negra')) {
-      return 'audit-log';
-    }
-    if (pathname.includes('create-prefixes')) {
-      return 'create-prefixes';
-    }
-    if (pathname.includes('create-groups') || pathname.includes('groups')) {
-      return 'create-groups';
-    }
-    if (pathname.includes('auto-auth-files') || pathname.includes('auth-files')) {
-      return 'auto-auth-files';
-    }
-    if (pathname.includes('control-switcher')) {
-      return 'switcher';
-    }
-    if (pathname.includes('pulse-tokens') || pathname.includes('tokens')) {
-      return 'tokens';
-    }
-    if (pathname.includes('maintenance')) {
-      return 'maintenance';
-    }
-    if (pathname.includes('quick-guide') || pathname.includes('guide')) {
-      return 'quick-guide';
-    }
-    if (pathname.includes('profiles')) {
-      return 'profiles';
-    }
+export const resolveTabFromLocation = () => {
+  if (typeof window === 'undefined' || !window.location) return 'home';
 
-    // 2. Hash del documento local o de la consola padre CPAMC (si está dentro del iframe)
-    let hash = (window.location.hash || '').toLowerCase();
-    try {
-      if ((!hash || hash === '#home') && window.parent && window.parent !== window && window.parent.location.hash) {
-        hash = window.parent.location.hash.toLowerCase();
-      }
-    } catch (_) {}
+  const pathname = (window.location.pathname || '').toLowerCase();
+  const hash = (window.location.hash || '').toLowerCase();
+  const locationString = `${pathname} ${hash}`;
 
-    // CPAMC Native Menus index mapping:
-    // CPAMC expone páginas como #/plugin-pages/<plugin-name>/<index>
-    // En CPAMC los menús se ordenan alfabéticamente por path:
-    // 0: /agent-matrix
-    // 1: /audit-log
-    // 2: /auto-auth-files
-    // 3: /control-switcher
-    // 4: /create-groups
-    // 5: /create-prefixes
-    // 6: /maintenance
-    // 7: /profiles
-    // 8: /pulse-tokens
-    // 9: /quick-guide
-    const numIndexMatch = hash.match(/\/(\d+)(?:\b|\?|$)/);
-    if (numIndexMatch) {
-      const idx = parseInt(numIndexMatch[1], 10);
-      switch (idx) {
-        case 0: return 'agent-matrix';
-        case 1: return 'audit-log';
-        case 2: return 'auto-auth-files';
-        case 3: return 'switcher';
-        case 4: return 'create-groups';
-        case 5: return 'create-prefixes';
-        case 6: return 'maintenance';
-        case 7: return 'profiles';
-        case 8: return 'tokens';
-        case 9: return 'quick-guide';
-        default: break;
-      }
+  for (const tab of TABS) {
+    if (tab.id === 'home') continue;
+    if (tab.matches && tab.matches.some((pattern) => locationString.includes(pattern))) {
+      return tab.id;
     }
+  }
 
-    if (hash.includes('tab-agent-matrix') || hash.includes('agent-matrix') || hash.includes('matriz')) {
-      return 'agent-matrix';
-    }
-    if (hash.includes('tab-audit-log') || hash.includes('audit-log') || hash.includes('bitacora') || hash.includes('caja-negra')) {
-      return 'audit-log';
-    }
-    if (hash.includes('tab-home') || hash.includes('tab=home') || hash === '#home') {
-      return 'home';
-    }
-    if (hash.includes('tab-create-prefixes') || hash.includes('create-prefixes')) {
-      return 'create-prefixes';
-    }
-    if (hash.includes('tab-create-groups') || hash.includes('create-groups') || hash.includes('groups')) {
-      return 'create-groups';
-    }
-    if (hash.includes('tab-control-switcher') || hash.includes('switcher')) {
-      return 'switcher';
-    }
-    if (hash.includes('tab-auto-auth-files') || hash.includes('auto-auth-files') || hash.includes('auth-files')) {
-      return 'auto-auth-files';
-    }
-    if (hash.includes('tab-pulse-tokens') || hash.includes('pulse-tokens') || hash.includes('tokens')) {
-      return 'tokens';
-    }
-    if (hash.includes('tab-maintenance') || hash.includes('maintenance')) {
-      return 'maintenance';
-    }
-    if (hash.includes('tab-quick-guide') || hash.includes('quick-guide') || hash.includes('guide')) {
-      return 'quick-guide';
-    }
-    if (hash.includes('tab-profiles')) {
-      return 'profiles';
-    }
-
-    if (pathname.includes('home') || pathname.includes('center') || pathname.endsWith('/')) {
-      return 'home';
-    }
+  const homeTab = TABS.find((t) => t.id === 'home');
+  if (homeTab?.matches?.some((pattern) => locationString.includes(pattern))) {
     return 'home';
-  };
+  }
+
+  return 'home';
+};
+
+export default function App() {
 
   const initialTab = (() => {
     // Si estamos en entorno de testing (Vitest / JSDOM), mantenemos 'profiles' como base de tests heredados
@@ -166,7 +88,7 @@ export default function App() {
   const [manualKeyError, setManualKeyError] = useState('');
   const consoleCheckExecutedRef = useRef(false);
 
-  // Escuchar cambios de hash en la barra de direcciones de CPAMC
+  // Escuchar cambios de hash en la barra de direcciones
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const handleHashChange = () => {
@@ -174,21 +96,8 @@ export default function App() {
       setActiveTab(nextTab);
     };
     window.addEventListener('hashchange', handleHashChange);
-    let parentListening = false;
-    try {
-      if (window.parent && window.parent !== window) {
-        window.parent.addEventListener('hashchange', handleHashChange);
-        parentListening = true;
-      }
-    } catch (_) {}
-
     return () => {
       window.removeEventListener('hashchange', handleHashChange);
-      if (parentListening) {
-        try {
-          window.parent.removeEventListener('hashchange', handleHashChange);
-        } catch (_) {}
-      }
     };
   }, []);
 
@@ -351,276 +260,36 @@ export default function App() {
 
   return (
     <div className="app-layout">
-      {/* Header Unificado: Única y exclusivamente visible en Visual Profile Prefix Topology */}
-      {activeTab === 'profiles' && (
-        <header className="app-header">
-          {/* Lado Izquierdo: Identidad, Submenús y Acciones Estructurales */}
-          <div className="header-left-cluster">
-            <div className="header-brand">
-              <img src={logoImg} alt="Auto Switcher Pro Logo" className="brand-logo-img" />
-              <div>
-                <h1 className="brand-title">AUTO SWITCHER PRO</h1>
-                <p className="brand-subtitle">
-                  Centro Integral de Control de Infraestructura IA
-                </p>
-              </div>
+      {/* Header Unificado Persistente */}
+      <header className="app-header">
+        {/* Lado Izquierdo: Identidad, Submenús y Acciones Estructurales */}
+        <div className="header-left-cluster">
+          <div className="header-brand">
+            <img src={logoImg} alt="Auto Switcher Pro Logo" className="brand-logo-img" />
+            <div>
+              <h1 className="brand-title">AUTO SWITCHER PRO</h1>
+              <p className="brand-subtitle">
+                Centro Integral de Control de Infraestructura IA
+              </p>
             </div>
+          </div>
 
           <div className="header-divider" />
 
           {/* Selector de Submenús */}
-          <div className="header-tabs-nav" style={{ display: 'flex', gap: '6px', padding: '4px', background: 'rgba(2, 6, 23, 0.8)', borderRadius: '10px', border: '1px solid rgba(51, 65, 85, 0.6)' }}>
-            <button
-              type="button"
-              onClick={() => setActiveTab('home')}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '6px',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                border: activeTab === 'home' ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid transparent',
-                background: activeTab === 'home' ? 'rgba(56, 189, 248, 0.35)' : 'transparent',
-                color: activeTab === 'home' ? '#e0f2fe' : '#94a3b8',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-              data-testid="tab-home"
-            >
-              <span>🏠</span>
-              <span>Inicio & Info</span>
-            </button>
-
-            {/* 1. Crear Group/Pefiles */}
-            <button
-              type="button"
-              onClick={() => setActiveTab('create-groups')}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '6px',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                border: activeTab === 'create-groups' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
-                background: activeTab === 'create-groups' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
-                color: activeTab === 'create-groups' ? '#f3e8ff' : '#94a3b8',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-              data-testid="tab-create-groups"
-            >
-              <span>🛠️</span>
-              <span>Crear Group/Perfiles</span>
-            </button>
-
-            {/* 2. Auto Auth Files */}
-            <button
-              type="button"
-              onClick={() => setActiveTab('auto-auth-files')}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '6px',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                border: activeTab === 'auto-auth-files' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
-                background: activeTab === 'auto-auth-files' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
-                color: activeTab === 'auto-auth-files' ? '#f3e8ff' : '#94a3b8',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-              data-testid="tab-auto-auth-files"
-            >
-              <span>🗂️</span>
-              <span>Auto Auth Files</span>
-            </button>
-
-            {/* 3. Control Switcher */}
-            <button
-              type="button"
-              onClick={() => setActiveTab('switcher')}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '6px',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                border: activeTab === 'switcher' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
-                background: activeTab === 'switcher' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
-                color: activeTab === 'switcher' ? '#f3e8ff' : '#94a3b8',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-              data-testid="tab-control-switcher"
-            >
-              <span>♊</span>
-              <span>Control Switcher</span>
-            </button>
-
-            {/* 4. Visual Profile */}
-            <button
-              type="button"
-              onClick={() => setActiveTab('profiles')}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '6px',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                border: activeTab === 'profiles' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
-                background: activeTab === 'profiles' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
-                color: activeTab === 'profiles' ? '#f3e8ff' : '#94a3b8',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-              data-testid="tab-visual-profile"
-            >
-              <span>🔵</span>
-              <span>Visual Profile</span>
-            </button>
-
-            {/* 5. Pulse Tokens */}
-            <button
-              type="button"
-              onClick={() => setActiveTab('tokens')}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '6px',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                border: activeTab === 'tokens' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
-                background: activeTab === 'tokens' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
-                color: activeTab === 'tokens' ? '#f3e8ff' : '#94a3b8',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-              data-testid="tab-pulse-tokens"
-            >
-              <span>🏷️</span>
-              <span>Pulse Tokens</span>
-            </button>
-
-            {/* 6. Directorio Cuentas */}
-            <button
-              type="button"
-              onClick={() => setActiveTab('create-prefixes')}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '6px',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                border: activeTab === 'create-prefixes' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
-                background: activeTab === 'create-prefixes' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
-                color: activeTab === 'create-prefixes' ? '#f3e8ff' : '#94a3b8',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-              data-testid="tab-create-prefixes"
-            >
-              <span>📋</span>
-              <span>Directorio Cuentas</span>
-            </button>
-
-            {/* 7. CPAMC Salud & Mantenimiento */}
-            <button
-              type="button"
-              onClick={() => setActiveTab('maintenance')}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '6px',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                border: activeTab === 'maintenance' ? '1px solid rgba(16, 185, 129, 0.5)' : '1px solid transparent',
-                background: activeTab === 'maintenance' ? 'rgba(16, 185, 129, 0.25)' : 'transparent',
-                color: activeTab === 'maintenance' ? '#a7f3d0' : '#94a3b8',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-              data-testid="tab-maintenance"
-            >
-              <span>🩺</span>
-              <span>Salud & Mant.</span>
-            </button>
-
-            {/* 8. Guía Rápida */}
-            <button
-              type="button"
-              onClick={() => setActiveTab('quick-guide')}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '6px',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                border: activeTab === 'quick-guide' ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid transparent',
-                background: activeTab === 'quick-guide' ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
-                color: activeTab === 'quick-guide' ? '#7dd3fc' : '#94a3b8',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-              data-testid="tab-quick-guide"
-            >
-              <span>❓</span>
-              <span>Guía Rápida</span>
-            </button>
-
-            {/* 9. Bitácora & Caja Negra */}
-            <button
-              type="button"
-              onClick={() => setActiveTab('audit-log')}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '6px',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                border: activeTab === 'audit-log' ? '1px solid rgba(245, 158, 11, 0.5)' : '1px solid transparent',
-                background: activeTab === 'audit-log' ? 'rgba(245, 158, 11, 0.25)' : 'transparent',
-                color: activeTab === 'audit-log' ? '#fde68a' : '#94a3b8',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-              data-testid="tab-audit-log"
-            >
-              <span>📜</span>
-              <span>Bitácora & Caja Negra</span>
-            </button>
-
-            {/* 10. Matriz de Agentes & Orquestación */}
-            <button
-              type="button"
-              onClick={() => setActiveTab('agent-matrix')}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '6px',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                border: activeTab === 'agent-matrix' ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid transparent',
-                background: activeTab === 'agent-matrix' ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
-                color: activeTab === 'agent-matrix' ? '#bae6fd' : '#94a3b8',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-              data-testid="tab-agent-matrix"
-            >
-              <span>🎛️</span>
-              <span>Matriz de Agentes</span>
-            </button>
+          <div className="header-tabs-nav">
+            {TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                className={`header-tab-btn ${activeTab === tab.id ? 'active' : ''}`}
+                onClick={() => setActiveTab(tab.id)}
+                data-testid={tab.testId}
+              >
+                <span>{tab.icon}</span>
+                <span>{tab.label}</span>
+              </button>
+            ))}
           </div>
 
           <div className="header-divider" />
@@ -655,23 +324,10 @@ export default function App() {
         <div className="header-right-meta">
           <button
             type="button"
-            className="btn btn-outline"
+            className="btn btn-outline btn-header-guide"
             onClick={() => setIsGuideOpen(true)}
             data-testid="btn-open-quick-guide"
             title="Abrir Guía Rápida & Manual de Usuario"
-            style={{
-              padding: '5px 10px',
-              fontSize: '11px',
-              fontWeight: 700,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              background: 'rgba(56, 189, 248, 0.15)',
-              color: '#38bdf8',
-              border: '1px solid rgba(56, 189, 248, 0.4)',
-              borderRadius: '6px',
-              cursor: 'pointer',
-            }}
           >
             <span>❓</span>
             <span>Guía Rápida</span>
@@ -679,23 +335,10 @@ export default function App() {
 
           <button
             type="button"
-            className="btn btn-outline"
+            className="btn btn-outline btn-header-license"
             onClick={() => setIsLicenseOpen(true)}
             data-testid="btn-open-license-modal"
             title="Ver estado de Licencia y Machine ID"
-            style={{
-              padding: '5px 10px',
-              fontSize: '11px',
-              fontWeight: 700,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              background: 'rgba(234, 179, 8, 0.15)',
-              color: '#facc15',
-              border: '1px solid rgba(234, 179, 8, 0.4)',
-              borderRadius: '6px',
-              cursor: 'pointer',
-            }}
           >
             <span>🔐</span>
             <span>Licencia</span>
@@ -715,11 +358,10 @@ export default function App() {
 
           <button
             type="button"
-            className="btn btn-outline"
+            className="btn btn-outline btn-header-reload"
             onClick={handleReload}
             data-testid="btn-reload-profiles"
             title="Recargar desde Management API"
-            style={{ padding: '4px 8px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
           >
             <span>🔄</span>
           </button>
@@ -727,32 +369,11 @@ export default function App() {
           <div className="header-meta">
             <span className="badge-status">C-ABI v1</span>
             <span className="badge-route">
-              {activeTab === 'home'
-                ? '/center'
-                : activeTab === 'create-prefixes'
-                ? '/create-prefixes'
-                : activeTab === 'create-groups'
-                ? '/create-groups'
-                : activeTab === 'switcher'
-                ? '/control-switcher'
-                : activeTab === 'tokens'
-                ? '/pulse-tokens'
-                : activeTab === 'auto-auth-files'
-                ? '/auto-auth-files'
-                : activeTab === 'maintenance'
-                ? '/maintenance'
-                : activeTab === 'quick-guide'
-                ? '/quick-guide'
-                : activeTab === 'audit-log'
-                ? '/audit-log'
-                : activeTab === 'agent-matrix'
-                ? '/agent-matrix'
-                : '/profiles'}
+              {TABS.find((t) => t.id === activeTab)?.route || '/profiles'}
             </span>
           </div>
         </div>
       </header>
-      )}
 
       {/* Feedback Toast si se dispara acción global */}
       {actionFeedback && (
