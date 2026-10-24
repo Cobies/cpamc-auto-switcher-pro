@@ -3146,6 +3146,28 @@ export async function updateManagementConsole(options = {}) {
 }
 
 /**
+ * Obtiene el reporte de auto-diagnóstico e integridad (Self-Healing Boot Report).
+ */
+export async function getSelfHealingReport(options = {}) {
+  const res = await apiFetch('/v0/management/auto-switcher-pro/self-healing', {
+    ...options,
+    method: 'GET',
+  });
+  return res.json();
+}
+
+/**
+ * Exporta la traza anónima de telemetría y eventos de la caja negra (.trace).
+ */
+export async function exportTelemetryTrace(options = {}) {
+  const res = await apiFetch('/v0/management/auto-switcher-pro/telemetry/export-trace', {
+    ...options,
+    method: 'GET',
+  });
+  return res.json();
+}
+
+/**
  * Obtiene el estado del motor de rebalanceo predictivo y la fatiga de las cuentas.
  */
 export async function getPredictiveState(options = {}) {

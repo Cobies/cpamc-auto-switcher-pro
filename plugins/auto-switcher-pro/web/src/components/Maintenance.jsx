@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   scanSystemHealth,
   cleanSystemResidues,
@@ -6,6 +6,8 @@ import {
   deleteAuthFile,
   listPools,
   loadAuthFilesWithPrefixes,
+  getSelfHealingReport,
+  exportTelemetryTrace,
 } from '../api/managementClient';
 import { triggerCPAMCSidebarRefresh } from '../utils/syncSidebar';
 import './Maintenance.css';
@@ -153,6 +155,43 @@ export default function Maintenance({ onReloadRequested }) {
   const [isPurgingOrphans, setIsPurgingOrphans] = useState(false);
   const [scanResult, setScanResult] = useState(null);
   const [feedback, setFeedback] = useState({ text: '', type: '' });
+  const [selfHealingData, setSelfHealingData] = useState(null);
+  const [isExportingTrace, setIsExportingTrace] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    getSelfHealingReport()
+      .then((data) => {
+        if (mounted && data && data.integrity_summary) {
+          setSelfHealingData(data);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleDownloadTelemetryTrace = async () => {
+    try {
+      setIsExportingTrace(true);
+      const trace = await exportTelemetryTrace();
+      const blob = new Blob([JSON.stringify(trace, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `auto-switcher-telemetry-${new Date().toISOString().slice(0, 10)}.trace`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showFeedback('✅ Traza diagnóstica anónima (.trace) exportada exitosamente.');
+    } catch (err) {
+      showFeedback('❌ Error al exportar traza: ' + (err.message || 'Error de red'), 'error');
+    } finally {
+      setIsExportingTrace(false);
+    }
+  };
 
   // Sub-pestañas: 'general' (auditoría clásica de 4 módulos) | 'sync' (Tuerca ⚙️ + Líderes + /model)
   const [activeSubTab, setActiveSubTab] = useState('general');
@@ -566,6 +605,46 @@ export default function Maintenance({ onReloadRequested }) {
                   data-testid="scan-progress-bar-fill"
                 />
               </div>
+            </div>
+          )}
+
+          {/* Resumen Liviano de Auto-Recuperación (Self-Healing Boot Diagnostic) */}
+          {selfHealingData && (
+            <div className="self-healing-banner" data-testid="self-healing-banner" style={{
+              background: 'rgba(16, 185, 129, 0.08)',
+              border: '1px solid rgba(16, 185, 129, 0.25)',
+              borderRadius: '8px',
+              padding: '12px 16px',
+              margin: '16px 0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px',
+              flexWrap: 'wrap'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '18px' }}>🛡️</span>
+                <div>
+                  <div style={{ fontWeight: '600', fontSize: '13px', color: '#10b981' }}>
+                    Auto-Diagnóstico de Integridad (Self-Healing Active)
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'rgba(255, 255, 255, 0.75)' }}>
+                    {selfHealingData.integrity_summary}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleDownloadTelemetryTrace}
+                disabled={isExportingTrace}
+                className="btn-sync-sidebar"
+                style={{ padding: '6px 12px', fontSize: '12px', cursor: 'pointer' }}
+                title="Exporta un archivo .trace con eventos anónimos de SQLite para soporte o depuración determinista"
+                data-testid="btn-export-trace"
+              >
+                <span>📥</span>
+                <span>{isExportingTrace ? 'Generando .trace...' : 'Exportar Traza (.trace)'}</span>
+              </button>
             </div>
           )}
 
