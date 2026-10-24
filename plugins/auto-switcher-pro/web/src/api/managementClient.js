@@ -2887,6 +2887,8 @@ export async function fetchCardQuota(cardOrNode, options = {}) {
         famRole === 'gemini' ||
         (!isClaude && (/^agy\d*(_\d+)?$/.test(cleanPref) || cleanPref.startsWith('g') || cleanPref === 'default'));
 
+      const detectedFamily = isClaude ? 'claude' : (isGemini ? 'gemini' : (famRole || 'gemini'));
+
       let win5h = null;
       let winWeekly = null;
       let win5hResetIn = 0;
@@ -2934,6 +2936,7 @@ export async function fetchCardQuota(cardOrNode, options = {}) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             account_key: accKey,
+            family: detectedFamily,
             window_5h_pct: win5h !== null ? win5h : 100.0,
             weekly_pct: winWeekly !== null ? winWeekly : 100.0,
             window_5h_reset_in: win5hResetIn,

@@ -37,10 +37,11 @@ func TriggerGhostWarmupCheck(registry *PoolRegistry) {
 			leaderAuth = p.LeaderAuth
 		}
 		leaderEmail := strings.TrimSuffix(strings.TrimPrefix(leaderAuth, "antigravity-"), ".json")
-		fatiguePct, isCooling, _ := predEngine.GetAccountStatus(leaderEmail)
+		poolFam := familyCanonicalShortName(p.Family, p.BasePrefix)
+		fatiguePct, isCooling, _ := predEngine.GetAccountStatus(leaderEmail, poolFam)
 
 		// Check if leader is near fatigue threshold (>= 75%) or cooling
-		if fatiguePct >= 75.0 || isCooling || predEngine.ShouldPreventiveCool(leaderEmail) {
+		if fatiguePct >= 75.0 || isCooling || predEngine.ShouldPreventiveCool(leaderEmail, poolFam) {
 			members := p.AllMembers()
 			if len(members) < 2 {
 				continue
@@ -54,10 +55,10 @@ func TriggerGhostWarmupCheck(registry *PoolRegistry) {
 					continue
 				}
 				resEmail := strings.TrimSuffix(strings.TrimPrefix(m, "antigravity-"), ".json")
-				if predEngine.ShouldPreventiveCool(resEmail) {
+				if predEngine.ShouldPreventiveCool(resEmail, poolFam) {
 					continue
 				}
-				q, hasQ := predEngine.GetLiveQuota(resEmail)
+				q, hasQ := predEngine.GetLiveQuota(resEmail, poolFam)
 				score := 50.0
 				if hasQ {
 					score = q.Window5hPct + q.WeeklyPct

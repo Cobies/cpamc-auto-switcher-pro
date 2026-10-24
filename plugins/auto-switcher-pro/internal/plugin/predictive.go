@@ -35,6 +35,7 @@ type RequestRecord struct {
 // AccountQuotaTelemetry almacena la telemetría viva de cuotas de una cuenta
 type AccountQuotaTelemetry struct {
 	AccountKey      string    `json:"account_key"`        // filename o email
+	Family          string    `json:"family,omitempty"`  // e.g. "gemini", "claude", "codex" (para evitar colisiones entre familias de la misma cuenta)
 	Window5hPct     float64   `json:"window_5h_pct"`      // 0.0 - 100.0 (% cuota restante 5h)
 	WeeklyPct       float64   `json:"weekly_pct"`         // 0.0 - 100.0 (% cuota restante semanal)
 	Window5hResetIn int64     `json:"window_5h_reset_in"` // segundos restantes para refresco 5h
@@ -43,12 +44,35 @@ type AccountQuotaTelemetry struct {
 	UpdatedAt       time.Time `json:"updated_at"`
 }
 
+// normalizeFamily normaliza la familia de cuota a "gemini", "claude", "codex", etc.
+func normalizeFamily(fam string) string {
+	f := strings.ToLower(strings.TrimSpace(fam))
+	switch {
+	case strings.Contains(f, "claude") || strings.Contains(f, "sonnet") || strings.Contains(f, "opus"):
+		return "claude"
+	case strings.Contains(f, "codex"):
+		return "codex"
+	default:
+		if f == "" {
+			return "gemini"
+		}
+		return f
+	}
+}
+
 // normalizeAccountKey normaliza un identificador de cuenta para búsqueda insensible a formato
 func normalizeAccountKey(k string) string {
 	lower := strings.ToLower(strings.TrimSpace(k))
 	lower = strings.TrimPrefix(lower, "antigravity-")
 	lower = strings.TrimSuffix(lower, ".json")
 	return lower
+}
+
+// compositeQuotaKey genera una clave compuesta (accountKey:family) para aislar cuotas de distintos modelos en la misma cuenta
+func compositeQuotaKey(accountKey, family string) string {
+	acc := normalizeAccountKey(accountKey)
+	fam := normalizeFamily(family)
+	return acc + ":" + fam
 }
 
 // PredictiveEngine gestiona la fatiga y enfriamiento preventivo de cuentas
@@ -281,6 +305,10 @@ func (pe *PredictiveEngine) RecordLiveQuota(telemetry AccountQuotaTelemetry) {
 		return
 	}
 	key := normalizeAccountKey(telemetry.AccountKey)
+	fam := normalizeFamily(telemetry.Family)
+	telemetry.Family = fam
+	compKey := compositeQuotaKey(key, fam)
+
 	pe.mu.Lock()
 	defer pe.mu.Unlock()
 
@@ -291,7 +319,14 @@ func (pe *PredictiveEngine) RecordLiveQuota(telemetry AccountQuotaTelemetry) {
 		telemetry.UpdatedAt = time.Now()
 	}
 	telemetry.AccountKey = key
-	pe.quotas[key] = telemetry
+
+	// 1. Guardar con clave compuesta aislada por familia
+	pe.quotas[compKey] = telemetry
+
+	// 2. Mantener clave base retrocompatible si no existe o si es la familia por defecto (gemini)
+	if _, exists := pe.quotas[key]; !exists || fam == "gemini" {
+		pe.quotas[key] = telemetry
+	}
 
 	var coolUntilMs int64
 	if c, ok := pe.cooling[key]; ok && c.After(time.Now()) {
@@ -307,8 +342,9 @@ func (pe *PredictiveEngine) RecordLiveQuota(telemetry AccountQuotaTelemetry) {
 	})
 }
 
-// GetLiveQuota obtiene la telemetría viva de cuotas para una cuenta
-func (pe *PredictiveEngine) GetLiveQuota(accountKey string) (AccountQuotaTelemetry, bool) {
+// GetLiveQuota obtiene la telemetría viva de cuotas para una cuenta y familia opcional.
+// Si se especifica familia ("gemini", "claude", etc.), busca primero la cuota exacta de esa familia.
+func (pe *PredictiveEngine) GetLiveQuota(accountKey string, family ...string) (AccountQuotaTelemetry, bool) {
 	pe.mu.RLock()
 	defer pe.mu.RUnlock()
 
@@ -316,6 +352,17 @@ func (pe *PredictiveEngine) GetLiveQuota(accountKey string) (AccountQuotaTelemet
 		return AccountQuotaTelemetry{}, false
 	}
 	key := normalizeAccountKey(accountKey)
+
+	// Si se solicita una familia específica, buscar la clave compuesta
+	if len(family) > 0 && strings.TrimSpace(family[0]) != "" {
+		fam := normalizeFamily(family[0])
+		compKey := compositeQuotaKey(key, fam)
+		if q, ok := pe.quotas[compKey]; ok {
+			return q, true
+		}
+	}
+
+	// Fallback a clave base o búsqueda por defecto
 	q, ok := pe.quotas[key]
 	return q, ok
 }
@@ -365,7 +412,7 @@ func (pe *PredictiveEngine) SetCooldown(accountEmail string, duration time.Durat
 
 // ShouldPreventiveCool indica si la cuenta debe descansar preventivamente para evitar un 429.
 // Mantiene al líder sticky mientras su cuota viva sea segura (>= 20% en 5h y >= 15% semanal).
-func (pe *PredictiveEngine) ShouldPreventiveCool(accountEmail string) bool {
+func (pe *PredictiveEngine) ShouldPreventiveCool(accountEmail string, family ...string) bool {
 	pe.mu.RLock()
 	defer pe.mu.RUnlock()
 
@@ -384,7 +431,17 @@ func (pe *PredictiveEngine) ShouldPreventiveCool(accountEmail string) bool {
 
 	// 2. ¿Tiene agotamiento crítico de cuota viva (< 20% en 5h o < 15% semanal)?
 	if pe.quotas != nil {
-		if q, ok := pe.quotas[key]; ok {
+		var q AccountQuotaTelemetry
+		var hasQ bool
+		if len(family) > 0 && strings.TrimSpace(family[0]) != "" {
+			fam := normalizeFamily(family[0])
+			compKey := compositeQuotaKey(key, fam)
+			q, hasQ = pe.quotas[compKey]
+		}
+		if !hasQ {
+			q, hasQ = pe.quotas[key]
+		}
+		if hasQ {
 			if !q.UpdatedAt.IsZero() {
 				// Sticky Leader Hysteresis: Si tiene cuota >= 20% (5h) y >= 15% (semanal),
 				// NO enfriar preventivamente, preservando el Prompt Cache.
@@ -413,7 +470,7 @@ func (pe *PredictiveEngine) ShouldPreventiveCool(accountEmail string) bool {
 
 // IsCriticalQuotaOrCooldown evalúa si la cuenta tiene cuota críticamente agotada (<15%) o cooldown activo,
 // lo cual justifica una rotación inmediata sin exigir margen de histeresis para evitar un 429 fatal.
-func (pe *PredictiveEngine) IsCriticalQuotaOrCooldown(accountEmail string) bool {
+func (pe *PredictiveEngine) IsCriticalQuotaOrCooldown(accountEmail string, family ...string) bool {
 	pe.mu.RLock()
 	defer pe.mu.RUnlock()
 
@@ -431,7 +488,17 @@ func (pe *PredictiveEngine) IsCriticalQuotaOrCooldown(accountEmail string) bool 
 
 	// 2. ¿Tiene agotamiento crítico de cuota viva (< 15% restante en ventana de 5h o semanal)?
 	if pe.quotas != nil {
-		if q, ok := pe.quotas[key]; ok {
+		var q AccountQuotaTelemetry
+		var hasQ bool
+		if len(family) > 0 && strings.TrimSpace(family[0]) != "" {
+			fam := normalizeFamily(family[0])
+			compKey := compositeQuotaKey(key, fam)
+			q, hasQ = pe.quotas[compKey]
+		}
+		if !hasQ {
+			q, hasQ = pe.quotas[key]
+		}
+		if hasQ {
 			if !q.UpdatedAt.IsZero() {
 				if q.Window5hPct < 15.0 || (q.WeeklyPct > 0 && q.WeeklyPct < 15.0) {
 					return true
@@ -444,7 +511,7 @@ func (pe *PredictiveEngine) IsCriticalQuotaOrCooldown(accountEmail string) bool 
 }
 
 // GetAccountStatus devuelve el porcentaje de fatiga y minutos restantes de descanso
-func (pe *PredictiveEngine) GetAccountStatus(accountEmail string) (fatiguePct float64, isCooling bool, minutesLeft int) {
+func (pe *PredictiveEngine) GetAccountStatus(accountEmail string, family ...string) (fatiguePct float64, isCooling bool, minutesLeft int) {
 	pe.mu.RLock()
 	defer pe.mu.RUnlock()
 
@@ -476,7 +543,17 @@ func (pe *PredictiveEngine) GetAccountStatus(accountEmail string) (fatiguePct fl
 
 	// Si la cuota viva está agotada (<15%), reportar como cooling preventivo si no lo estaba
 	if !isCooling && pe.quotas != nil {
-		if q, ok := pe.quotas[key]; ok {
+		var q AccountQuotaTelemetry
+		var hasQ bool
+		if len(family) > 0 && strings.TrimSpace(family[0]) != "" {
+			fam := normalizeFamily(family[0])
+			compKey := compositeQuotaKey(key, fam)
+			q, hasQ = pe.quotas[compKey]
+		}
+		if !hasQ {
+			q, hasQ = pe.quotas[key]
+		}
+		if hasQ {
 			if (q.Window5hPct > 0 && q.Window5hPct < 15.0) || (q.WeeklyPct > 0 && q.WeeklyPct < 15.0) {
 				isCooling = true
 				if q.Window5hResetIn > 0 {

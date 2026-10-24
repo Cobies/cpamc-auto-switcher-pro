@@ -120,4 +120,41 @@ func TestPredictiveEngine(t *testing.T) {
 	if !pe.ShouldPreventiveCool(quotaAcc) {
 		t.Fatalf("account with 0%% quota must trigger preventive cooling")
 	}
+
+	// 6. Test Multi-Family Quota Isolation on the exact same account
+	multiAcc := "multi-family-user@gmail.com"
+	pe.RecordLiveQuota(AccountQuotaTelemetry{
+		AccountKey:  multiAcc,
+		Family:      "gemini",
+		Window5hPct: 90.0,
+		WeeklyPct:   95.0,
+	})
+	pe.RecordLiveQuota(AccountQuotaTelemetry{
+		AccountKey:  multiAcc,
+		Family:      "claude",
+		Window5hPct: 10.0, // Claude exhausted on the same account
+		WeeklyPct:   15.0,
+	})
+
+	// Gemini quota query must yield 90.0%
+	qGem, okGem := pe.GetLiveQuota(multiAcc, "gemini")
+	if !okGem || qGem.Window5hPct != 90.0 {
+		t.Fatalf("expected Gemini quota 90.0, got %+v (ok: %v)", qGem, okGem)
+	}
+
+	// Claude quota query must yield 10.0%
+	qClau, okClau := pe.GetLiveQuota(multiAcc, "claude")
+	if !okClau || qClau.Window5hPct != 10.0 {
+		t.Fatalf("expected Claude quota 10.0, got %+v (ok: %v)", qClau, okClau)
+	}
+
+	// In Claude family, account should preventive cool
+	if !pe.ShouldPreventiveCool(multiAcc, "claude") {
+		t.Fatalf("expected account to preventive cool under Claude")
+	}
+
+	// In Gemini family, account should NOT preventive cool because Gemini quota is 90%
+	if pe.ShouldPreventiveCool(multiAcc, "gemini") {
+		t.Fatalf("expected account NOT to cool under Gemini when Gemini has 90%% quota")
+	}
 }

@@ -306,6 +306,7 @@ func (p *AutonomousQuotaPoller) ingestQuotaPayload(payload []byte, memberFile, e
 
 		predEngine.RecordLiveQuota(AccountQuotaTelemetry{
 			AccountKey:  accountKey,
+			Family:      fam,
 			Window5hPct: w5h,
 			WeeklyPct:   weekly,
 			UpdatedAt:   time.Now(),
