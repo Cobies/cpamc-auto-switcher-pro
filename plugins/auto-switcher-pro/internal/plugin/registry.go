@@ -995,7 +995,8 @@ func handlePoolsHTTP(req ManagementRequestPayload) ([]byte, error) {
 			// Si no es una rotación forzada (por error 429 o red), comprobar si el líder realmente necesita descanso
 			if !isForced && (reason == "agent turn" || reason == "preventive" || (rotPayload.Force != nil && !*rotPayload.Force)) {
 				predEngine := GetPredictiveEngine()
-				if !predEngine.ShouldPreventiveCool(currentLeader) {
+				poolFam := familyCanonicalShortName(pool.Family, pool.BasePrefix)
+				if !predEngine.ShouldPreventiveCool(currentLeader, poolFam) {
 					resp := map[string]any{
 						"ok":             true,
 						"rotated":        false,
@@ -1009,7 +1010,7 @@ func handlePoolsHTTP(req ManagementRequestPayload) ([]byte, error) {
 					// Ghost Warmup Recommendation: si el líder está en fatiga >= 75% o enfriamiento,
 					// sugerir a la extensión de Pi la mejor reserva para pre-calentar el Prompt Cache con inferencia real
 					cEmail := strings.TrimSuffix(strings.TrimPrefix(currentLeader, "antigravity-"), ".json")
-					fatiguePct, isCooling, _ := predEngine.GetAccountStatus(cEmail)
+					fatiguePct, isCooling, _ := predEngine.GetAccountStatus(cEmail, poolFam)
 					if fatiguePct >= 75.0 || isCooling {
 						members := pool.AllMembers()
 						var bestReserve string
@@ -1019,10 +1020,10 @@ func handlePoolsHTTP(req ManagementRequestPayload) ([]byte, error) {
 								continue
 							}
 							resEmail := strings.TrimSuffix(strings.TrimPrefix(m, "antigravity-"), ".json")
-							if predEngine.ShouldPreventiveCool(resEmail) {
+							if predEngine.ShouldPreventiveCool(resEmail, poolFam) {
 								continue
 							}
-							q, hasQ := predEngine.GetLiveQuota(resEmail)
+							q, hasQ := predEngine.GetLiveQuota(resEmail, poolFam)
 							score := 50.0
 							if hasQ {
 								score = q.Window5hPct + q.WeeklyPct
@@ -1052,7 +1053,7 @@ func handlePoolsHTTP(req ManagementRequestPayload) ([]byte, error) {
 				// 2) Exigir que el líder esté en zona de peligro (< 20%) y que la mejor reserva
 				//    tenga al menos +35% (Δ >= 35%) de ventaja en ventana de 5h antes de rotar.
 				leaderEmail := strings.TrimSuffix(strings.TrimPrefix(currentLeader, "antigravity-"), ".json")
-				leaderQuota, hasLeaderQuota := predEngine.GetLiveQuota(leaderEmail)
+				leaderQuota, hasLeaderQuota := predEngine.GetLiveQuota(leaderEmail, poolFam)
 
 				if !hasLeaderQuota {
 					resp := map[string]any{
@@ -1074,8 +1075,8 @@ func handlePoolsHTTP(req ManagementRequestPayload) ([]byte, error) {
 						continue
 					}
 					resEmail := strings.TrimSuffix(strings.TrimPrefix(m, "antigravity-"), ".json")
-					if !predEngine.ShouldPreventiveCool(resEmail) {
-						if q, hasQ := predEngine.GetLiveQuota(resEmail); hasQ {
+					if !predEngine.ShouldPreventiveCool(resEmail, poolFam) {
+						if q, hasQ := predEngine.GetLiveQuota(resEmail, poolFam); hasQ {
 							if leaderQuota.Window5hPct < 20.0 && (q.Window5hPct-leaderQuota.Window5hPct) >= 35.0 {
 								hasHealthyReserveWithAdvantage = true
 								break

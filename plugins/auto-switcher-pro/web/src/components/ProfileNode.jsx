@@ -172,6 +172,20 @@ function ProfileNode({ id, data, isConnectable }) {
               👑 RAM
             </span>
           )}
+          {data?.roleSuffix && (
+            <span
+              className={`profile-badge badge-facet badge-facet-${data.roleSuffix}`}
+              style={{
+                backgroundColor: data.roleSuffix === 'claude' ? 'rgba(168, 85, 247, 0.2)' : 'rgba(56, 189, 248, 0.2)',
+                color: data.roleSuffix === 'claude' ? '#c084fc' : '#38bdf8',
+                border: data.roleSuffix === 'claude' ? '1px solid rgba(168, 85, 247, 0.4)' : '1px solid rgba(56, 189, 248, 0.4)',
+                fontWeight: 800,
+              }}
+              title={`Faceta ${data.roleSuffix.toUpperCase()}`}
+            >
+              {data.roleSuffix === 'claude' ? '🟣 CLAUDE' : '♊ GEMINI'}
+            </span>
+          )}
           {accountType && (
             <span
               className={`profile-badge badge-account-type badge-type-${accountType.toLowerCase()}`}

@@ -667,6 +667,55 @@ describe('buildGraphFromAuthFiles & Credential Leak Prevention', () => {
     // child-ambiguous.json remains disconnected (no edge invented)
     expect(edges.some((e) => e.target === 'child-ambiguous.json')).toBe(false);
   });
+
+  it('projects dual visual nodes for Antigravity accounts assigned across Gemini and Claude pools', () => {
+    const authFiles = [
+      { name: 'antigravity-shared.json', type: 'antigravity', prefix: 'agy' },
+      { name: 'antigravity-claude-leader.json', type: 'antigravity', prefix: 'agy_clau' },
+    ];
+    const registeredPools = [
+      {
+        id: 'Pool-01-gemini',
+        family: 'gemini_pure',
+        base_prefix: 'agy',
+        leader_auth: 'antigravity-shared.json',
+      },
+      {
+        id: 'Pool-04-claude',
+        family: 'claude',
+        base_prefix: 'agy_clau',
+        leader_auth: 'antigravity-claude-leader.json',
+        reserves: ['antigravity-shared.json'],
+      },
+    ];
+
+    const { nodes, edges } = buildGraphFromAuthFiles(authFiles, { registeredPools });
+
+    // antigravity-shared.json must be projected as two distinct nodes
+    const geminiNode = nodes.find((n) => n.id === 'antigravity-shared.json@gemini');
+    const claudeNode = nodes.find((n) => n.id === 'antigravity-shared.json@claude');
+
+    expect(geminiNode).toBeDefined();
+    expect(claudeNode).toBeDefined();
+    expect(geminiNode.data.fileName).toBe('antigravity-shared.json');
+    expect(claudeNode.data.fileName).toBe('antigravity-shared.json');
+    expect(geminiNode.data.roleSuffix).toBe('gemini');
+    expect(claudeNode.data.roleSuffix).toBe('claude');
+
+    // Gemini facet is leader of Pool-01-gemini -> isRoot = true
+    expect(geminiNode.data.isPoolLeader).toBe(true);
+    expect(geminiNode.data.isRoot).toBe(true);
+
+    // Claude facet is reserve of Pool-04-claude -> isChild = true, target of edge from claude leader
+    expect(claudeNode.data.isPoolLeader).toBe(false);
+    expect(claudeNode.data.isRoot).toBe(false);
+
+    // Edge from claude leader to claude facet of shared account
+    const claudeEdge = edges.find(
+      (e) => e.source === 'antigravity-claude-leader.json' && e.target === 'antigravity-shared.json@claude'
+    );
+    expect(claudeEdge).toBeDefined();
+  });
 });
 
 describe('sanitizeFileName Helper', () => {

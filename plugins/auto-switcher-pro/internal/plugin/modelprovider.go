@@ -1099,6 +1099,7 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 		leaderAuth = cascade[0]
 	}
 	leaderEmail := strings.TrimSuffix(strings.TrimPrefix(leaderAuth, "antigravity-"), ".json")
+	poolFam := familyCanonicalShortName(pool.Family, pool.BasePrefix)
 
 	// Blindaje de Prompt Caching (Histeresis & Sticky Session):
 	// Para no destruir los embeddings en caché de Google Antigravity a mitad de una tarea larga:
@@ -1108,7 +1109,7 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 	//    - Y la reserva candidata DEBE tener al menos +35% (Δ >= 35%) de ventaja confirmada.
 	hasHealthyReserve := false
 	reserveWithBetterQuota := false
-	leaderQuota, hasLeaderQuota := predEngine.GetLiveQuota(leaderEmail)
+	leaderQuota, hasLeaderQuota := predEngine.GetLiveQuota(leaderEmail, poolFam)
 
 	if len(cascade) > 1 {
 		for _, resAuth := range cascade[1:] {
@@ -1116,7 +1117,7 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 				hasHealthyReserve = true
 				if hasLeaderQuota {
 					resEmail := strings.TrimSuffix(strings.TrimPrefix(resAuth, "antigravity-"), ".json")
-					if resQ, ok := predEngine.GetLiveQuota(resEmail); ok {
+					if resQ, ok := predEngine.GetLiveQuota(resEmail, poolFam); ok {
 						// Histeresis estricta: líder en zona de peligro (< 20%) y reserva con ventaja >= +35%
 						if leaderQuota.Window5hPct < 20.0 && (resQ.Window5hPct-leaderQuota.Window5hPct) >= 35.0 {
 							reserveWithBetterQuota = true
@@ -1133,9 +1134,9 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 	// Para rotación preventiva: solo si líder <20% y la reserva tiene >= +35% de ventaja confirmada
 	skipLeaderPredictive := false
 	if hasHealthyReserve {
-		if predEngine.IsCriticalQuotaOrCooldown(leaderEmail) {
+		if predEngine.IsCriticalQuotaOrCooldown(leaderEmail, poolFam) {
 			skipLeaderPredictive = true
-		} else if predEngine.ShouldPreventiveCool(leaderEmail) && reserveWithBetterQuota {
+		} else if predEngine.ShouldPreventiveCool(leaderEmail, poolFam) && reserveWithBetterQuota {
 			skipLeaderPredictive = true
 		}
 	}
@@ -1156,8 +1157,8 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 			sort.SliceStable(reserves, func(a, b int) bool {
 				emailA := strings.TrimSuffix(strings.TrimPrefix(reserves[a], "antigravity-"), ".json")
 				emailB := strings.TrimSuffix(strings.TrimPrefix(reserves[b], "antigravity-"), ".json")
-				qA, hasA := predEngine.GetLiveQuota(emailA)
-				qB, hasB := predEngine.GetLiveQuota(emailB)
+				qA, hasA := predEngine.GetLiveQuota(emailA, poolFam)
+				qB, hasB := predEngine.GetLiveQuota(emailB, poolFam)
 				if hasA && hasB {
 					if taskType == "HEAVY" {
 						// Para tareas pesadas, la cuota semanal manda (70% peso semanal, 30% 5h)
@@ -1189,7 +1190,7 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 			for idx, authFile := range orderedCascade {
 				mEmail := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(authFile, "antigravity-"), ".json"))
 				if mEmail == affEmail {
-					if _, isAvail := available[strings.ToLower(authFile)]; isAvail && !predEngine.ShouldPreventiveCool(mEmail) {
+					if _, isAvail := available[strings.ToLower(authFile)]; isAvail && !predEngine.ShouldPreventiveCool(mEmail, poolFam) {
 						if idx > 0 {
 							matched := orderedCascade[idx]
 							orderedCascade = append(orderedCascade[:idx], orderedCascade[idx+1:]...)
@@ -1212,11 +1213,11 @@ func schedulerPickCascade(registry *PoolRegistry, req schedulerPickRequest) sche
 		for idx, member := range cascade {
 			if _, isAvail := available[strings.ToLower(member)]; isAvail {
 				mEmail := strings.TrimSuffix(strings.TrimPrefix(member, "antigravity-"), ".json")
-				fatiguePct, isCooling, _ := predEngine.GetAccountStatus(mEmail)
+				fatiguePct, isCooling, _ := predEngine.GetAccountStatus(mEmail, poolFam)
 				if idx == 0 && (fatiguePct >= 80.0 || isCooling) {
 					leaderFatigued = true
 				}
-				if fatiguePct < 80.0 && !isCooling && !predEngine.ShouldPreventiveCool(mEmail) {
+				if fatiguePct < 80.0 && !isCooling && !predEngine.ShouldPreventiveCool(mEmail, poolFam) {
 					allFatigued = false
 					if idx > 0 {
 						break
