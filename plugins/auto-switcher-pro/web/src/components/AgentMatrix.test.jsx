@@ -92,7 +92,7 @@ describe('AgentMatrix Component', () => {
     expect(screen.getByText('🛠️ gentle-ai-worker')).toBeDefined();
 
     // 2. Check Dynamic Harness clarity badges
-    expect(screen.getByText('📟 Gentle-Shell Terminal CLI')).toBeDefined();
+    expect(screen.getByText('GENTLE-SHELL CLI')).toBeDefined();
     expect(screen.getByText(/Terminal CLI Soberana/i)).toBeDefined();
 
     // 3. Columns in primary table view: ROL/AGENTE, PRIMARIO, THINKING, TEST
@@ -219,7 +219,7 @@ describe('AgentMatrix Component', () => {
     // 1. Gentle-AI / Gentle-Shell must be displayed
     expect(screen.getByText('👑 ORQUESTADOR GENTLE')).toBeDefined();
     expect(screen.getByText('🛠️ gentle-ai-worker')).toBeDefined();
-    expect(screen.getByText('📟 Gentle-Shell Terminal CLI')).toBeDefined();
+    expect(screen.getByText('GENTLE-SHELL CLI')).toBeDefined();
 
     // 2. j0k3r-pi MUST NOT be displayed in tabs or body
     expect(screen.queryByText('👑 ORQUESTADOR J0K3R')).toBeNull();

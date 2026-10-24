@@ -1281,9 +1281,6 @@ export default function AgentMatrix() {
                 <span className={`universe-accordion-chevron ${isVerExpanded ? 'open' : ''}`}>▶</span>
                 <span className="universe-icon">{harness.icon}</span>
                 <span className="universe-title">{harness.name.toUpperCase()}</span>
-                {harness.badge && (
-                  <span className="chip-shell">{harness.badge}</span>
-                )}
                 <span className="universe-meta" title={`Ruta de configuración: ${harness.config_path}`} onClick={(e) => e.stopPropagation()}>
                   📁 {harness.config_path}
                 </span>
