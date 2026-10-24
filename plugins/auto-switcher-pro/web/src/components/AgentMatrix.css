@@ -1,95 +1,340 @@
 .agent-matrix-container {
-  padding: 24px;
-  max-width: 1400px;
+  padding: 16px 20px;
+  max-width: 1440px;
   margin: 0 auto;
   color: #f8fafc;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
-.matrix-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 24px;
-  background: rgba(15, 23, 42, 0.6);
-  backdrop-filter: blur(12px);
-  padding: 20px 24px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.matrix-title-group h2 {
-  margin: 0 0 6px 0;
-  font-size: 20px;
-  font-weight: 700;
+/* ==========================================================================
+   COCKPIT TOOLBAR (1 Sola Línea UX/UI Pro - Cyberpunk Glassmorphic 2027)
+   ========================================================================== */
+.matrix-cockpit-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  color: #fff;
-}
-
-.matrix-subtitle {
-  margin: 0;
-  font-size: 13px;
-  color: #94a3b8;
-}
-
-.matrix-actions {
-  display: flex;
   gap: 12px;
-  align-items: center;
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 8px 14px;
+  margin-bottom: 18px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
-.matrix-save-btn {
-  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-  color: #ffffff;
-  border: none;
-  border-radius: 8px;
-  padding: 10px 20px;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
+.matrix-cockpit-bar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Divisor sutil entre módulos */
+.cockpit-divider {
+  width: 1px;
+  height: 24px;
+  background: rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+
+/* 1. Identidad */
+.cockpit-brand {
   display: flex;
   align-items: center;
   gap: 8px;
-  transition: all 0.2s ease;
-  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);
+  cursor: help;
+  flex-shrink: 0;
 }
 
-.matrix-scan-btn {
+.cockpit-logo {
+  font-size: 18px;
+  filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.4));
+}
+
+.cockpit-title {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  background: linear-gradient(135deg, #ffffff 30%, #94a3b8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  white-space: nowrap;
+}
+
+/* 2. Semáforo Telemetría */
+.cockpit-gauge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(15, 23, 42, 0.5);
+  font-size: 12px;
+  cursor: help;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.cockpit-gauge:hover {
+  transform: translateY(-1px);
+}
+
+.cockpit-gauge.optimal {
+  background: rgba(16, 185, 129, 0.08);
+  border-color: rgba(16, 185, 129, 0.3);
+  color: #34d399;
+}
+
+.cockpit-gauge.moderate {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.3);
+  color: #fbbf24;
+}
+
+.cockpit-gauge.critical {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #f87171;
+}
+
+.gauge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+  animation: pulse-dot 2s infinite ease-in-out;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+.gauge-badge {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.gauge-autonomy {
+  background: rgba(255, 255, 255, 0.06);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.gauge-desc-hidden {
+  display: none;
+}
+
+/* 3. Estrategia de Ejecución */
+.cockpit-presets {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.presets-mini-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.cockpit-segmented-control {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 2px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  gap: 2px;
+}
+
+.cockpit-segmented-control .preset-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.cockpit-segmented-control .preset-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #f1f5f9;
+}
+
+.cockpit-segmented-control .preset-btn.safe:hover {
+  color: #34d399;
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.cockpit-segmented-control .preset-btn.pro:hover {
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.cockpit-segmented-control .preset-btn.turbo:hover {
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+/* 4. Switcher de Universos / Arneses */
+.cockpit-tabs-wrapper {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.cockpit-tabs {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 2px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  gap: 2px;
+}
+
+.cockpit-tab-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #94a3b8;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cockpit-tab-btn:hover {
+  color: #e2e8f0;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.cockpit-tab-btn.active {
   background: rgba(56, 189, 248, 0.12);
   color: #38bdf8;
-  border: 1px solid rgba(56, 189, 248, 0.35);
-  border-radius: 8px;
-  padding: 10px 18px;
-  font-size: 13px;
+  border-color: rgba(56, 189, 248, 0.3);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.15);
+}
+
+.tab-count-pill {
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 10px;
   font-weight: 700;
-  cursor: pointer;
+  padding: 1px 5px;
+  border-radius: 10px;
+  color: inherit;
+}
+
+.cockpit-single-harness-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #7dd3fc;
+  white-space: nowrap;
+}
+
+.cockpit-no-harness {
+  font-size: 11px;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+
+/* 5. Acciones Rápidas (Empujadas al extremo derecho) */
+.cockpit-actions {
   display: flex;
   align-items: center;
   gap: 8px;
-  transition: all 0.2s ease;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
-.matrix-scan-btn:hover:not(:disabled) {
-  background: rgba(56, 189, 248, 0.22);
+.cockpit-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cockpit-action-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.cockpit-action-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.cockpit-action-btn.warmup {
+  background: rgba(245, 158, 11, 0.08);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.cockpit-action-btn.warmup:hover:not(:disabled) {
+  background: rgba(245, 158, 11, 0.16);
+  border-color: #fbbf24;
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.2);
+}
+
+.cockpit-action-btn.scan {
+  background: rgba(56, 189, 248, 0.08);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+}
+
+.cockpit-action-btn.scan:hover:not(:disabled) {
+  background: rgba(56, 189, 248, 0.18);
   border-color: #38bdf8;
-  transform: translateY(-1px);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.2);
 }
 
-.matrix-scan-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+.cockpit-action-btn.save {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #ffffff;
+  border: 1px solid rgba(16, 185, 129, 0.6);
+  box-shadow: 0 2px 10px rgba(16, 185, 129, 0.25);
 }
 
-.matrix-save-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.35);
-}
-
-.matrix-save-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+.cockpit-action-btn.save:hover:not(:disabled) {
+  background: linear-gradient(135deg, #34d399 0%, #059669 100%);
+  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.4);
 }
 
 /* Universo Selector Segmented Control */

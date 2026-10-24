@@ -413,7 +413,9 @@ export default function AgentMatrix() {
       return {
         level: 'optimal',
         badge: '🟢 Distribución Óptima',
+        shortBadge: '🟢 Óptima',
         autonomy: '> 8 horas continuas',
+        shortAutonomy: '>8h',
         desc: 'Cargas balanceadas hacia Gemini; cuota de Claude reservada para tareas críticas.',
         claudePressure,
       };
@@ -421,7 +423,9 @@ export default function AgentMatrix() {
       return {
         level: 'moderate',
         badge: '🟡 Carga Moderada',
+        shortBadge: '🟡 Moderada',
         autonomy: '3 - 5 horas continuas',
+        shortAutonomy: '3-5h',
         desc: 'Uso activo de Claude; vigilar ráfagas de subagentes concurrentes en paralelo.',
         claudePressure,
       };
@@ -429,7 +433,9 @@ export default function AgentMatrix() {
       return {
         level: 'critical',
         badge: '🔴 Estrés Crítico de Cuota',
+        shortBadge: '🔴 Crítica',
         autonomy: '< 30 minutos',
+        shortAutonomy: '<30m',
         desc: 'Riesgo de agotar la ventana de 5h. Se recomienda desviar discovery/verify a Gemini o activar Auto-Downgrade T2+.',
         claudePressure,
       };
@@ -904,26 +910,113 @@ export default function AgentMatrix() {
 
   return (
     <div className="agent-matrix-container">
-      {/* Header Bar */}
-      <div className="matrix-header">
-        <div className="matrix-title-group">
-          <h2>
-            <span>🎛️</span>
-            <span>Matriz de Agentes & Orquestación</span>
-          </h2>
-          <p className="matrix-subtitle">
-            Control unificado de orquestadores y subagentes detectados dinámicamente en el equipo
-          </p>
+      {/* Cockpit Toolbar en 1 sola línea (Glassmorphic Cyberpunk 2027) */}
+      <div className="matrix-cockpit-bar">
+        {/* 1. Identidad */}
+        <div className="cockpit-brand" title="Control unificado de orquestadores y subagentes detectados dinámicamente en el equipo">
+          <span className="cockpit-logo">🎛️</span>
+          <span className="cockpit-title">Matriz de Agentes & Orquestación</span>
         </div>
 
-        <div className="matrix-actions">
+        <div className="cockpit-divider" />
+
+        {/* 2. Semáforo Telemetría (Micro-Pill Interactiva con Tooltip Rico) */}
+        <div
+          className={`cockpit-gauge ${stress.level}`}
+          data-testid="token-burn-gauge"
+          title={`${stress.badge} · Autonomía estimada: ${stress.autonomy}\n${stress.desc}`}
+        >
+          <span className="gauge-dot" />
+          <span className="gauge-badge">{stress.shortBadge || stress.badge} · {stress.shortAutonomy || stress.autonomy}</span>
+          <span className="gauge-desc-hidden">Autonomía estimada: {stress.autonomy} - {stress.desc}</span>
+        </div>
+
+        <div className="cockpit-divider" />
+
+        {/* 3. Estrategia de Ejecución (Segmented Control) */}
+        <div className="cockpit-presets">
+          <span className="presets-mini-label" title="Estrategia global de concurrencia">
+            <span className="presets-icon">🎛️</span>
+            <span>Estrategia:</span>
+          </span>
+          <div className="cockpit-segmented-control">
+            <button
+              type="button"
+              className="preset-btn safe"
+              onClick={() => handleApplyPreset('safe')}
+              title="Concurrencia en 1 tarea para todos los agentes. Máximo ahorro de cuota y cero riesgo."
+            >
+              🛡️ Modo Seguro
+            </button>
+            <button
+              type="button"
+              className="preset-btn pro"
+              onClick={() => handleApplyPreset('pro')}
+              title="Escritores en 1 tarea fija, lectores y exploradores en 2 tareas simultáneas. Velocidad 2x recomendada."
+            >
+              ⚡ Modo Pro
+            </button>
+            <button
+              type="button"
+              className="preset-btn turbo"
+              onClick={() => handleApplyPreset('turbo')}
+              title="Escritores protegidos en 1 tarea, exploradores a 3 tareas en ráfaga para proyectos gigantes."
+            >
+              🚀 Modo Turbo
+            </button>
+          </div>
+        </div>
+
+        <div className="cockpit-divider" />
+
+        {/* 4. Switcher de Universos / Arneses */}
+        <div className="cockpit-tabs-wrapper">
+          {harnesses.length > 1 ? (
+            <div className="cockpit-tabs">
+              <button
+                type="button"
+                className={`cockpit-tab-btn ${activeUniverse === 'all' ? 'active' : ''}`}
+                onClick={() => handleUniverseChange('all')}
+                title="Mostrar todos los arneses y agentes en una vista unificada"
+              >
+                <span>🌐</span>
+                <span>Vista Global Completa</span>
+              </button>
+              {harnesses.map((h) => (
+                <button
+                  key={h.id}
+                  type="button"
+                  className={`cockpit-tab-btn ${activeUniverse === h.id ? 'active' : ''}`}
+                  onClick={() => handleUniverseChange(h.id)}
+                  title={`Filtrar exclusivamente agentes de ${h.name}`}
+                >
+                  <span>{h.icon}</span>
+                  <span>{h.name}</span>
+                  <span className="tab-count-pill">{h.agents?.filter((a) => !a.is_orchestrator).length || 0}</span>
+                </button>
+              ))}
+            </div>
+          ) : harnesses.length === 1 ? (
+            <div className="cockpit-single-harness-badge" title="Arnés detectado">
+              <span>{harnesses[0].icon} {harnesses[0].name}</span>
+              <span className="tab-count-pill">({harnesses[0].agents?.filter((a) => !a.is_orchestrator).length || 0} agentes detectados en disco)</span>
+            </div>
+          ) : (
+            <div className="cockpit-no-harness">
+              <span>⚠️ Sin arneses detectados</span>
+            </div>
+          )}
+        </div>
+
+        {/* 5. Acciones Rápidas */}
+        <div className="cockpit-actions">
           {feedback.text && (
             <span
               style={{
-                fontSize: 12,
+                fontSize: 11,
                 fontWeight: 700,
                 color: feedback.type === 'error' ? '#ef4444' : '#10b981',
-                marginRight: 8,
+                whiteSpace: 'nowrap',
               }}
             >
               {feedback.text}
@@ -931,126 +1024,36 @@ export default function AgentMatrix() {
           )}
           <button
             type="button"
-            className="matrix-scan-btn"
-            style={{ borderColor: 'rgba(245, 158, 11, 0.4)', color: '#fbbf24', background: 'rgba(245, 158, 11, 0.08)' }}
+            className="cockpit-action-btn warmup"
             onClick={handleTriggerWarmup}
             disabled={warming || loading}
             title="Disparar Shadow Warmup predictivo para pre-calentar conexiones y prompt cache"
           >
             <span>{warming ? '⏳' : '⚡'}</span>
-            <span>{warming ? 'Calentando...' : 'Warmup Triage'}</span>
+            <span className="btn-label-text">{warming ? 'Calentando...' : 'Warmup Triage'}</span>
           </button>
           <button
             type="button"
-            className="matrix-scan-btn"
+            className="cockpit-action-btn scan"
             onClick={handleScanEnvironment}
             disabled={scanning || loading}
             title="Escanear y detectar los arneses instalados en el equipo"
           >
             <span>{scanning ? '⏳' : '🔍'}</span>
-            <span>{scanning ? 'Escaneando...' : 'Detectar Arneses'}</span>
+            <span className="btn-label-text">{scanning ? 'Escaneando...' : 'Detectar Arneses'}</span>
           </button>
           <button
             type="button"
-            className="matrix-save-btn"
+            className="cockpit-action-btn save"
             onClick={handleSave}
             disabled={saving || loading}
+            title="Guardar y sincronizar la configuración en todos los arneses"
           >
             <span>💾</span>
-            <span>{saving ? 'Guardando...' : 'Guardar Todo'}</span>
+            <span className="btn-label-text">{saving ? 'Guardando...' : 'Guardar Todo'}</span>
           </button>
         </div>
       </div>
-
-      {/* Semáforo de Estrés de Cuota ("Token Burn Gauge") */}
-      <div className={`token-burn-gauge ${stress.level}`} data-testid="token-burn-gauge">
-        <span className="gauge-badge">{stress.badge}</span>
-        <span className="gauge-autonomy">Autonomía estimada: {stress.autonomy}</span>
-        <span className="gauge-desc">{stress.desc}</span>
-      </div>
-
-      {/* Preset Strategy Bar (Claude Design 2027) */}
-      <div className="matrix-presets-bar">
-        <div className="presets-label">
-          <span className="presets-icon">🎛️</span>
-          <span>Estrategia de Ejecución:</span>
-        </div>
-        <div className="presets-buttons">
-          <button
-            type="button"
-            className="preset-btn safe"
-            onClick={() => handleApplyPreset('safe')}
-            title="Concurrencia en 1 tarea para todos los agentes. Máximo ahorro de cuota y cero riesgo."
-          >
-            🛡️ Modo Seguro
-          </button>
-          <button
-            type="button"
-            className="preset-btn pro"
-            onClick={() => handleApplyPreset('pro')}
-            title="Escritores en 1 tarea fija, lectores y exploradores en 2 tareas simultáneas. Velocidad 2x recomendada."
-          >
-            ⚡ Modo Pro
-          </button>
-          <button
-            type="button"
-            className="preset-btn turbo"
-            onClick={() => handleApplyPreset('turbo')}
-            title="Escritores protegidos en 1 tarea, exploradores a 3 tareas en ráfaga para proyectos gigantes."
-          >
-            🚀 Modo Turbo
-          </button>
-        </div>
-      </div>
-
-      {/* Universe Segmented Tabs (Dinámico según harnesses detectados) */}
-      {harnesses.length > 1 ? (
-        <div className="matrix-tabs">
-          <button
-            type="button"
-            className={`matrix-tab-btn ${activeUniverse === 'all' ? 'active' : ''}`}
-            onClick={() => handleUniverseChange('all')}
-          >
-            <span>🌐</span>
-            <span>Vista Global Completa</span>
-          </button>
-          {harnesses.map((h) => (
-            <button
-              key={h.id}
-              type="button"
-              className={`matrix-tab-btn ${activeUniverse === h.id ? 'active' : ''}`}
-              onClick={() => handleUniverseChange(h.id)}
-            >
-              <span>{h.icon}</span>
-              <span>{h.name} ({h.agents?.filter((a) => !a.is_orchestrator).length || 0})</span>
-            </button>
-          ))}
-        </div>
-      ) : harnesses.length === 1 ? (
-        <div className="matrix-tabs" style={{ background: 'transparent', border: 'none', padding: 0 }}>
-          <div className="matrix-single-universe-badge" style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '6px 14px',
-            background: 'rgba(56, 189, 248, 0.1)',
-            border: '1px solid rgba(56, 189, 248, 0.25)',
-            borderRadius: '8px',
-            fontSize: '12px',
-            color: '#7dd3fc',
-            fontWeight: 600,
-          }}>
-            <span>{harnesses[0].icon} {harnesses[0].name}</span>
-            <span style={{ fontSize: '11px', color: '#94a3b8' }}>• ({harnesses[0].agents?.filter((a) => !a.is_orchestrator).length || 0} agentes detectados en disco)</span>
-          </div>
-        </div>
-      ) : (
-        <div className="matrix-tabs" style={{ background: 'transparent', border: 'none', padding: 0 }}>
-          <div style={{ color: '#94a3b8', fontSize: 12 }}>
-            No se detectaron arneses configurados. Pulsa en <strong>🔍 Detectar Arneses</strong> para escanear el entorno.
-          </div>
-        </div>
-      )}
 
       {/* Harness Sections (100% Dinámicas) */}
       {harnesses.map((harness) => {
