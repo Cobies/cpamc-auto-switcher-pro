@@ -696,18 +696,24 @@ export async function getAuthFileModels(fileName, options = {}) {
     return [];
   }
   const cleanName = fileName.trim();
-  const endpoint = `/v0/management/auth-files/models?name=${encodeURIComponent(cleanName)}`;
-  try {
-    const res = await apiFetch(endpoint, options);
-    const data = await res.json();
-    if (Array.isArray(data?.models)) {
-      return data.models.map((m) => m?.id || m?.name || String(m)).filter(Boolean);
+  const endpoints = [
+    `/v0/management/auth-files/models?name=${encodeURIComponent(cleanName)}`,
+    `/v8/management/credentials/models?name=${encodeURIComponent(cleanName)}`,
+  ];
+  for (const endpoint of endpoints) {
+    try {
+      const res = await apiFetch(endpoint, options);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data?.models) && data.models.length > 0) {
+          return data.models.map((m) => m?.id || m?.name || String(m)).filter(Boolean);
+        }
+      }
+    } catch (_err) {
+      // fallback al siguiente endpoint
     }
-    return [];
-  } catch (err) {
-    console.warn(`[VisualProfile] getAuthFileModels failed for "${cleanName}":`, err.message);
-    return [];
   }
+  return [];
 }
 
 /**
@@ -2245,8 +2251,12 @@ export function resolveInheritedCardModels(card, catalogModels = [], globalDisab
     } else if (effectiveFamily === 'claude') {
       const isDirectClaude = prefix.startsWith('clau');
       if (isDirectClaude) {
-        matches = (lower.includes('claude') || lower.includes('haiku') || lower.includes('sonnet') || lower.includes('opus')) &&
-                  !lower.includes('4-6') && !lower.includes('5-5') && !lower.startsWith('gpt');
+        matches =
+          rawId.toLowerCase().startsWith('clau/') ||
+          (lower.includes('claude') &&
+            !lower.includes('4-6') &&
+            !lower.includes('5-5') &&
+            !lower.startsWith('gpt'));
       } else {
         matches =
           lower.includes('claude') ||
@@ -2256,24 +2266,21 @@ export function resolveInheritedCardModels(card, catalogModels = [], globalDisab
       }
     } else if (effectiveFamily === 'codex') {
       matches =
+        rawId.toLowerCase().startsWith('codex/') ||
         lower.includes('codex') ||
-        lower.includes('astra') ||
-        lower.includes('sol') ||
-        lower.includes('terra') ||
-        lower.includes('luna') ||
         lower.includes('chatgpt') ||
-        /^gpt/.test(lower) ||
-        lower.includes('o1') ||
-        lower.includes('o3') ||
-        lower.includes('o4');
+        lower.startsWith('gpt-') ||
+        lower.startsWith('o1') ||
+        lower.startsWith('o3') ||
+        lower.startsWith('o4');
     } else if (CANONICAL_PROVIDER_MODELS[effectiveFamily]) {
       const canonicalSet = new Set(CANONICAL_PROVIDER_MODELS[effectiveFamily].map((m) => m.toLowerCase()));
       matches =
+        rawId.toLowerCase().startsWith(`${effectiveFamily}/`) ||
         canonicalSet.has(lower) ||
-        lower.includes(effectiveFamily) ||
-        rawId.toLowerCase().startsWith(`${effectiveFamily}/`);
+        lower.includes(effectiveFamily);
     } else {
-      matches = lower.includes(effectiveFamily) || rawId.toLowerCase().startsWith(`${effectiveFamily}/`);
+      matches = rawId.toLowerCase().startsWith(`${effectiveFamily}/`) || lower.includes(effectiveFamily);
     }
 
     if (matches) {
@@ -2281,13 +2288,12 @@ export function resolveInheritedCardModels(card, catalogModels = [], globalDisab
     }
   }
 
-  // Fallback transparente: si el catálogo upstream aún no expone modelos para esta familia,
-  // proveer el catálogo canónico del proveedor para garantizar selección honesta en la UI.
+  // Si el catálogo está vacío o no arrojó coincidencias, proveer fallback canónico de proveedor si existe
   if (resultSet.size === 0 && CANONICAL_PROVIDER_MODELS[effectiveFamily]) {
-    for (const m of CANONICAL_PROVIDER_MODELS[effectiveFamily]) {
-      const lower = m.toLowerCase();
-      if (!disabledSet.has(lower)) {
-        resultSet.add(m);
+    for (const canonical of CANONICAL_PROVIDER_MODELS[effectiveFamily]) {
+      const base = toBaseModelId(canonical);
+      if (base && !disabledSet.has(base.toLowerCase())) {
+        resultSet.add(base);
       }
     }
   }

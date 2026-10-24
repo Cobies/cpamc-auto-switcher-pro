@@ -81,13 +81,6 @@ const MODEL_FAMILIES = {
     provider: 'antigravity',
     quota: 'Claude and GPT models',
     note: 'Cuentas directas oficiales Anthropic (prefijo clau*). Convención: clau, clau2...',
-    models: [
-      'claude-3-7-sonnet',
-      'claude-3-5-sonnet',
-      'claude-3-5-haiku',
-      'claude-3-opus',
-      'claude-3-haiku',
-    ],
   },
   codex: {
     label: 'OpenAI Codex',
@@ -96,43 +89,6 @@ const MODEL_FAMILIES = {
     provider: 'codex',
     quota: 'Codex',
     note: 'Cuentas individuales Codex / OpenAI (prefijo codex*). Convención: codex, codex2...',
-    models: [
-      'gpt-6.1',
-      'gpt-6.1-sol',
-      'gpt-6.1-astra',
-      'gpt-6-astra',
-      'gpt-6-sol',
-      'gpt-6-luna',
-      'gpt-5.6-sol',
-      'gpt-5.6-terra',
-      'gpt-5.6-luna',
-      'gpt-5.5',
-      'gpt-5.5-pro',
-      'gpt-5.4',
-      'gpt-5.4-mini',
-      'gpt-5.4-nano',
-      'gpt-5.4-pro',
-      'gpt-5.3-codex',
-      'gpt-5.3-codex-spark',
-      'gpt-5.2',
-      'gpt-5.2-pro',
-      'gpt-5.1',
-      'gpt-5',
-      'o4-mini',
-      'o3',
-      'o3-mini',
-      'o3-pro',
-      'o1',
-      'o1-mini',
-      'o1-pro',
-      'o1-preview',
-      'chatgpt-4o-latest',
-      'gpt-4o',
-      'gpt-4o-mini',
-      'gpt-4.1',
-      'gpt-4-turbo',
-      'gpt-4',
-    ],
   },
 };
 
@@ -642,7 +598,29 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
   const availableSpecialistModels = useMemo(() => {
     if (!effectiveFamily) return [];
 
-    // Si la cuenta física seleccionada tiene modelos nativos inspeccionados vía getAuthFileModels:
+    // Verificación de existencia real: ¿Existen cuentas vinculadas en el sistema para esta familia?
+    const famProvider = effectiveFamily.provider;
+    const familyAccountsExist = nodes.some((n) => {
+      const prov = (n.data?.provider || n.data?.accountType || '').toLowerCase();
+      const p = (n.data?.prefix || '').toLowerCase();
+      const fileName = (n.data?.fileName || n.name || n.id || '').toLowerCase();
+      if (famProvider === 'antigravity') {
+        return prov === 'antigravity' || fileName.startsWith('antigravity');
+      }
+      return (
+        prov === famProvider ||
+        prov.includes(famProvider) ||
+        p.startsWith(effectiveFamily.hintPrefix) ||
+        fileName.startsWith(`${effectiveFamily.hintPrefix}-`)
+      );
+    });
+
+    // CERO HARDCODING: si no hay cuentas logeadas de esta familia, no inventar modelos
+    if (!familyAccountsExist) {
+      return [];
+    }
+
+    // 1. Si la cuenta física seleccionada tiene modelos nativos inspeccionados vía getAuthFileModels:
     if (selectedAuthModels.length > 0) {
       let models = [...selectedAuthModels];
       if (excludeVersion55) {
@@ -653,6 +631,7 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
       return sortModelsByFamilyAndVersion(models, targetFamilyRole, isCod, isGem);
     }
 
+    // 2. Extraer dinámicamente de los modelos activos del catálogo en tiempo real
     const sourceModels = Array.isArray(catalogModels) && catalogModels.length > 0
       ? catalogModels
       : [];
@@ -662,78 +641,24 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
     };
     let models = resolveInheritedCardModels(dummyCard, sourceModels);
 
-    // Si el catálogo aún no cargó o está vacío en tests, proveer los modelos canónicos conocidos
+    // Solo si existen cuentas logeadas de esta familia y el catálogo upstream aún no cargó:
     if (models.length === 0) {
-      if (effectiveFamily.models && effectiveFamily.models.length > 0) {
-        models = [...effectiveFamily.models];
-      } else if (effectiveFamily.key === 'gemini_pure') {
+      if (effectiveFamily.key === 'gemini_pure') {
         models = [
           'gemini-3.8-flash-high',
           'gemini-3.7-flash-high',
           'gemini-3.6-flash-high',
           'gemini-3.5-flash-lite',
-          'gemini-3.1-pro-low',
           'gemini-3.1-flash-lite',
-          'gemini-3.1-flash-image',
           'gemini-3-flash',
-          'gemini-pro-agent',
         ];
       } else if (effectiveFamily.key === 'gemini_sonnet') {
         models = ['claude-sonnet-4-6', 'claude-sonnet-5-5-high'];
       } else if (effectiveFamily.key === 'gemini_opus') {
         models = ['claude-opus-4-6-thinking', 'claude-opus-5-5-high'];
       } else if (effectiveFamily.key === 'gemini_claude') {
-        models = [
-          'claude-sonnet-4-6',
-          'claude-opus-4-6-thinking',
-        ];
-      } else if (effectiveFamily.key === 'claude') {
-        models = [
-          'claude-3-7-sonnet',
-          'claude-3-5-sonnet',
-          'claude-3-5-haiku',
-          'claude-3-opus',
-          'claude-3-haiku',
-        ];
-      } else if (effectiveFamily.key === 'codex') {
-        models = [
-          'gpt-6.1',
-          'gpt-6.1-sol',
-          'gpt-6.1-astra',
-          'gpt-6-astra',
-          'gpt-6-sol',
-          'gpt-6-luna',
-          'gpt-5.6-sol',
-          'gpt-5.6-terra',
-          'gpt-5.6-luna',
-          'gpt-5.5',
-          'gpt-5.5-pro',
-          'gpt-5.4',
-          'gpt-5.4-mini',
-          'gpt-5.4-nano',
-          'gpt-5.4-pro',
-          'gpt-5.3-codex',
-          'gpt-5.3-codex-spark',
-          'gpt-5.2',
-          'gpt-5.2-pro',
-          'gpt-5.1',
-          'gpt-5',
-          'o4-mini',
-          'o3',
-          'o3-mini',
-          'o3-pro',
-          'o1',
-          'o1-mini',
-          'o1-pro',
-          'o1-preview',
-          'chatgpt-4o-latest',
-          'gpt-4o',
-          'gpt-4o-mini',
-          'gpt-4.1',
-          'gpt-4-turbo',
-          'gpt-4',
-        ];
-      } else if (CANONICAL_PROVIDER_MODELS[targetFamilyRole]) {
+        models = ['claude-sonnet-4-6', 'claude-opus-4-6-thinking'];
+      } else if (effectiveFamily.isOmniAuthPro && CANONICAL_PROVIDER_MODELS[targetFamilyRole]) {
         models = [...CANONICAL_PROVIDER_MODELS[targetFamilyRole]];
       }
     }
@@ -745,7 +670,7 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
     const isGemini = (targetFamilyRole || '') === 'gemini';
     const isCodex = (targetFamilyRole || '') === 'codex';
     return sortModelsByFamilyAndVersion(models, targetFamilyRole, isCodex, isGemini);
-  }, [effectiveFamily, catalogModels, selectedAuthModels, targetFamilyRole, excludeVersion55]);
+  }, [effectiveFamily, nodes, catalogModels, selectedAuthModels, targetFamilyRole, excludeVersion55]);
 
   // Actualizar el modelo especialista predeterminado cuando cambie la familia o subtipo
   useEffect(() => {
@@ -2107,18 +2032,29 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
                       <select
                         className="group-select bento-select"
                         value={selectedSpecialistModel}
+                        disabled={availableSpecialistModels.length === 0}
                         onChange={(e) => setSelectedSpecialistModel(e.target.value)}
                         data-testid="select-specialist-model"
                       >
-                        {availableSpecialistModels.map((m, idx) => (
-                          <option key={m} value={m}>
-                            {m}{idx === 0 ? ' ⭐ (Recomendado)' : ''}
-                          </option>
-                        ))}
+                        {availableSpecialistModels.length === 0 ? (
+                          <option value="">-- Sin cuentas logeadas / No hay modelos disponibles --</option>
+                        ) : (
+                          availableSpecialistModels.map((m, idx) => (
+                            <option key={m} value={m}>
+                              {m}{idx === 0 ? ' ⭐ (Recomendado)' : ''}
+                            </option>
+                          ))
+                        )}
                       </select>
-                      <p className="bento-specialist-hint">
-                        🔒 Este pool responderá <strong>únicamente</strong> a <code>{selectedSpecialistModel || 'este modelo'}</code>. Los restantes {Math.max(0, availableSpecialistModels.length - 1)} modelos de su familia quedan automáticamente bloqueados para aislar la cuota.
-                      </p>
+                      {availableSpecialistModels.length === 0 ? (
+                        <p className="bento-specialist-hint" style={{ color: '#f59e0b' }}>
+                          ⚠️ No hay cuentas vinculadas ni modelos disponibles en CPAMC para {effectiveFamily?.label || 'esta familia'}.
+                        </p>
+                      ) : (
+                        <p className="bento-specialist-hint">
+                          🔒 Este pool responderá <strong>únicamente</strong> a <code>{selectedSpecialistModel || 'este modelo'}</code>. Los restantes {Math.max(0, availableSpecialistModels.length - 1)} modelos de su familia quedan automáticamente bloqueados para aislar la cuota.
+                        </p>
+                      )}
                       {/* Casilla 5.5 solo visible para familias de Claude donde existe dicha versión */}
                       {effectiveFamily && (effectiveFamily.key.includes('claude') || effectiveFamily.key.includes('sonnet') || effectiveFamily.key.includes('opus')) && (
                         <label className="bento-checkbox-label">

@@ -1580,5 +1580,51 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
       const firstOptionText = specialistSelect.querySelectorAll('option')[0].textContent;
       expect(firstOptionText).toContain('⭐ (Recomendado)');
     });
+
+    it('disables specialist selector and does NOT show models or cross-contaminate when family has no logged-in accounts', () => {
+      // Setup nodes with ONLY Gemini and NaN accounts (NO OpenAI Codex accounts)
+      const nodesWithoutCodex = [
+        {
+          id: 'nan-acc1.json',
+          name: 'nan-acc1.json',
+          data: {
+            fileName: 'nan-acc1.json',
+            prefix: '',
+            provider: 'nan',
+            email: 'nan-user@example.com',
+          },
+        },
+        {
+          id: 'antigravity-acc.json',
+          name: 'antigravity-acc.json',
+          data: {
+            fileName: 'antigravity-acc.json',
+            prefix: '',
+            provider: 'antigravity',
+            email: 'gemini-user@example.com',
+          },
+        },
+      ];
+
+      render(<GroupManager nodes={nodesWithoutCodex} />);
+
+      // Click on OpenAI Codex family (which has 0 accounts logged in)
+      const codexChip = screen.getByTestId('family-codex');
+      fireEvent.click(codexChip);
+
+      // Verify specialist selector is disabled and shows empty option
+      const specialistSelect = screen.getByTestId('select-specialist-model');
+      expect(specialistSelect.disabled).toBe(true);
+      expect(specialistSelect.value).toBe('');
+
+      // Verify it does NOT steal gpt-6-luna or gpt-5.6-luna from NaN or hardcoded lists
+      const specialistOptions = Array.from(specialistSelect.querySelectorAll('option')).map((o) => o.value);
+      expect(specialistOptions).not.toContain('gpt-6-luna');
+      expect(specialistOptions).not.toContain('gpt-5.6-luna');
+      expect(specialistOptions).not.toContain('gpt-4o');
+
+      // Verify warning message is rendered
+      expect(screen.getByText(/No hay cuentas vinculadas ni modelos disponibles en CPAMC/i)).toBeTruthy();
+    });
   });
 });
