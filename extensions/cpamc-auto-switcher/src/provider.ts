@@ -1022,7 +1022,7 @@ export function initDynamicProvider(pi: ExtensionAPI): void {
     for (const target of signalTargets) {
         try {
             if (existsSync(target)) {
-                watch(target, () => triggerHotReload());
+                watch(target, () => triggerHotReload()).unref();
             } else {
                 const parent = dirname(target);
                 if (existsSync(parent)) {
@@ -1030,7 +1030,7 @@ export function initDynamicProvider(pi: ExtensionAPI): void {
                         if (typeof filename === "string" && (filename.includes("epoch") || filename.includes("state.json"))) {
                             triggerHotReload();
                         }
-                    });
+                    }).unref();
                 }
             }
         } catch {}
