@@ -933,36 +933,32 @@ export default function AgentMatrix() {
 
         <div className="cockpit-divider" />
 
-        {/* 3. Estrategia de Ejecución (Segmented Control) */}
-        <div className="cockpit-presets">
-          <span className="presets-mini-label" title="Estrategia global de concurrencia">
-            <span className="presets-icon">🎛️</span>
-            <span>Estrategia:</span>
-          </span>
+        {/* 3. Estrategia de Ejecución (Segmented Control Minimalista) */}
+        <div className="cockpit-presets" title="Estrategia global de concurrencia y límites por rol">
           <div className="cockpit-segmented-control">
             <button
               type="button"
               className="preset-btn safe"
               onClick={() => handleApplyPreset('safe')}
-              title="Concurrencia en 1 tarea para todos los agentes. Máximo ahorro de cuota y cero riesgo."
+              title="Modo Seguro: Concurrencia en 1 tarea para todos los agentes. Máximo ahorro de cuota y cero riesgo."
             >
-              🛡️ Modo Seguro
+              🛡️ Seguro
             </button>
             <button
               type="button"
               className="preset-btn pro"
               onClick={() => handleApplyPreset('pro')}
-              title="Escritores en 1 tarea fija, lectores y exploradores en 2 tareas simultáneas. Velocidad 2x recomendada."
+              title="Modo Pro: Escritores en 1 tarea fija, lectores y exploradores en 2 tareas simultáneas. Velocidad 2x recomendada."
             >
-              ⚡ Modo Pro
+              ⚡ Pro
             </button>
             <button
               type="button"
               className="preset-btn turbo"
               onClick={() => handleApplyPreset('turbo')}
-              title="Escritores protegidos en 1 tarea, exploradores a 3 tareas en ráfaga para proyectos gigantes."
+              title="Modo Turbo: Escritores protegidos en 1 tarea, exploradores a 3 tareas en ráfaga para proyectos gigantes."
             >
-              🚀 Modo Turbo
+              🚀 Turbo
             </button>
           </div>
         </div>

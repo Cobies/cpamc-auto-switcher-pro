@@ -129,10 +129,10 @@ describe('AgentMatrix Component', () => {
     expect(screen.getAllByText('1 tarea').length).toBeGreaterThan(0);
     expect(screen.getAllByText('(Seguro)').length).toBeGreaterThan(0);
 
-    // 12. Check Global Preset Buttons (Modo Seguro, Modo Pro, Modo Turbo)
-    expect(screen.getByText('🛡️ Modo Seguro')).toBeDefined();
-    expect(screen.getByText('⚡ Modo Pro')).toBeDefined();
-    expect(screen.getByText('🚀 Modo Turbo')).toBeDefined();
+    // 12. Check Global Preset Buttons (Seguro, Pro, Turbo)
+    expect(screen.getByText('🛡️ Seguro')).toBeDefined();
+    expect(screen.getByText('⚡ Pro')).toBeDefined();
+    expect(screen.getByText('🚀 Turbo')).toBeDefined();
   });
 
   it('renders strictly Gentle-AI by default and completely hides j0k3r-pi when not detected', async () => {
@@ -340,7 +340,7 @@ describe('AgentMatrix Component', () => {
     expect(screen.getByText('(Seguro)')).toBeDefined();
 
     // Explorer debe tener un select de concurrencia
-    const turboBtn = screen.getByText('🚀 Modo Turbo');
+    const turboBtn = screen.getByText('🚀 Turbo');
     fireEvent.click(turboBtn);
 
     // Tras activar turbo, worker sigue con candado (Seguro)
