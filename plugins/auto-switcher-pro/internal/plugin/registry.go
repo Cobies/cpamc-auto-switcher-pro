@@ -94,7 +94,8 @@ type PoolDefinition struct {
 	UpdatedAt    string            `json:"updated_at,omitempty"`
 }
 
-// familyCanonicalShortName returns the clean family suffix ("gemini", "claude", "codex")
+// familyCanonicalShortName returns the clean family suffix
+// ("gemini", "claude", "codex", "nan", "nvidia", "deepseek", etc.)
 // used in Pool-XX-<family> identifiers.
 func familyCanonicalShortName(family, basePrefix string) string {
 	f := strings.ToLower(strings.TrimSpace(family))
@@ -105,6 +106,24 @@ func familyCanonicalShortName(family, basePrefix string) string {
 	case strings.Contains(f, "claude") || strings.Contains(f, "sonnet") || strings.Contains(f, "opus") ||
 		strings.HasPrefix(b, "clau") || strings.HasPrefix(b, "agy_clau") || strings.HasPrefix(b, "agy_son") || strings.HasPrefix(b, "agy_opus"):
 		return "claude"
+	case strings.Contains(f, "nan") || strings.HasPrefix(b, "nan"):
+		return "nan"
+	case strings.Contains(f, "nvidia") || strings.HasPrefix(b, "nvidia"):
+		return "nvidia"
+	case strings.Contains(f, "deepseek") || strings.HasPrefix(b, "deepseek"):
+		return "deepseek"
+	case strings.Contains(f, "groq") || strings.HasPrefix(b, "groq"):
+		return "groq"
+	case strings.Contains(f, "cerebras") || strings.HasPrefix(b, "cerebras"):
+		return "cerebras"
+	case strings.Contains(f, "mistral") || strings.HasPrefix(b, "mistral"):
+		return "mistral"
+	case strings.Contains(f, "typesafe") || strings.HasPrefix(b, "typesafe"):
+		return "typesafe"
+	case strings.Contains(f, "vercel") || strings.HasPrefix(b, "vercel"):
+		return "vercel"
+	case strings.Contains(f, "opencode") || strings.HasPrefix(b, "ocgo") || strings.HasPrefix(b, "opencode"):
+		return "opencode"
 	default:
 		return "gemini"
 	}

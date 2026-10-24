@@ -526,6 +526,73 @@ export async function listAuthFiles(options = {}) {
     });
   }
 
+  // Complemento de alta fidelidad: consultar en paralelo las cuentas gestionadas por OmniAuth Pro Hub
+  // para evitar fallos de desencriptación AES-256 en disco e inyectarlas transparentemente.
+  try {
+    const hubEndpoint = '/v0/management/hub/accounts';
+    const hubRes = await apiFetch(hubEndpoint, options);
+    if (hubRes.ok) {
+      const hubData = await hubRes.json();
+      if (Array.isArray(hubData?.accounts)) {
+        const hubMap = new Map();
+        hubData.accounts.forEach((acc) => {
+          if (acc && typeof acc.ID === 'string' && acc.ID.trim()) {
+            hubMap.set(acc.ID.trim(), acc);
+          } else if (acc && typeof acc.id === 'string' && acc.id.trim()) {
+            hubMap.set(acc.id.trim(), acc);
+          }
+        });
+
+        // Combinar o enriquecer validFiles
+        validFiles.forEach((f) => {
+          const hubItem = hubMap.get(f.name);
+          if (hubItem) {
+            f.hubManaged = true;
+            f.prefix = hubItem.prefix || hubItem.Prefix || '';
+            f.provider = (hubItem.provider || hubItem.Provider || f.provider || '').toLowerCase().trim();
+            f.email = hubItem.label || hubItem.Label || f.email || f.name;
+            if (hubItem.in_cooldown || hubItem.InCooldown) {
+              f.unavailable = true;
+              f.cooldowns = [{
+                scope: 'global',
+                reason: '429 Rate Limit Cooldown (OmniAuth Pro)',
+                remaining_seconds: 60,
+              }];
+            }
+            hubMap.delete(f.name);
+          }
+        });
+
+        // Si existen cuentas en OmniAuth Pro que no aparecieron en el listing nativo
+        hubMap.forEach((hubItem, id) => {
+          validFiles.push({
+            name: id,
+            id,
+            type: (hubItem.provider || hubItem.Provider || 'omniauth-pro').toLowerCase().trim(),
+            provider: (hubItem.provider || hubItem.Provider || 'omniauth-pro').toLowerCase().trim(),
+            email: hubItem.label || hubItem.Label || id,
+            prefix: hubItem.prefix || hubItem.Prefix || '',
+            status: (hubItem.disabled || hubItem.Disabled) ? 'disabled' : 'active',
+            hubManaged: true,
+            unavailable: Boolean(hubItem.in_cooldown || hubItem.InCooldown),
+            disabled: Boolean(hubItem.disabled || hubItem.Disabled),
+            cooldowns: (hubItem.in_cooldown || hubItem.InCooldown) ? [{
+              scope: 'global',
+              reason: '429 Rate Limit Cooldown (OmniAuth Pro)',
+              remaining_seconds: 60,
+            }] : [],
+            recent_requests: [],
+            success: 0,
+            failed: 0,
+          });
+        });
+      }
+    }
+  } catch (hubErr) {
+    // Si OmniAuth Pro no está instalado o el endpoint falla, continuar normalmente con CPAMC nativo
+    console.debug?.('[VisualProfile] OmniAuth Pro Hub accounts not accessible:', hubErr.message);
+  }
+
   return validFiles;
 }
 
@@ -662,6 +729,29 @@ export async function loadAuthFilesWithPrefixes(options = {}) {
   // Fail closed: if ANY file fails to download, reject the entire batch
   const results = await Promise.all(
     files.map(async (file) => {
+      // Si el archivo ya viene catalogado por el Hub de OmniAuth Pro con su prefix resuelto:
+      if (file.hubManaged && typeof file.prefix === 'string') {
+        const record = {
+          name: file.name,
+          prefix: file.prefix,
+          excluded_models: file.excluded_models || [],
+        };
+        if (file.type) record.type = file.type;
+        if (file.provider) record.provider = file.provider;
+        if (file.email) record.email = file.email;
+        if (file.status) record.status = file.status;
+        if (file.auth_index) record.auth_index = file.auth_index;
+        if (file.project_id) record.project_id = file.project_id;
+        if (file.unavailable !== undefined) record.unavailable = file.unavailable === true;
+        if (file.disabled !== undefined) record.disabled = file.disabled === true;
+        if (Array.isArray(file.cooldowns)) record.cooldowns = file.cooldowns;
+        if (Array.isArray(file.recent_requests)) record.recent_requests = file.recent_requests;
+        if (typeof file.success === 'number') record.success = file.success;
+        if (typeof file.failed === 'number') record.failed = file.failed;
+        if (file.next_retry_after) record.next_retry_after = file.next_retry_after;
+        return record;
+      }
+
       try {
         const details = await downloadAuthFilePrefix(file.name, options);
         const record = {
@@ -1622,12 +1712,31 @@ export function buildManagedPoolCards(nodes = [], registeredPools = null) {
 
     const cards = [];
     registeredPools.forEach((pool) => {
-      const familyKey = String(pool.family || '');
-      const familyRole = familyKey.startsWith('gemini_pure')
-        ? 'gemini'
-        : (familyKey === 'codex' || familyKey.includes('codex') || familyKey.includes('openai') || familyKey.includes('gpt'))
-        ? 'codex'
-        : 'claude';
+      const familyKey = String(pool.family || '').toLowerCase();
+      let familyRole = 'claude';
+      if (familyKey.startsWith('gemini_pure') || familyKey === 'gemini') {
+        familyRole = 'gemini';
+      } else if (familyKey.includes('codex') || familyKey.includes('openai') || familyKey.includes('gpt')) {
+        familyRole = 'codex';
+      } else if (familyKey === 'nan' || familyKey.includes('nan')) {
+        familyRole = 'nan';
+      } else if (familyKey === 'nvidia' || familyKey.includes('nvidia')) {
+        familyRole = 'nvidia';
+      } else if (familyKey === 'deepseek' || familyKey.includes('deepseek')) {
+        familyRole = 'deepseek';
+      } else if (familyKey === 'groq' || familyKey.includes('groq')) {
+        familyRole = 'groq';
+      } else if (familyKey === 'cerebras' || familyKey.includes('cerebras')) {
+        familyRole = 'cerebras';
+      } else if (familyKey === 'mistral' || familyKey.includes('mistral')) {
+        familyRole = 'mistral';
+      } else if (familyKey === 'typesafe' || familyKey.includes('typesafe')) {
+        familyRole = 'typesafe';
+      } else if (familyKey === 'vercel' || familyKey.includes('vercel')) {
+        familyRole = 'vercel';
+      } else if (familyKey === 'opencode' || familyKey.includes('opencode')) {
+        familyRole = 'opencode';
+      }
       const basePrefix = pool.base_prefix || '';
 
       // Gobernanza virtual pura: la política del pool define el especialista de la tarjeta.

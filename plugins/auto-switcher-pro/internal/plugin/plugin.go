@@ -150,6 +150,16 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 				},
 				{
 					"Method":      http.MethodGet,
+					"Path":        "/auto-switcher-pro/license/status",
+					"Description": "Obtiene el estado de la licencia de la máquina y días de evaluación",
+				},
+				{
+					"Method":      http.MethodPost,
+					"Path":        "/auto-switcher-pro/license/activate",
+					"Description": "Activa o traslada una clave de licencia PRO en la máquina",
+				},
+				{
+					"Method":      http.MethodGet,
 					"Path":        "/auto-switcher-pro/report",
 					"Description": "Genera un paquete de diagnóstico y telemetría para soporte técnico",
 				},

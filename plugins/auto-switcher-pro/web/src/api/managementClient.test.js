@@ -523,6 +523,79 @@ describe('loadAuthFilesWithPrefixes - Fail-Closed Safety Contract', () => {
       },
     ]);
   });
+
+  it('seamlessly integrates and decodes OmniAuth Pro accounts from /hub/accounts without failing closed on encrypted files', async () => {
+    const mockFetch = vi.fn().mockImplementation((url) => {
+      if (url === '/v0/management/auth-files') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            files: [
+              { name: 'antigravity-account.json', provider: 'antigravity' },
+              { name: 'nan-ea07f57cae3f.json', provider: '' },
+            ],
+          }),
+        });
+      }
+      if (url === '/v0/management/hub/accounts') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ok: true,
+            accounts: [
+              {
+                id: 'nan-ea07f57cae3f.json',
+                provider: 'nan',
+                prefix: 'nan',
+                label: 'NaN Builders Pro',
+                in_cooldown: false,
+              },
+              {
+                id: 'nvidia-nim-acc2.json',
+                provider: 'nvidia',
+                prefix: 'nvidia',
+                label: 'NVIDIA NIM Account 2',
+                in_cooldown: true,
+              },
+            ],
+          }),
+        });
+      }
+      if (url.includes('antigravity-account.json')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ prefix: 'agy' }),
+        });
+      }
+      // If CPAMC attempts to download encrypted nan file, it would return raw cipher/error
+      if (url.includes('nan-ea07f57cae3f.json')) {
+        return Promise.reject(new Error('SyntaxError: Unexpected token in JSON at position 0'));
+      }
+      return Promise.reject(new Error(`Unhandled URL: ${url}`));
+    });
+
+    const records = await loadAuthFilesWithPrefixes({
+      key: 'test-key',
+      fetchFn: mockFetch,
+    });
+
+    expect(records.length).toBe(3);
+    const nanRec = records.find((r) => r.name === 'nan-ea07f57cae3f.json');
+    expect(nanRec).toBeDefined();
+    expect(nanRec.prefix).toBe('nan');
+    expect(nanRec.provider).toBe('nan');
+    expect(nanRec.email).toBe('NaN Builders Pro');
+
+    const nvidiaRec = records.find((r) => r.name === 'nvidia-nim-acc2.json');
+    expect(nvidiaRec).toBeDefined();
+    expect(nvidiaRec.prefix).toBe('nvidia');
+    expect(nvidiaRec.provider).toBe('nvidia');
+    expect(nvidiaRec.unavailable).toBe(true);
+    expect(nvidiaRec.cooldowns.length).toBeGreaterThan(0);
+  });
 });
 
 describe('buildGraphFromAuthFiles & Credential Leak Prevention', () => {

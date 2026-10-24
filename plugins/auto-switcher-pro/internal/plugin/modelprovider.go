@@ -604,6 +604,37 @@ func poolPrefixedCatalog(registry *PoolRegistry) []pluginModelInfo {
 	return models
 }
 
+// targetProviderForPool returns the registered provider key for the given pool.
+// Maps dynamic OmniAuth Pro families to their corresponding target provider in CPAMC.
+func targetProviderForPool(pool PoolDefinition) string {
+	f := strings.ToLower(strings.TrimSpace(pool.Family))
+	b := strings.ToLower(strings.TrimSpace(pool.BasePrefix))
+	switch {
+	case strings.Contains(f, "codex") || strings.HasPrefix(b, "codex"):
+		return codexProviderKey
+	case strings.Contains(f, "nan") || strings.HasPrefix(b, "nan"):
+		return "nan"
+	case strings.Contains(f, "nvidia") || strings.HasPrefix(b, "nvidia"):
+		return "nvidia"
+	case strings.Contains(f, "deepseek") || strings.HasPrefix(b, "deepseek"):
+		return "deepseek"
+	case strings.Contains(f, "groq") || strings.HasPrefix(b, "groq"):
+		return "groq"
+	case strings.Contains(f, "cerebras") || strings.HasPrefix(b, "cerebras"):
+		return "cerebras"
+	case strings.Contains(f, "mistral") || strings.HasPrefix(b, "mistral"):
+		return "mistral"
+	case strings.Contains(f, "typesafe") || strings.HasPrefix(b, "typesafe"):
+		return "typesafe"
+	case strings.Contains(f, "vercel") || strings.HasPrefix(b, "vercel"):
+		return "vercel"
+	case strings.Contains(f, "opencode") || strings.HasPrefix(b, "ocgo") || strings.HasPrefix(b, "opencode"):
+		return "opencode-go"
+	default:
+		return antigravityProviderKey
+	}
+}
+
 // routeDecisionFor resolves a model.route request:
 //  1. Clean Pool Identifier ("Pool-01-gemini"): resolves dynamically to the configured
 //     model of the current ActiveLeader account in RAM.
@@ -664,12 +695,13 @@ func routeDecisionFor(registry *PoolRegistry, requestedModel string) modelRouteR
 			canonicalTarget = pool.ActiveModelForAccount(activeAuth)
 		}
 		resolvedModel := ResolveActiveModelFallback(canonicalTarget)
+		targetProv := targetProviderForPool(pool)
 		return modelRouteResponse{
 			Handled:     true,
 			TargetKind:  "provider",
-			Target:      antigravityProviderKey,
+			Target:      targetProv,
 			TargetModel: resolvedModel,
-			Reason:      fmt.Sprintf("auto-switcher-pro sovereign pool route (%s -> %s)", trimmed, resolvedModel),
+			Reason:      fmt.Sprintf("auto-switcher-pro sovereign pool route (%s -> %s via %s)", trimmed, resolvedModel, targetProv),
 		}
 	}
 
@@ -685,14 +717,15 @@ func routeDecisionFor(registry *PoolRegistry, requestedModel string) modelRouteR
 	}
 
 	resolvedRest := ResolveActiveModelFallback(rest)
+	targetProv := targetProviderForPool(pool)
 	for _, target := range poolTargets(pool) {
 		if strings.EqualFold(target, rest) || strings.EqualFold(target, resolvedRest) {
 			return modelRouteResponse{
 				Handled:     true,
 				TargetKind:  "provider",
-				Target:      antigravityProviderKey,
+				Target:      targetProv,
 				TargetModel: resolvedRest,
-				Reason:      fmt.Sprintf("auto-switcher-pro 2N pool route (%s)", pool.BasePrefix),
+				Reason:      fmt.Sprintf("auto-switcher-pro 2N pool route (%s via %s)", pool.BasePrefix, targetProv),
 			}
 		}
 	}

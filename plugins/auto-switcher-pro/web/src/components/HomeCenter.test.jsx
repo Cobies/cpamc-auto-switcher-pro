@@ -55,64 +55,76 @@ describe('HomeCenter Component - Portada Principal & Directorio de Menús', () =
 
     expect(screen.getByTestId('home-hero-logo')).toBeTruthy();
     expect(screen.getByText('cpamc Auto Switcher Pro')).toBeTruthy();
-    expect(screen.getByText(/¿De qué se trata\?/i)).toBeTruthy();
+    expect(screen.getByTestId('home-anatomy-box')).toBeTruthy();
+    expect(screen.getByText(/ANATOMÍA TÉCNICA DEL CÓDIGO/i)).toBeTruthy();
   });
 
-  it('renders dynamic KPI cards (License, Machine ID, Version, Status, Pools, Telemetry)', async () => {
+  it('renders Top Estrella pillar by default and expands all 13 pillars on toggle click', () => {
     render(<HomeCenter onNavigateTab={vi.fn()} />);
 
-    expect(screen.getByTestId('kpi-license')).toBeTruthy();
-    expect(screen.getByTestId('kpi-machine-id')).toBeTruthy();
-    expect(screen.getByTestId('kpi-version')).toBeTruthy();
+    // Por defecto muestra el Pilar 1 (Top Estrella)
+    expect(screen.getByTestId('pillar-item-1')).toBeTruthy();
+    expect(screen.getByText(/Rescate instantáneo ante 429/i)).toBeTruthy();
+    expect(screen.getByText(/Pools Soberanos para NVIDIA NIM & DeepSeek/i)).toBeTruthy();
+    expect(screen.queryByTestId('pillar-item-2')).toBeNull();
+
+    // Botón de expansión
+    const toggleBtn = screen.getByTestId('btn-toggle-all-pillars');
+    expect(toggleBtn.textContent).toContain('Ver arquitectura completa');
+
+    // Clic para desplegar todos los 13 pilares
+    fireEvent.click(toggleBtn);
+    expect(screen.getByTestId('pillar-item-2')).toBeTruthy();
+    expect(screen.getByTestId('pillar-item-13')).toBeTruthy();
+    expect(toggleBtn.textContent).toContain('Plegar a vista Top Estrella');
+
+    // Clic para plegar de nuevo a la vista Top Estrella
+    fireEvent.click(toggleBtn);
+    expect(screen.queryByTestId('pillar-item-2')).toBeNull();
+    expect(screen.getByTestId('pillar-item-1')).toBeTruthy();
+  });
+
+  it('renders dynamic unified cockpit bar (Version, License, Host ID) and 4 operational/sponsor KPIs', async () => {
+    render(<HomeCenter onNavigateTab={vi.fn()} />);
+
+    expect(screen.getByTestId('home-cockpit-bar')).toBeTruthy();
     expect(screen.getByTestId('kpi-status')).toBeTruthy();
+    expect(screen.getByTestId('kpi-sponsor')).toBeTruthy();
+    expect(screen.getByTestId('btn-home-sponsor')).toBeTruthy();
     expect(screen.getByTestId('kpi-pools')).toBeTruthy();
     expect(screen.getByTestId('kpi-telemetry')).toBeTruthy();
 
     await waitFor(() => {
       expect(screen.getByText('CPA-TEST-1234-ABCD')).toBeDefined();
       expect(screen.getByText('v0.1.1')).toBeDefined();
-      expect(screen.getByText('✓ Al día')).toBeDefined();
+      expect(screen.getByText('✓ Estable')).toBeDefined();
+      expect(screen.getByText('Pro Vitalicia')).toBeDefined();
+      expect(screen.getByText(/☕ ¿Te salvó de un 429\?/i)).toBeDefined();
+      expect(screen.getByText(/💖 Invitar un Café al Creador/i)).toBeDefined();
       expect(screen.getAllByText('2 Pools').length).toBeGreaterThan(0);
       expect(screen.getAllByText('3 Eventos').length).toBeGreaterThan(0);
     });
   });
 
-  it('shows update available badge with link when a newer release exists on GitHub', async () => {
-    vi.spyOn(managementClient, 'fetchPluginVersion').mockResolvedValue({
+  it('shows Free Tier and Activar Pro button when user does not have a Pro license', async () => {
+    vi.spyOn(managementClient, 'fetchLicenseStatus').mockResolvedValue({
       ok: true,
-      current_version: '0.1.1',
-      current_tag: 'v0.1.1',
-      latest_tag: 'v0.2.0',
-      update_available: true,
-      github_repo: 'WiloxDev/cpamc-auto-switcher-pro',
-      releases_url: 'https://github.com/WiloxDev/cpamc-auto-switcher-pro/releases',
+      status: 'trial',
+      tier: 'FREE',
+      machine_id: 'CPA-TRIAL-9999',
+      days_remaining: 30,
     });
 
-    render(<HomeCenter onNavigateTab={vi.fn()} />);
+    const openModalMock = vi.fn();
+    render(<HomeCenter onNavigateTab={vi.fn()} onOpenLicenseModal={openModalMock} />);
 
     await waitFor(() => {
-      expect(screen.getByText(/⚡ Actualizar a v0.2.0/i)).toBeDefined();
-    });
-  });
-
-  it('allows copying the Machine ID to clipboard', async () => {
-    const writeTextMock = vi.fn().mockResolvedValue(undefined);
-    Object.assign(navigator, {
-      clipboard: {
-        writeText: writeTextMock,
-      },
+      expect(screen.getByText('Free Tier')).toBeDefined();
+      expect(screen.getByTestId('btn-home-open-license')).toBeDefined();
     });
 
-    render(<HomeCenter onNavigateTab={vi.fn()} />);
-
-    await waitFor(() => {
-      expect(screen.getByText('CPA-TEST-1234-ABCD')).toBeDefined();
-    });
-
-    const copyBtn = screen.getByTestId('btn-copy-machine-id');
-    fireEvent.click(copyBtn);
-
-    expect(writeTextMock).toHaveBeenCalledWith('CPA-TEST-1234-ABCD');
+    fireEvent.click(screen.getByTestId('btn-home-open-license'));
+    expect(openModalMock).toHaveBeenCalled();
   });
 
   it('renders all menu cards and triggers onNavigateTab on click', () => {
