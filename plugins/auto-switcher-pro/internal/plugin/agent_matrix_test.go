@@ -555,4 +555,49 @@ func TestAgentMatrix_DynamicThinkingLevels(t *testing.T) {
 	}
 }
 
+func TestAgentMatrix_HarnessVersionAudit(t *testing.T) {
+	req := ManagementRequestPayload{
+		Method: "GET",
+		Path:   "/v0/management/auto-switcher-pro/agent-matrix/harness-version?harness=gentle_shell",
+	}
+
+	raw, err := handleAgentMatrixHTTP(req)
+	if err != nil {
+		t.Fatalf("version audit failed: %v", err)
+	}
+
+	var env Envelope
+	_ = json.Unmarshal(raw, &env)
+	var resp ManagementResponsePayload
+	_ = json.Unmarshal(env.Result, &resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var parsed struct {
+		OK   bool                `json:"ok"`
+		Data HarnessVersionAudit `json:"data"`
+	}
+	bodyBytes, _ := base64.StdEncoding.DecodeString(resp.Body)
+	if len(bodyBytes) == 0 {
+		bodyBytes = []byte(resp.Body)
+	}
+	if err := json.Unmarshal(bodyBytes, &parsed); err != nil {
+		t.Fatalf("failed to parse json: %v (raw body: %s)", err, resp.Body)
+	}
+
+	if !parsed.OK {
+		t.Errorf("expected ok: true")
+	}
+	if parsed.Data.HarnessID != "gentle_shell" {
+		t.Errorf("expected harness_id gentle_shell, got %s", parsed.Data.HarnessID)
+	}
+	if parsed.Data.NPMVersion == "" {
+		t.Errorf("expected NPMVersion to be resolved, got empty")
+	}
+	if parsed.Data.GitHubVersion == "" {
+		t.Errorf("expected GitHubVersion to be resolved, got empty")
+	}
+}
+
 

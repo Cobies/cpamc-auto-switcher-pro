@@ -3054,6 +3054,24 @@ export async function triggerTriageWarmup(targetPools = [], options = {}) {
   return data;
 }
 
+/**
+ * Consulta la auditoría de versiones del arnés en tiempo real (Local vs Release oficial npm vs GitHub main).
+ *
+ * @param {string} harnessId
+ * @param {Object} [options]
+ */
+export async function fetchHarnessVersion(harnessId = 'gentle_shell', options = {}) {
+  const res = await apiFetch(`/v0/management/auto-switcher-pro/agent-matrix/harness-version?harness=${encodeURIComponent(harnessId)}`, {
+    ...options,
+    method: 'GET',
+  });
+  const data = await res.json();
+  if (!res.ok || !data?.ok) {
+    throw new Error(data?.message || 'Error al obtener versión del arnés');
+  }
+  return data.data;
+}
+
 
 
 

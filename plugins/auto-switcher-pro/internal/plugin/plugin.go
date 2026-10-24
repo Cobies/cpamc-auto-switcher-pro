@@ -223,6 +223,11 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 					"Path":        agentMatrixWarmupRoutePath,
 					"Description": "Dispara el Shadow Warmup asíncrono durante el triage del orquestador",
 				},
+				{
+					"Method":      http.MethodGet,
+					"Path":        agentMatrixVersionRoutePath,
+					"Description": "Audita y compara la versión del arnés (instalación local vs npm oficial vs GitHub main)",
+				},
 			},
 			"resources": []map[string]any{
 				{

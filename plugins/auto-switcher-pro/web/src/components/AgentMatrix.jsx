@@ -5,6 +5,7 @@ import {
   testAgentRoute,
   scanAgentEnvironment,
   triggerTriageWarmup,
+  fetchHarnessVersion,
 } from '../api/managementClient';
 import './AgentMatrix.css';
 
@@ -117,6 +118,52 @@ export default function AgentMatrix() {
   const [feedback, setFeedback] = useState({ text: '', type: '' });
   const [pingStates, setPingStates] = useState({});
   const [dirtyHarnesses, setDirtyHarnesses] = useState({}); // { [agentKey]: { loading: bool, latency: number, text: string, ok: bool } }
+  const [expandedAgents, setExpandedAgents] = useState(() => new Set()); // Set of agentKey strings
+  const [expandedHarnessVersions, setExpandedHarnessVersions] = useState(() => new Set()); // Set of harness.id
+  const [harnessVersionData, setHarnessVersionData] = useState({}); // { [harnessId]: { loading, data, error } }
+
+  const toggleHarnessVersion = async (harnessId) => {
+    setExpandedHarnessVersions((prev) => {
+      const next = new Set(prev);
+      if (next.has(harnessId)) {
+        next.delete(harnessId);
+      } else {
+        next.add(harnessId);
+      }
+      return next;
+    });
+
+    if (!harnessVersionData[harnessId]?.data && !harnessVersionData[harnessId]?.loading) {
+      setHarnessVersionData((prev) => ({
+        ...prev,
+        [harnessId]: { loading: true, data: null, error: null },
+      }));
+      try {
+        const ver = await fetchHarnessVersion(harnessId);
+        setHarnessVersionData((prev) => ({
+          ...prev,
+          [harnessId]: { loading: false, data: ver, error: null },
+        }));
+      } catch (err) {
+        setHarnessVersionData((prev) => ({
+          ...prev,
+          [harnessId]: { loading: false, data: null, error: err.message },
+        }));
+      }
+    }
+  };
+
+  const toggleAgentExpanded = (agentKey) => {
+    setExpandedAgents((prev) => {
+      const next = new Set(prev);
+      if (next.has(agentKey)) {
+        next.delete(agentKey);
+      } else {
+        next.add(agentKey);
+      }
+      return next;
+    });
+  };
 
   const handleUniverseChange = (univ) => {
     setActiveUniverse(univ);
@@ -727,7 +774,6 @@ export default function AgentMatrix() {
             >
               {renderDropdownOptions()}
             </select>
-            {renderPoolTransparencyPill(agent.primary_pool, false)}
             {isClaudeFamily(agent.primary_pool) && (
               <div
                 className="claude-contextual-controls"
@@ -843,18 +889,9 @@ export default function AgentMatrix() {
               <div className="th-title">PRIMARIO</div>
               <div className="th-sub">Ruta activa de ejecución</div>
             </th>
-            <th style={{ width: 24 }}></th>
-            <th title="Relevo en standby. Solo se activa si la ruta primaria es una cuenta suelta y agota cuota o recibe error HTTP 429.">
-              <div className="th-title">SECUNDARIO</div>
-              <div className="th-sub">Relevo por agotamiento o 429</div>
-            </th>
             <th>
               <div className="th-title">THINKING</div>
               <div className="th-sub">Nivel de razonamiento</div>
-            </th>
-            <th>
-              <div className="th-title">CONCURRENCIA</div>
-              <div className="th-sub">Capacidad paralela segura</div>
             </th>
             <th>
               <div className="th-title">TEST</div>
@@ -870,179 +907,208 @@ export default function AgentMatrix() {
             const isWriter = isWriterAgent(a);
             const isOrch = a.is_orchestrator;
             const agentDesc = a.description || meta.summary;
+            const isExpanded = expandedAgents.has(agentKey);
 
             return (
-              <tr key={a.agent_id} className={isOrch ? 'orchestrator-row' : ''}>
-                <td className="agent-name-cell" title={agentDesc}>
-                  <div className="agent-name-wrap">
-                    <span className="agent-title-text" style={{ color: isOrch ? '#f59e0b' : '#e2e8f0' }}>
-                      {a.displayName || a.agent_id}
-                    </span>
-                    <span className={`agent-role-chip ${meta.badgeClass}`}>{meta.badge}</span>
-                    <span className="agent-info-tip" title={agentDesc}>ℹ️</span>
-                  </div>
-                </td>
-                <td>
-                  <select
-                    className="matrix-select"
-                    value={a.primary_pool}
-                    onChange={(e) => handlePoolChange(harnessId, a.agent_id, 'primary_pool', e.target.value)}
+              <React.Fragment key={a.agent_id}>
+                <tr className={`${isOrch ? 'orchestrator-row' : ''} ${isExpanded ? 'agent-row-expanded' : ''}`}>
+                  <td
+                    className="agent-name-cell"
+                    title="Haz clic para ver/ocultar configuración de rescate y concurrencia"
+                    onClick={() => toggleAgentExpanded(agentKey)}
                   >
-                    {renderDropdownOptions()}
-                  </select>
-                  {renderPoolTransparencyPill(a.primary_pool, false)}
-                  {isClaudeFamily(a.primary_pool) && (
-                    <div
-                      className="claude-contextual-controls"
-                      title="Protector de cuota Claude: tope de intentos en Claude antes de pasar a Gemini"
+                    <div className="agent-name-wrap">
+                      <span className={`agent-accordion-chevron ${isExpanded ? 'open' : ''}`}>▶</span>
+                      <span className="agent-title-text" style={{ color: isOrch ? '#f59e0b' : '#e2e8f0' }}>
+                        {a.displayName || a.agent_id}
+                      </span>
+                      <span className={`agent-role-chip ${meta.badgeClass}`}>{meta.badge}</span>
+                      <span className="agent-info-tip" title={agentDesc} onClick={(e) => e.stopPropagation()}>ℹ️</span>
+                    </div>
+                  </td>
+                  <td>
+                    <select
+                      className="matrix-select"
+                      value={a.primary_pool}
+                      onChange={(e) => handlePoolChange(harnessId, a.agent_id, 'primary_pool', e.target.value)}
                     >
-                      <div className="claude-contextual-row">
-                        <span className="claude-shield-icon">🛡️</span>
-                        <span className="claude-shield-label">Freno Anti-Bucle:</span>
-                        <select
-                          className="matrix-select claude-turns-select"
-                          value={a.max_claude_turns ?? 3}
-                          onChange={(e) => handlePoolChange(harnessId, a.agent_id, 'max_claude_turns', parseInt(e.target.value, 10))}
-                          title="Protector de cuota Claude: tope de intentos antes de pasar a Gemini"
-                        >
-                          <option value={2}>2 (Ahorro)</option>
-                          <option value={3}>3 (Recomendado)</option>
-                          <option value={5}>5 (Paciencia)</option>
-                          <option value={0}>Sin límite</option>
-                        </select>
-                        {!isOrch && (
-                          <button
-                            type="button"
-                            className={`btn-downgrade-chip ${a.auto_downgrade ? 'active' : ''}`}
-                            onClick={() => handlePoolChange(harnessId, a.agent_id, 'auto_downgrade', !a.auto_downgrade)}
-                            title="Mitigación T2+: reduce tokens de pensamiento a partir del 2do turno"
+                      {renderDropdownOptions()}
+                    </select>
+                    {isClaudeFamily(a.primary_pool) && (
+                      <div
+                        className="claude-contextual-controls"
+                        title="Protector de cuota Claude: tope de intentos en Claude antes de pasar a Gemini"
+                      >
+                        <div className="claude-contextual-row">
+                          <span className="claude-shield-icon">🛡️</span>
+                          <span className="claude-shield-label">Freno Anti-Bucle:</span>
+                          <select
+                            className="matrix-select claude-turns-select"
+                            value={a.max_claude_turns ?? 3}
+                            onChange={(e) => handlePoolChange(harnessId, a.agent_id, 'max_claude_turns', parseInt(e.target.value, 10))}
+                            title="Protector de cuota Claude: tope de intentos antes de pasar a Gemini"
                           >
-                            {a.auto_downgrade ? '🟢 T2+' : '⚪ T2+ Off'}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </td>
-                <td style={{ textAlign: 'center', width: 24 }}>
-                  {isPoolTarget(a.primary_pool) ? null : (
-                    <span
-                      className="relay-arrow"
-                      title="Relevo automático: Solo toma el relevo si la cuenta suelta primaria recibe 429 o fallo de red"
-                    >
-                      →
-                    </span>
-                  )}
-                </td>
-                <td>
-                  {isPoolTarget(a.primary_pool) ? (
-                    <div
-                      className="pool-self-covered-badge"
-                      title="Este agente está respaldado por un Pool Soberano con rotación automática de cuentas en RAM. No requiere rescate secundario externo."
-                    >
-                      <span className="self-covered-icon">🛡️</span>
-                      <span className="self-covered-text">Autocubierto en Pool</span>
-                    </div>
-                  ) : (
-                    <>
-                      <select
-                        className="matrix-select"
-                        value={a.fallback_pool}
-                        onChange={(e) => handlePoolChange(harnessId, a.agent_id, 'fallback_pool', e.target.value)}
-                        disabled={availablePools.length + upstreamModels.length <= 1}
-                      >
-                        {availablePools.length + upstreamModels.length <= 1 ? (
-                          <option value="">🚫 Sin failover (Requiere 2+ pools/cuentas)</option>
-                        ) : (
-                          renderDropdownOptions(a.primary_pool)
-                        )}
-                      </select>
-                      {renderPoolTransparencyPill(a.fallback_pool, true)}
-                    </>
-                  )}
-                </td>
-                <td>
-                  {(() => {
-                    const suppLevels = getThinkingLevelsForTarget(a.primary_pool);
-                    if (!suppLevels || suppLevels.length === 0) {
-                      return (
-                        <span
-                          className="thinking-na-badge"
-                          title="Este modelo no requiere ni admite parámetros de razonamiento/thinking"
-                        >
-                          🚫 N/A
-                        </span>
-                      );
-                    }
-                    return (
-                      <div className="thinking-toggle">
-                        {suppLevels.map((lvl) => {
-                          const info = formatThinkingLevelBadge(lvl);
-                          return (
+                            <option value={2}>2 (Ahorro)</option>
+                            <option value={3}>3 (Recomendado)</option>
+                            <option value={5}>5 (Paciencia)</option>
+                            <option value={0}>Sin límite</option>
+                          </select>
+                          {!isOrch && (
                             <button
-                              key={lvl}
                               type="button"
-                              className={`thinking-btn ${a.thinking_level === lvl ? `active ${lvl}` : ''}`}
-                              onClick={() => handlePoolChange(harnessId, a.agent_id, 'thinking_level', lvl)}
-                              title={info.label}
+                              className={`btn-downgrade-chip ${a.auto_downgrade ? 'active' : ''}`}
+                              onClick={() => handlePoolChange(harnessId, a.agent_id, 'auto_downgrade', !a.auto_downgrade)}
+                              title="Mitigación T2+: reduce tokens de pensamiento a partir del 2do turno"
                             >
-                              {info.short}
+                              {a.auto_downgrade ? '🟢 T2+' : '⚪ T2+ Off'}
                             </button>
-                          );
-                        })}
+                          )}
+                        </div>
                       </div>
-                    );
-                  })()}
-                </td>
-                <td>
-                  {isWriter ? (
-                    <div
-                      className="concurrency-lock-badge"
-                      title={isOrch ? "Orquestador Soberano: Atiende en consola interactiva con concurrencia fija en 1" : "Candado de Seguridad: Agente con permisos de escritura y edición de código. Bloqueado en 1 tarea para evitar que dos agentes editen los mismos archivos y corrompan código."}
+                    )}
+                  </td>
+                  <td>
+                    {(() => {
+                      const suppLevels = getThinkingLevelsForTarget(a.primary_pool);
+                      if (!suppLevels || suppLevels.length === 0) {
+                        return (
+                          <span
+                            className="thinking-na-badge"
+                            title="Este modelo no requiere ni admite parámetros de razonamiento/thinking"
+                          >
+                            🚫 N/A
+                          </span>
+                        );
+                      }
+                      return (
+                        <div className="thinking-toggle">
+                          {suppLevels.map((lvl) => {
+                            const info = formatThinkingLevelBadge(lvl);
+                            return (
+                              <button
+                                key={lvl}
+                                type="button"
+                                className={`thinking-btn ${a.thinking_level === lvl ? `active ${lvl}` : ''}`}
+                                onClick={() => handlePoolChange(harnessId, a.agent_id, 'thinking_level', lvl)}
+                                title={info.label}
+                              >
+                                {info.short}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="btn-ping-route"
+                      onClick={() => handleTestRoute(a, harnessId)}
+                      disabled={ping?.loading}
+                      title="Test rápido de conectividad y latencia con el líder del pool"
                     >
-                      <span className="lock-icon">🔒</span>
-                      <span className="lock-label">1 tarea</span>
-                      <span className="lock-status">{isOrch ? "(Líder)" : "(Seguro)"}</span>
-                    </div>
-                  ) : (
-                    <div className="concurrency-selector-wrapper">
-                      <select
-                        className="matrix-select concurrency-select"
-                        value={a.concurrency || 1}
-                        onChange={(e) => handlePoolChange(harnessId, a.agent_id, 'concurrency', parseInt(e.target.value, 10))}
-                        title="Capacidad de tareas simultáneas seguras para este agente de lectura"
+                      {ping?.loading ? '⏳...' : '⚡ Test'}
+                    </button>
+                    {ping?.text && (
+                      <div
+                        style={{
+                          fontSize: 10,
+                          color: ping.ok ? '#10b981' : '#ef4444',
+                          marginTop: 4,
+                          whiteSpace: 'nowrap',
+                        }}
                       >
-                        <option value={1}>1 (Ahorro)</option>
-                        <option value={2}>2 (Recomendado 2x)</option>
-                        <option value={3}>3 (Ráfaga Turbo)</option>
-                      </select>
-                    </div>
-                  )}
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    className="btn-ping-route"
-                    onClick={() => handleTestRoute(a, harnessId)}
-                    disabled={ping?.loading}
-                    title="Test rápido de conectividad y latencia con el líder del pool"
-                  >
-                    {ping?.loading ? '⏳...' : '⚡ Test'}
-                  </button>
-                  {ping?.text && (
-                    <div
-                      style={{
-                        fontSize: 10,
-                        color: ping.ok ? '#10b981' : '#ef4444',
-                        marginTop: 4,
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {ping.text}
-                    </div>
-                  )}
-                </td>
-              </tr>
+                        {ping.text}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+
+                {/* Acordeón Desplegable con SECUNDARIO (Failover) y CONCURRENCIA (Read-Only) */}
+                {isExpanded && (
+                  <tr className="agent-accordion-row">
+                    <td colSpan={4} className="agent-accordion-cell">
+                      <div className="agent-accordion-content">
+                        {/* Bloque 1: Secundario / Failover */}
+                        <div className="accordion-block accordion-block-failover">
+                          <div className="accordion-block-header">
+                            <span className="accordion-block-icon">🛡️</span>
+                            <span className="accordion-block-title">SECUNDARIO</span>
+                            <span className="accordion-block-subtitle">Relevo por agotamiento o 429</span>
+                          </div>
+                          <div className="accordion-block-body">
+                            {isPoolTarget(a.primary_pool) ? (
+                              <div
+                                className="pool-self-covered-badge"
+                                title="Este agente está respaldado por un Pool Soberano con rotación automática de cuentas en RAM. No requiere rescate secundario externo."
+                              >
+                                <span className="self-covered-icon">🛡️</span>
+                                <span className="self-covered-text">Autocubierto en Pool</span>
+                                <span className="self-covered-detail">
+                                  ({poolDetails[a.primary_pool]?.total_members || 2} cuentas en rotación RAM)
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="accordion-fallback-selector-wrap">
+                                <select
+                                  className="matrix-select accordion-fallback-select"
+                                  value={a.fallback_pool}
+                                  onChange={(e) => handlePoolChange(harnessId, a.agent_id, 'fallback_pool', e.target.value)}
+                                  disabled={availablePools.length + upstreamModels.length <= 1}
+                                >
+                                  {availablePools.length + upstreamModels.length <= 1 ? (
+                                    <option value="">🚫 Sin failover (Requiere 2+ pools/cuentas)</option>
+                                  ) : (
+                                    renderDropdownOptions(a.primary_pool)
+                                  )}
+                                </select>
+                                {renderPoolTransparencyPill(a.fallback_pool, true)}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Bloque 2: Concurrencia (Solo Lectura) */}
+                        <div className="accordion-block accordion-block-concurrency">
+                          <div className="accordion-block-header">
+                            <span className="accordion-block-icon">⚡</span>
+                            <span className="accordion-block-title">CONCURRENCIA</span>
+                            <span className="accordion-block-subtitle">Capacidad paralela segura (Solo Lectura)</span>
+                          </div>
+                          <div className="accordion-block-body">
+                            {isWriter || isOrch ? (
+                              <div
+                                className="concurrency-readonly-badge writer-mode"
+                                title={isOrch ? "Orquestador Soberano: Atiende en consola interactiva con concurrencia fija en 1" : "Candado de Seguridad: Agente con permisos de escritura y edición de código. Bloqueado en 1 tarea para evitar corrupción de código."}
+                              >
+                                <span className="lock-icon">🔒</span>
+                                <span className="concurrency-val">1 tarea</span>
+                                <span className="concurrency-tag">{isOrch ? "Líder" : "Seguro"}</span>
+                                <span className="concurrency-desc">
+                                  {isOrch ? "Consola interactiva" : "Edición secuencial anti-corrupción"}
+                                </span>
+                              </div>
+                            ) : (
+                              <div
+                                className="concurrency-readonly-badge reader-mode"
+                                title="Agente seguro de lectura y análisis sin riesgo de mutación"
+                              >
+                                <span className="lock-icon">⚡</span>
+                                <span className="concurrency-val">{a.concurrency || 2} {a.concurrency === 1 ? 'tarea' : 'tareas'}</span>
+                                <span className="concurrency-tag">Lectura Rápida</span>
+                                <span className="concurrency-desc">
+                                  Análisis paralelo seguro
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
             );
           })}
         </tbody>
@@ -1201,24 +1267,31 @@ export default function AgentMatrix() {
 
         const orch = harness.agents?.find((a) => a.is_orchestrator);
         const subagents = harness.agents?.filter((a) => !a.is_orchestrator) || [];
+        const isVerExpanded = expandedHarnessVersions.has(harness.id);
+        const verInfo = harnessVersionData[harness.id];
 
         return (
           <div key={harness.id} className="universe-section">
-            <div className="universe-header" title={harness.subtitle}>
+            <div
+              className={`universe-header universe-header-clickable ${isVerExpanded ? 'expanded' : ''}`}
+              title="Haz clic para inspeccionar auditoría de versión y actualizaciones oficiales de Gentleman"
+              onClick={() => toggleHarnessVersion(harness.id)}
+            >
               <div className="universe-header-left">
+                <span className={`universe-accordion-chevron ${isVerExpanded ? 'open' : ''}`}>▶</span>
                 <span className="universe-icon">{harness.icon}</span>
                 <span className="universe-title">{harness.name.toUpperCase()}</span>
                 {harness.badge && (
                   <span className="chip-shell">{harness.badge}</span>
                 )}
-                <span className="universe-meta" title={`Ruta de configuración: ${harness.config_path}`}>
+                <span className="universe-meta" title={`Ruta de configuración: ${harness.config_path}`} onClick={(e) => e.stopPropagation()}>
                   📁 {harness.config_path}
                 </span>
                 <span className="universe-clarity-callout" style={{ display: 'none' }}>
                   {harness.subtitle}
                 </span>
               </div>
-              <div className="universe-header-right">
+              <div className="universe-header-right" onClick={(e) => e.stopPropagation()}>
                 <button
                   type="button"
                   className={`matrix-save-harness-btn ${dirtyHarnesses[harness.id] ? 'dirty' : ''}`}
@@ -1237,6 +1310,103 @@ export default function AgentMatrix() {
                 </button>
               </div>
             </div>
+
+            {/* Panel Acordeón de Auditoría de Versión (100% Dinámico de Fuentes Oficiales) */}
+            {isVerExpanded && (
+              <div className="harness-version-audit-panel">
+                <div className="audit-panel-header">
+                  <span className="audit-panel-icon">📊</span>
+                  <span className="audit-panel-title">
+                    Auditoría de Versión & Telemetría Upstream ({harness.name})
+                  </span>
+                  {verInfo?.loading && (
+                    <span className="audit-panel-spinner">⏳ Consultando npm y GitHub...</span>
+                  )}
+                  {verInfo?.data?.checked_at && (
+                    <span className="audit-panel-sync">
+                      Sincronizado: {verInfo.data.checked_at.slice(11, 19)} UTC
+                    </span>
+                  )}
+                </div>
+
+                {verInfo?.error ? (
+                  <div className="audit-panel-error">
+                    <span>⚠️ Error al obtener telemetría: {verInfo.error}</span>
+                  </div>
+                ) : verInfo?.loading ? (
+                  <div className="audit-panel-loading">
+                    <div className="loading-spinner" />
+                    <span>Conectando con registry oficial y repositorio...</span>
+                  </div>
+                ) : verInfo?.data ? (
+                  <div className="audit-table-wrapper">
+                    <table className="audit-table">
+                      <thead>
+                        <tr>
+                          <th>Entorno / Origen</th>
+                          <th>Versión</th>
+                          <th>Fecha / Commit</th>
+                          <th>Estado</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td className="audit-cell-source">
+                            <span className="audit-env-icon">💻</span>
+                            <span>Instalación Local (en este equipo)</span>
+                          </td>
+                          <td className="audit-cell-version local-val">
+                            <code>{verInfo.data.local_version || 'N/A'}</code>
+                          </td>
+                          <td className="audit-cell-date">
+                            <code>{verInfo.data.local_date || '-'}</code>
+                          </td>
+                          <td className="audit-cell-status">
+                            <span className={`audit-badge ${verInfo.data.local_version && verInfo.data.local_version !== 'No detectado' ? 'active' : 'warn'}`}>
+                              {verInfo.data.local_status || 'Activa en disco'}
+                            </span>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td className="audit-cell-source">
+                            <span className="audit-env-icon">📦</span>
+                            <span>Último Release Oficial (npm registry)</span>
+                          </td>
+                          <td className="audit-cell-version npm-val">
+                            <code>{verInfo.data.npm_version || 'N/A'}</code>
+                          </td>
+                          <td className="audit-cell-date">
+                            <code>{verInfo.data.npm_date || '-'}</code>
+                          </td>
+                          <td className="audit-cell-status">
+                            <span className="audit-badge release">
+                              {verInfo.data.npm_status || 'Disponible en npm'}
+                            </span>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td className="audit-cell-source">
+                            <span className="audit-env-icon">🌐</span>
+                            <span>Rama main (GitHub upstream)</span>
+                          </td>
+                          <td className="audit-cell-version gh-val">
+                            <code>{verInfo.data.github_version || 'N/A'}</code>
+                          </td>
+                          <td className="audit-cell-date">
+                            <code>{verInfo.data.github_commit || '-'}</code>
+                          </td>
+                          <td className="audit-cell-status">
+                            <span className="audit-badge upstream">
+                              {verInfo.data.github_status || 'Gentleman-Programming'}
+                            </span>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+              </div>
+            )}
 
             {renderTable(harness.agents || [], harness.id)}
           </div>

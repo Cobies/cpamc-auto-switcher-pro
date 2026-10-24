@@ -95,44 +95,75 @@ describe('AgentMatrix Component', () => {
     expect(screen.getByText('📟 Gentle-Shell Terminal CLI')).toBeDefined();
     expect(screen.getByText(/Terminal CLI Soberana/i)).toBeDefined();
 
-    // 3. Check Clarity Item 2: Rescate Failover 429 clarity & Pool Self-Covered badge
-    expect(screen.getAllByText(/Autocubierto en Pool/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/SECUNDARIO/i).length).toBeGreaterThan(0);
+    // 3. Columns in primary table view: ROL/AGENTE, PRIMARIO, THINKING, TEST
+    expect(screen.getAllByText('Misión en el ciclo').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Ruta activa de ejecución').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Nivel de razonamiento').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Sonda de red y token').length).toBeGreaterThan(0);
 
-    // 4. Check Clarity Item 3: Sovereign Facade -> Physical Reality transparency
-    expect(screen.getAllByText(/claude-sonnet-4-6/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/\(4 cuentas activas\)/i).length).toBeGreaterThan(0);
-
-    // 5. Check Non-reasoning Thinking N/A Badge
+    // 4. Check Non-reasoning Thinking N/A Badge
     expect(screen.getByText('🚫 N/A')).toBeDefined();
 
-    // 6. Check Dry-Run Ping button existence
+    // 5. Check Dry-Run Ping button existence
     expect(screen.getAllByText('⚡ Test').length).toBeGreaterThan(0);
 
-    // 7. Check Token Burn Gauge & Stress Semaphore
+    // 6. Check Token Burn Gauge & Stress Semaphore
     const gauge = screen.getByTestId('token-burn-gauge');
     expect(gauge).toBeDefined();
     expect(screen.getByText(/Autonomía estimada:/i)).toBeDefined();
 
-    // 8. Check Warmup Triage button
+    // 7. Check Warmup Triage button
     expect(screen.getByText('Warmup Triage')).toBeDefined();
 
-    // 9. Agnostic Architecture: Claude-centric fixed headers are ELIMINATED from the universal table
+    // 8. Agnostic Architecture: Claude-centric fixed headers are ELIMINATED from the universal table
     expect(screen.queryByText('AUTO-DOWNGRADE')).toBeNull();
     expect(screen.queryByText('TOPE BUCLE (CLAUDE)')).toBeNull();
 
-    // 10. Check Claude Design 2027: Universal Column sub-headers (micro-copy de caso de uso)
-    expect(screen.getAllByText('Misión en el ciclo').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Capacidad paralela segura').length).toBeGreaterThan(0);
+    // 9. Clicking an agent row opens the accordion displaying SECUNDARIO & Read-only CONCURRENCY
+    const gentleRowCell = screen.getByText('👑 ORQUESTADOR GENTLE').closest('td');
+    fireEvent.click(gentleRowCell);
 
-    // 11. Check Safety Lock for writers and smart concurrency options
-    expect(screen.getAllByText('1 tarea').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('(Seguro)').length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(screen.getAllByText(/SECUNDARIO/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/Autocubierto en Pool/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/CONCURRENCIA/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/1 tarea/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/Líder/i).length).toBeGreaterThan(0);
+    });
 
-    // 12. Check Global Preset Buttons (Seguro, Pro, Turbo)
+    // 10. Check Global Preset Buttons (Seguro, Pro, Turbo)
     expect(screen.getByText('🛡️ Seguro')).toBeDefined();
     expect(screen.getByText('⚡ Pro')).toBeDefined();
     expect(screen.getByText('🚀 Turbo')).toBeDefined();
+
+    // 11. Check Harness Version Audit Accordion on header click
+    vi.spyOn(managementClient, 'fetchHarnessVersion').mockResolvedValue({
+      harness_id: 'gentle_shell',
+      harness_name: 'Gentle-Shell CLI',
+      local_version: '4.0.0',
+      local_date: '2026-10-01',
+      local_status: '🟢 Activa en host',
+      npm_version: '4.3.0',
+      npm_date: '2026-10-16',
+      npm_status: '🚀 Disponible en npm (gentle-pi)',
+      github_version: '4.3.0',
+      github_commit: '195b8d9',
+      github_status: '🔗 GitHub Upstream (Gentleman-Programming)',
+      is_up_to_date: false,
+      checked_at: '2026-10-23T22:00:00Z',
+    });
+
+    const gentleHeader = screen.getByText('GENTLE-SHELL CLI').closest('.universe-header');
+    fireEvent.click(gentleHeader);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Auditoría de Versión & Telemetría Upstream/i)).toBeDefined();
+      expect(screen.getByText('Instalación Local (en este equipo)')).toBeDefined();
+      expect(screen.getByText('Último Release Oficial (npm registry)')).toBeDefined();
+      expect(screen.getByText('Rama main (GitHub upstream)')).toBeDefined();
+      expect(screen.getByText('4.0.0')).toBeDefined();
+      expect(screen.getAllByText('4.3.0').length).toBeGreaterThan(0);
+    });
   });
 
   it('renders strictly Gentle-AI by default and completely hides j0k3r-pi when not detected', async () => {
@@ -336,15 +367,21 @@ describe('AgentMatrix Component', () => {
       expect(screen.getByText('Matriz de Agentes & Orquestación')).toBeDefined();
     });
 
-    // Worker debe mostrar candado de seguridad (1 tarea fija)
-    expect(screen.getByText('(Seguro)')).toBeDefined();
+    // Abrir acordeón de gentle-ai-worker haciendo clic en su celda
+    const workerCell = screen.getByText('🛠️ gentle-ai-worker').closest('td');
+    fireEvent.click(workerCell);
 
-    // Explorer debe tener un select de concurrencia
+    // Worker debe mostrar candado de seguridad (1 tarea fija) en su acordeón
+    await waitFor(() => {
+      expect(screen.getByText('Seguro')).toBeDefined();
+      expect(screen.getByText('Edición secuencial anti-corrupción')).toBeDefined();
+    });
+
     const turboBtn = screen.getByText('🚀 Turbo');
     fireEvent.click(turboBtn);
 
-    // Tras activar turbo, worker sigue con candado (Seguro)
-    expect(screen.getByText('(Seguro)')).toBeDefined();
+    // Tras activar turbo, worker sigue protegido en 1 tarea (Seguro)
+    expect(screen.getByText('Seguro')).toBeDefined();
     expect(screen.getByText(/🚀 Modo Turbo activado/i)).toBeDefined();
   });
 
