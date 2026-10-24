@@ -152,7 +152,7 @@ describe("Dynamic Provider Filtering & Granular Coexistence", () => {
         assert.equal(reconciled.length, 3);
     });
 
-    it("verifies registration injects x-project-identity and x-workspace-root headers", () => {
+    it("verifies registration injects x-project-identity and x-workspace-root headers", async () => {
         let registeredProviderConfig: any = null;
         const mockPi: any = {
             registerProvider: (_id: string, config: any) => {
@@ -160,7 +160,7 @@ describe("Dynamic Provider Filtering & Granular Coexistence", () => {
             },
         };
 
-        const { initDynamicProvider } = require("./provider.ts");
+        const { initDynamicProvider } = await import("./provider.js");
         initDynamicProvider(mockPi);
 
         assert.ok(registeredProviderConfig, "provider must be registered");

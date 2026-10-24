@@ -1016,21 +1016,24 @@ export function initDynamicProvider(pi: ExtensionAPI): void {
                 }
             } catch {}
         }, 75);
+        debounceTimer.unref?.();
     };
 
     const signalTargets = resolveSignalFileTargets();
     for (const target of signalTargets) {
         try {
             if (existsSync(target)) {
-                watch(target, () => triggerHotReload());
+                const watcher = watch(target, () => triggerHotReload());
+                watcher.unref?.();
             } else {
                 const parent = dirname(target);
                 if (existsSync(parent)) {
-                    watch(parent, (_event, filename) => {
+                    const watcher = watch(parent, (_event, filename) => {
                         if (typeof filename === "string" && (filename.includes("epoch") || filename.includes("state.json"))) {
                             triggerHotReload();
                         }
                     });
+                    watcher.unref?.();
                 }
             }
         } catch {}
