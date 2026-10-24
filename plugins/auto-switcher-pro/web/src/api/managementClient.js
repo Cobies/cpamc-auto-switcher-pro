@@ -831,17 +831,24 @@ export function buildGraphFromAuthFiles(authFiles = [], options = {}) {
 
   const registeredPools = Array.isArray(options.registeredPools) ? options.registeredPools : [];
   const poolByLeaderMap = new Map();
-  const poolByMemberMap = new Map();
+  const poolsByMemberMap = new Map(); // fileName -> Array of pools where it participates
   registeredPools.forEach((p) => {
     if (!p) return;
     if (p.leader_auth) poolByLeaderMap.set(p.leader_auth, p);
     const allMembers = [
+      ...(p.leader_auth ? [p.leader_auth] : []),
       ...(Array.isArray(p.members) ? p.members : []),
       ...(Array.isArray(p.reserves) ? p.reserves : []),
     ];
     allMembers.forEach((m) => {
-      if (m && !poolByMemberMap.has(m)) {
-        poolByMemberMap.set(m, p);
+      if (m) {
+        if (!poolsByMemberMap.has(m)) {
+          poolsByMemberMap.set(m, []);
+        }
+        const existingList = poolsByMemberMap.get(m);
+        if (!existingList.some((x) => x.id === p.id)) {
+          existingList.push(p);
+        }
       }
     });
   });
@@ -935,89 +942,120 @@ export function buildGraphFromAuthFiles(authFiles = [], options = {}) {
       }
     }
 
-    // Si la cuenta pertenece a un Pool Soberano registrado en el plugin
-    // y no es el líder del pool, vincular automáticamente la arista hacia el líder del pool
-    const assignedPool = poolByMemberMap.get(file.name);
-    if (assignedPool && assignedPool.leader_auth && assignedPool.leader_auth !== file.name) {
-      childNodeIds.add(file.name);
-      const edgeId = `edge__${assignedPool.leader_auth}-${file.name}`;
-      if (!edges.some((e) => e.id === edgeId)) {
-        edges.push({
-          id: edgeId,
-          source: assignedPool.leader_auth,
-          target: file.name,
-          animated: true,
-          style: { stroke: '#38bdf8', strokeWidth: 2 },
-        });
+    const filePools = poolsByMemberMap.get(file.name) || [];
+    filePools.forEach((assignedPool) => {
+      const isLeader = assignedPool?.leader_auth === file.name;
+      const poolFam = (assignedPool?.family || '').toLowerCase();
+      const isClaudePool = poolFam.includes('claude') || poolFam.includes('sonnet') || poolFam.includes('opus') || (assignedPool?.base_prefix || '').startsWith('agy_clau');
+      const isDualAccount = (file.type === 'antigravity' || file.provider === 'antigravity') && filePools.length > 1;
+
+      if (assignedPool && assignedPool.leader_auth && !isLeader) {
+        const leaderPools = poolsByMemberMap.get(assignedPool.leader_auth) || [];
+        const isLeaderDual = leaderPools.length > 1;
+        const sourceId = isLeaderDual && isClaudePool ? `${assignedPool.leader_auth}@claude` : (isLeaderDual && !isClaudePool ? `${assignedPool.leader_auth}@gemini` : assignedPool.leader_auth);
+        const targetId = isDualAccount && isClaudePool ? `${file.name}@claude` : (isDualAccount && !isClaudePool ? `${file.name}@gemini` : file.name);
+
+        childNodeIds.add(targetId);
+        const edgeId = `edge__${sourceId}-${targetId}`;
+        if (!edges.some((e) => e.id === edgeId)) {
+          edges.push({
+            id: edgeId,
+            source: sourceId,
+            target: targetId,
+            animated: true,
+            style: { stroke: isClaudePool ? '#a855f7' : '#38bdf8', strokeWidth: 2 },
+          });
+        }
       }
-    }
+    });
   });
 
   // Build nodes with strictly whitelisted non-credential fields
-  const rawNodes = cleanFiles.map((file) => {
+  const rawNodes = [];
+  cleanFiles.forEach((file) => {
     const fileName = file.name;
-    const assignedPool = poolByMemberMap.get(fileName);
-    const isPoolLeader = assignedPool?.leader_auth === fileName;
-    const isRAMLeader = assignedPool?.active_leader === fileName;
+    const filePools = poolsByMemberMap.get(fileName) || [];
+    const isAntigravity = (file.type === 'antigravity' || file.provider === 'antigravity');
+    const isDualAccount = isAntigravity && filePools.length > 1;
 
-    // Calcular prefijo virtual del pool para miembros/reservas que no tienen prefijo estampado en disco
-    let virtualPrefix = '';
-    if (assignedPool) {
-      if (isPoolLeader) {
-        virtualPrefix = assignedPool.base_prefix || '';
-      } else {
-        const reserveList = Array.isArray(assignedPool.reserves)
-          ? assignedPool.reserves
-          : (Array.isArray(assignedPool.members) ? assignedPool.members.filter((m) => m !== assignedPool.leader_auth) : []);
-        const rIdx = reserveList.indexOf(fileName);
-        const seq = rIdx >= 0 ? rIdx + 1 : 1;
-        virtualPrefix = `${assignedPool.base_prefix}_${seq}`;
+    // Helper para generar el nodo con su data
+    const createNodeInstance = (nodeId, assignedPool, roleSuffix = '') => {
+      const isPoolLeader = assignedPool?.leader_auth === fileName;
+      const isRAMLeader = assignedPool?.active_leader === fileName;
+
+      let virtualPrefix = '';
+      if (assignedPool) {
+        if (isPoolLeader) {
+          virtualPrefix = assignedPool.base_prefix || '';
+        } else {
+          const reserveList = Array.isArray(assignedPool.reserves)
+            ? assignedPool.reserves
+            : (Array.isArray(assignedPool.members) ? assignedPool.members.filter((m) => m !== assignedPool.leader_auth) : []);
+          const rIdx = reserveList.indexOf(fileName);
+          const seq = rIdx >= 0 ? rIdx + 1 : 1;
+          virtualPrefix = `${assignedPool.base_prefix}_${seq}`;
+        }
       }
-    }
 
-    const prefix = file.prefix;
-    const isChild = childNodeIds.has(fileName);
-    const isRoot = !isChild && Boolean(prefix || isPoolLeader);
-    const ambiguousParent = ambiguousChildMap.get(fileName) || null;
-    const accountType = (file.type || file.provider || '').trim().toLowerCase();
-    const maskedEmail = extractSafeMaskedEmail(file.email, fileName);
+      const prefix = file.prefix;
+      const isChild = childNodeIds.has(nodeId);
+      const isRoot = !isChild && Boolean(prefix || isPoolLeader);
+      const ambiguousParent = ambiguousChildMap.get(fileName) || null;
+      const accountType = (file.type || file.provider || '').trim().toLowerCase();
+      const maskedEmail = extractSafeMaskedEmail(file.email, fileName);
 
-    return {
-      id: fileName, // Immutable exact auth-file name
-      type: 'profile',
-      position: { x: 0, y: 0 },
-      excluded_models: file.excluded_models || [],
-      excludedModels: file.excludedModels || [],
-      data: {
-        fileName,
-        prefix,
-        virtualPrefix,
-        initialPrefix: prefix,
-        label: prefix || (assignedPool ? `[${assignedPool.id}]` : fileName),
-        isDirty: false,
-        isRoot,
-        isSynthetic: false, // Real auth-file node
-        ambiguousParent,
-        accountType,
-        provider: (file.provider || file.type || '').trim().toLowerCase(),
-        maskedEmail, // Store masked email only in node.data
-        email: maskedEmail, // Raw email is NEVER stored
+      return {
+        id: nodeId,
+        type: 'profile',
+        position: { x: 0, y: 0 },
         excluded_models: file.excluded_models || [],
         excludedModels: file.excludedModels || [],
-        auth_index: file.auth_index,
-        project_id: file.project_id,
-        unavailable: file.unavailable === true,
-        disabled: file.disabled === true,
-        cooldowns: file.cooldowns || [],
-        recent_requests: file.recent_requests || [],
-        success: file.success || 0,
-        failed: file.failed || 0,
-        next_retry_after: file.next_retry_after || '',
-        poolId: assignedPool?.id || null,
-        isRAMLeader,
-        isPoolLeader,
-      },
+        data: {
+          fileName,
+          nodeId,
+          roleSuffix, // 'gemini' o 'claude' cuando es dual
+          prefix,
+          virtualPrefix,
+          initialPrefix: prefix,
+          label: prefix || (assignedPool ? `[${assignedPool.id}]` : fileName),
+          isDirty: false,
+          isRoot,
+          isSynthetic: false, // Real auth-file node
+          ambiguousParent,
+          accountType,
+          provider: (file.provider || file.type || '').trim().toLowerCase(),
+          maskedEmail,
+          email: maskedEmail,
+          excluded_models: file.excluded_models || [],
+          excludedModels: file.excludedModels || [],
+          auth_index: file.auth_index,
+          project_id: file.project_id,
+          unavailable: file.unavailable === true,
+          disabled: file.disabled === true,
+          cooldowns: file.cooldowns || [],
+          recent_requests: file.recent_requests || [],
+          success: file.success || 0,
+          failed: file.failed || 0,
+          next_retry_after: file.next_retry_after || '',
+          poolId: assignedPool?.id || null,
+          isRAMLeader,
+          isPoolLeader,
+        },
+      };
     };
+
+    if (isDualAccount) {
+      // Generar dos nodos visuales separados: uno para su faceta Gemini y otro para Claude
+      filePools.forEach((pool) => {
+        const poolFam = (pool.family || '').toLowerCase();
+        const isClaude = poolFam.includes('claude') || poolFam.includes('sonnet') || poolFam.includes('opus') || (pool.base_prefix || '').startsWith('agy_clau');
+        const roleSuffix = isClaude ? 'claude' : 'gemini';
+        rawNodes.push(createNodeInstance(`${fileName}@${roleSuffix}`, pool, roleSuffix));
+      });
+    } else {
+      const assignedPool = filePools[0] || null;
+      rawNodes.push(createNodeInstance(fileName, assignedPool, ''));
+    }
   });
 
   // Deterministic topology-aware layout: roots above descendants, collision-free separate lanes
