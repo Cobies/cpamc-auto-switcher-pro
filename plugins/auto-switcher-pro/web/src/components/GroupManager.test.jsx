@@ -1421,4 +1421,110 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
     expect(cards[1].getAttribute('data-testid')).toBe('pool-card-agy2');
     expect(cards[2].getAttribute('data-testid')).toBe('pool-card-agy_clau');
   });
+
+  describe('GroupManager - Dynamic OmniAuth Pro Provider Families', () => {
+    it('dynamically appends OmniAuth Pro family chips after Codex when accounts exist', () => {
+      const nodesWithDeepSeek = [
+        {
+          id: 'deepseek-acc1.json',
+          name: 'deepseek-acc1.json',
+          data: {
+            fileName: 'deepseek-acc1.json',
+            prefix: '',
+            provider: 'deepseek',
+            email: 'deepseek-user1@example.com',
+          },
+        },
+        {
+          id: 'deepseek-acc2.json',
+          name: 'deepseek-acc2.json',
+          data: {
+            fileName: 'deepseek-acc2.json',
+            prefix: '',
+            provider: 'deepseek',
+            email: 'deepseek-user2@example.com',
+          },
+        },
+      ];
+
+      render(<GroupManager nodes={nodesWithDeepSeek} />);
+
+      // Baseline core families must exist in correct order
+      expect(screen.getByTestId('family-gemini')).toBeTruthy();
+      expect(screen.getByTestId('family-claude')).toBeTruthy();
+      expect(screen.getByTestId('family-codex')).toBeTruthy();
+
+      // DeepSeek dynamic family chip must appear appended
+      const deepseekChip = screen.getByTestId('family-deepseek');
+      expect(deepseekChip).toBeTruthy();
+      expect(deepseekChip.textContent).toContain('DeepSeek');
+      expect(deepseekChip.textContent).toContain('prefijo deepseek*');
+
+      // Unused providers (e.g. Groq, Cerebras) must NOT pollute the UI
+      expect(screen.queryByTestId('family-groq')).toBeNull();
+      expect(screen.queryByTestId('family-cerebras')).toBeNull();
+    });
+
+    it('filters leader and reserve candidates strictly to the chosen dynamic provider and suggests prefix', async () => {
+      const mixedNodes = [
+        {
+          id: 'deepseek-acc1.json',
+          name: 'deepseek-acc1.json',
+          data: {
+            fileName: 'deepseek-acc1.json',
+            prefix: '',
+            provider: 'deepseek',
+            email: 'deepseek-user1@example.com',
+          },
+        },
+        {
+          id: 'deepseek-acc2.json',
+          name: 'deepseek-acc2.json',
+          data: {
+            fileName: 'deepseek-acc2.json',
+            prefix: '',
+            provider: 'deepseek',
+            email: 'deepseek-user2@example.com',
+          },
+        },
+        {
+          id: 'nvidia-acc1.json',
+          name: 'nvidia-acc1.json',
+          data: {
+            fileName: 'nvidia-acc1.json',
+            prefix: '',
+            provider: 'nvidia',
+            email: 'nvidia-user@example.com',
+          },
+        },
+      ];
+
+      render(<GroupManager nodes={mixedNodes} />);
+
+      // Select DeepSeek family
+      const deepseekChip = screen.getByTestId('family-deepseek');
+      fireEvent.click(deepseekChip);
+
+      // Verify prefix auto-suggestion
+      const prefixInput = screen.getByTestId('input-group-base-prefix');
+      expect(prefixInput.value).toBe('deepseek');
+
+      // Check leader select: must contain both DeepSeek accounts, but NEVER the NVIDIA account
+      const selectLeader = screen.getByTestId('select-active-account');
+      const options = Array.from(selectLeader.querySelectorAll('option')).map((o) => o.value);
+      expect(options).toContain('deepseek-acc1.json');
+      expect(options).toContain('deepseek-acc2.json');
+      expect(options).not.toContain('nvidia-acc1.json');
+
+      // Select deepseek-acc1 as leader
+      fireEvent.change(selectLeader, { target: { value: 'deepseek-acc1.json' } });
+
+      // Reserve list should now show deepseek-acc2 as the only available candidate
+      await waitFor(() => {
+        expect(screen.getByTestId('reserve-item-deepseek-acc2.json')).toBeTruthy();
+      });
+      expect(screen.queryByTestId('reserve-item-deepseek-acc1.json')).toBeNull();
+      expect(screen.queryByTestId('reserve-item-nvidia-acc1.json')).toBeNull();
+    });
+  });
 });

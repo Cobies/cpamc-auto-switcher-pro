@@ -92,6 +92,90 @@ const MODEL_FAMILIES = {
   },
 };
 
+// Metadatos de proveedores dinámicos (OmniAuth Pro / ecosistema CPAMC)
+const OMNIAUTH_PROVIDER_META = {
+  deepseek: {
+    label: 'DeepSeek',
+    icon: '🐋',
+    hintPrefix: 'deepseek',
+    quota: 'DeepSeek Chat & Reasoner',
+    note: 'Cuentas de DeepSeek oficiales o compatibles (prefijo deepseek*). Convención: deepseek, deepseek2...',
+    models: ['deepseek-chat', 'deepseek-reasoner'],
+  },
+  nvidia: {
+    label: 'NVIDIA NIM',
+    icon: '🟢',
+    hintPrefix: 'nvidia',
+    quota: 'NVIDIA NIM Cluster',
+    note: 'Cuentas de NVIDIA NIM (prefijo nvidia*). Convención: nvidia, nvidia2...',
+    models: ['meta/llama-3.3-70b-instruct', 'deepseek-ai/deepseek-r1', 'nvidia/llama-3.1-nemotron-70b-instruct'],
+  },
+  groq: {
+    label: 'Groq',
+    icon: '⚡',
+    hintPrefix: 'groq',
+    quota: 'Groq Ultra-Fast LPU',
+    note: 'Cuentas de aceleración Groq LPU (prefijo groq*). Convención: groq, groq2...',
+    models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768'],
+  },
+  cerebras: {
+    label: 'Cerebras',
+    icon: '🏎️',
+    hintPrefix: 'cerebras',
+    quota: 'Cerebras Wafer-Scale',
+    note: 'Cuentas de Cerebras Wafer-Scale Engine (prefijo cerebras*). Convención: cerebras, cerebras2...',
+    models: ['llama-3.3-70b', 'llama3.1-8b'],
+  },
+  mistral: {
+    label: 'Mistral AI',
+    icon: '🌪️',
+    hintPrefix: 'mistral',
+    quota: 'Mistral La Plateforme',
+    note: 'Cuentas oficiales de Mistral AI (prefijo mistral*). Convención: mistral, mistral2...',
+    models: ['mistral-large-latest', 'codestral-latest'],
+  },
+  typesafe: {
+    label: 'TypeSafe AI',
+    icon: '🛡️',
+    hintPrefix: 'typesafe',
+    quota: 'TypeSafe AI Router',
+    note: 'Cuentas protegidas de TypeSafe AI (prefijo typesafe*). Convención: typesafe, typesafe2...',
+    models: ['deepseek-chat', 'deepseek-r1'],
+  },
+  vercel: {
+    label: 'Vercel AI Gateway',
+    icon: '▲',
+    hintPrefix: 'vercel',
+    quota: 'Vercel AI Gateway',
+    note: 'Cuentas enrutadas vía Vercel Gateway (prefijo vercel*). Convención: vercel, vercel2...',
+    models: ['anthropic/claude-3-7-sonnet', 'openai/gpt-4o'],
+  },
+  nan: {
+    label: 'NaN Builders',
+    icon: '🧬',
+    hintPrefix: 'nan',
+    quota: 'NaN Builders Fleet',
+    note: 'Cuentas del clúster NaN Builders (prefijo nan*). Convención: nan, nan2...',
+    models: ['deepseek-v4-flash', 'glm-5.3-flash', 'mimo-v2.6-flash'],
+  },
+  opencode: {
+    label: 'OpenCode Go',
+    icon: '💻',
+    hintPrefix: 'opencode',
+    quota: 'OpenCode Catalogs',
+    note: 'Cuentas de catálogo dinámico OpenCode (prefijo opencode*). Convención: opencode, opencode2...',
+    models: ['deepseek-chat', 'gemini-2.5-flash'],
+  },
+  'openai-compat': {
+    label: 'OpenAI Compatible',
+    icon: '🌐',
+    hintPrefix: 'custom',
+    quota: 'OpenAI Compatible Endpoint',
+    note: 'Endpoints compatibles con especificación OpenAI (prefijo custom*). Convención: custom, custom2...',
+    models: ['default'],
+  },
+};
+
 // Patrones de nombre por familia objetivo: se usan para liberar modelos del
 // origen al virtualizar aunque el catálogo no los liste (p.ej. excluidos).
 const FAMILY_TARGET_PATTERNS = {
@@ -332,6 +416,51 @@ export default function GroupManager({
     });
   }, [nodes, registryMemberFileNames]);
 
+  // Familias de modelos totales (Estáticas + Proveedores Dinámicos de OmniAuth Pro presentes en los nodos)
+  const allModelFamilies = useMemo(() => {
+    const families = { ...MODEL_FAMILIES };
+    if (!Array.isArray(nodes) || nodes.length === 0) return families;
+
+    // Detectar qué proveedores de OmniAuth Pro existen en los nodos cargados
+    const detectedProviders = new Set();
+    nodes.forEach((n) => {
+      const p = (n.data?.provider || n.data?.accountType || '').toLowerCase().trim();
+      const fn = (n.data?.fileName || n.name || n.id || '').toLowerCase().trim();
+
+      // Mapear proveedor o prefijo de nombre de archivo a OMNIAUTH_PROVIDER_META
+      for (const [provKey, meta] of Object.entries(OMNIAUTH_PROVIDER_META)) {
+        if (
+          p === provKey ||
+          p.includes(provKey) ||
+          fn.startsWith(`${meta.hintPrefix}-`) ||
+          fn.startsWith(`${provKey}-`)
+        ) {
+          detectedProviders.add(provKey);
+        }
+      }
+    });
+
+    // Agregar al final de la barra preservando Gemini, Claude y Codex primero
+    detectedProviders.forEach((provKey) => {
+      const meta = OMNIAUTH_PROVIDER_META[provKey];
+      if (meta && !families[provKey]) {
+        families[provKey] = {
+          key: provKey,
+          label: meta.label,
+          icon: meta.icon,
+          hintPrefix: meta.hintPrefix,
+          provider: provKey,
+          quota: meta.quota,
+          note: meta.note,
+          isOmniAuthPro: true,
+          models: meta.models,
+        };
+      }
+    });
+
+    return families;
+  }, [nodes]);
+
   // Resolución de familia efectiva (gestiona la jerarquía de sub-tipos de Gemini)
   const effectiveFamily = useMemo(() => {
     if (!family) return null;
@@ -346,16 +475,19 @@ export default function GroupManager({
         note: sub.note,
       };
     }
-    const fam = MODEL_FAMILIES[family];
+    const fam = allModelFamilies[family] || MODEL_FAMILIES[family];
+    if (!fam) return null;
     return {
       key: family,
       label: fam.label,
       hintPrefix: fam.hintPrefix,
-      provider: fam.provider,
-      quota: fam.quota,
-      note: fam.note,
+      provider: fam.provider || family,
+      quota: fam.quota || `${fam.label} API`,
+      note: fam.note || `Cuentas de ${fam.label} (prefijo ${fam.hintPrefix}*).`,
+      isOmniAuthPro: fam.isOmniAuthPro || false,
+      models: fam.models || [],
     };
-  }, [family, geminiSubtype]);
+  }, [family, geminiSubtype, allModelFamilies]);
 
   const isGeminiPackageFamily = !!effectiveFamily && (
     effectiveFamily.key.startsWith('gemini_')
@@ -378,6 +510,9 @@ export default function GroupManager({
     }
     if (effectiveFamily.key === 'codex' || effectiveFamily.provider === 'codex') {
       return 'codex';
+    }
+    if (effectiveFamily.isOmniAuthPro || effectiveFamily.provider !== 'antigravity') {
+      return effectiveFamily.provider;
     }
     return null;
   }, [effectiveFamily]);
@@ -457,6 +592,8 @@ export default function GroupManager({
           'gpt-4-turbo',
           'gpt-4',
         ];
+      } else if (effectiveFamily.models && effectiveFamily.models.length > 0) {
+        models = [...effectiveFamily.models];
       }
     }
 
@@ -564,7 +701,7 @@ export default function GroupManager({
         .filter((n) => {
           const prov = (n.data?.provider || n.data?.accountType || '').toLowerCase();
           const fileName = n.data?.fileName || n.name || n.id || '';
-          const matchesProv = prov === famProvider;
+          const matchesProv = prov === famProvider || prov.includes(famProvider) || fileName.toLowerCase().startsWith(`${effectiveFamily.hintPrefix}-`);
           if (!matchesProv) return false;
 
           // Si ya está asignada a un pool registrado de esta misma familia/rol, no es libre
@@ -838,14 +975,14 @@ export default function GroupManager({
     setModelRoutes(null);
     setSaveReport(null);
 
-    let hint = famKey && MODEL_FAMILIES[famKey] ? MODEL_FAMILIES[famKey].hintPrefix : null;
+    let hint = famKey && allModelFamilies[famKey] ? allModelFamilies[famKey].hintPrefix : null;
     if (famKey === 'gemini') {
       hint = MODEL_FAMILIES.gemini.subtypes[geminiSubtype].hintPrefix;
     }
     if (hint) {
       setGroupBasePrefix(suggestNextBasePrefix(nodes, hint));
     }
-  }, [nodes, family, geminiSubtype]);
+  }, [nodes, family, geminiSubtype, allModelFamilies]);
 
   const handleSelectGeminiSubtype = useCallback((subType) => {
     if (geminiSubtype !== subType) {
@@ -1097,11 +1234,14 @@ export default function GroupManager({
       const leaderFileName = activeNode.data?.fileName || activeNode.name;
       const nextPoolIndex = existingPools.length + 1;
       const famKey = (effectiveFamily?.key || trimmedBase || '').toLowerCase();
-      const famSuffix = famKey.includes('codex')
-        ? 'codex'
-        : famKey.includes('clau') || famKey.includes('son') || famKey.includes('opus')
-        ? 'claude'
-        : 'gemini';
+      let famSuffix = 'gemini';
+      if (famKey.includes('codex')) {
+        famSuffix = 'codex';
+      } else if (famKey.includes('clau') || famKey.includes('son') || famKey.includes('opus')) {
+        famSuffix = 'claude';
+      } else if (effectiveFamily?.isOmniAuthPro || effectiveFamily?.provider) {
+        famSuffix = effectiveFamily.provider;
+      }
       const canonicalPoolName = `Pool-${String(nextPoolIndex).padStart(2, '0')}-${famSuffix}`;
       const chosenModel = targetModels[0] || 'gemini-3.8-flash-high';
       const memberModelsMap = { [leaderFileName]: chosenModel };
@@ -1757,7 +1897,7 @@ export default function GroupManager({
                 <div className="group-field">
                   <label className="group-label">① Familia de modelos (define qué cuota se vigila):</label>
                   <div className="group-family-segmented" role="group">
-                    {Object.entries(MODEL_FAMILIES).map(([key, fam]) => (
+                    {Object.entries(allModelFamilies).map(([key, fam]) => (
                       <button
                         key={key}
                         type="button"
