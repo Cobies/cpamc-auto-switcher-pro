@@ -13,8 +13,6 @@
  */
 
 
-const SECRET_SALT = 'cli-proxy-api-webui::secure-storage';
-const ENC_PREFIX = 'enc::v1::';
 const EMAIL_REGEX = /[a-zA-Z0-9._%+]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
 const SUFFIX_STRIP = /(?:-plus)?\.json$/i;
 
@@ -115,89 +113,6 @@ export function sanitizeFileName(name) {
 }
 
 /**
- * Deobfuscates CPAMC storage payload using host and userAgent XOR cipher.
- *
- * @param {string} raw - The stored string value
- * @param {string} [host] - Hostname override for testing
- * @param {string} [ua] - User agent override for testing
- * @returns {string} Deobfuscated string, or raw if not obfuscated or on error
- */
-export function deobfuscateCPAMC(raw, host, ua) {
-  if (!raw || typeof raw !== 'string') return '';
-  if (!raw.startsWith(ENC_PREFIX)) return raw;
-
-  try {
-    const effectiveHost =
-      host ||
-      (typeof window !== 'undefined' && window.location && window.location.host) ||
-      'localhost';
-    const effectiveUa =
-      ua ||
-      (typeof navigator !== 'undefined' && navigator.userAgent) ||
-      '';
-
-    const keyStr = `${SECRET_SALT}|${effectiveHost}|${effectiveUa}`;
-    const encoder = new TextEncoder();
-    const keyBytes = encoder.encode(keyStr);
-
-    const b64 = raw.slice(ENC_PREFIX.length);
-    const binary = atob(b64);
-    const dataBytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      dataBytes[i] = binary.charCodeAt(i);
-    }
-
-    const decrypted = new Uint8Array(dataBytes.length);
-    for (let i = 0; i < dataBytes.length; i++) {
-      decrypted[i] = dataBytes[i] ^ keyBytes[i % keyBytes.length];
-    }
-
-    return new TextDecoder().decode(decrypted);
-  } catch {
-    // Fail-safe: return raw on decode error without throwing or leaking
-    return raw;
-  }
-}
-
-/**
- * Obfuscates plain text matching CPAMC XOR cipher.
- * Useful for tests and symmetrical verification.
- *
- * @param {string} plainText
- * @param {string} [host]
- * @param {string} [ua]
- * @returns {string} Obfuscated payload with 'enc::v1::' prefix
- */
-export function obfuscateCPAMC(plainText, host, ua) {
-  if (typeof plainText !== 'string') return '';
-  const effectiveHost =
-    host ||
-    (typeof window !== 'undefined' && window.location && window.location.host) ||
-    'localhost';
-  const effectiveUa =
-    ua ||
-    (typeof navigator !== 'undefined' && navigator.userAgent) ||
-    '';
-
-  const keyStr = `${SECRET_SALT}|${effectiveHost}|${effectiveUa}`;
-  const encoder = new TextEncoder();
-  const keyBytes = encoder.encode(keyStr);
-  const dataBytes = encoder.encode(plainText);
-
-  const encrypted = new Uint8Array(dataBytes.length);
-  for (let i = 0; i < dataBytes.length; i++) {
-    encrypted[i] = dataBytes[i] ^ keyBytes[i % keyBytes.length];
-  }
-
-  let binary = '';
-  for (let i = 0; i < encrypted.length; i++) {
-    binary += String.fromCharCode(encrypted[i]);
-  }
-
-  return ENC_PREFIX + btoa(binary);
-}
-
-/**
  * Retrieves the management key from CPAMC parent storage (iframe) or local storage.
  * Fails closed and returns empty string if key is not found.
  *
@@ -205,17 +120,12 @@ export function obfuscateCPAMC(plainText, host, ua) {
  * @param {string} [options.injectedKey] - Directly injected key for test override
  * @param {Storage} [options.parentStorage] - Storage override for parent window
  * @param {Storage} [options.localStorage] - Storage override for local window
- * @param {string} [options.host] - Host override
- * @param {string} [options.userAgent] - User agent override
  * @returns {string} Management key or empty string
  */
 export function getManagementKey(options = {}) {
   if (options.injectedKey) {
     return options.injectedKey.trim();
   }
-
-  const effectiveHost = options.host;
-  const effectiveUa = options.userAgent;
 
   // 1. Try parent localStorage (iframe scenario inside CPAMC)
   try {
@@ -228,10 +138,13 @@ export function getManagementKey(options = {}) {
     if (parentStorage) {
       const raw = parentStorage.getItem('cli-proxy-auth');
       if (raw) {
-        const decrypted = deobfuscateCPAMC(raw, effectiveHost, effectiveUa);
-        const parsed = JSON.parse(decrypted);
-        if (parsed?.state?.managementKey) {
-          return String(parsed.state.managementKey).trim();
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed?.state?.managementKey) {
+            return String(parsed.state.managementKey).trim();
+          }
+        } catch {
+          // Non-JSON or malformed: fall through
         }
       }
     }
@@ -248,10 +161,13 @@ export function getManagementKey(options = {}) {
     if (localStorage) {
       const raw = localStorage.getItem('cli-proxy-auth');
       if (raw) {
-        const decrypted = deobfuscateCPAMC(raw, effectiveHost, effectiveUa);
-        const parsed = JSON.parse(decrypted);
-        if (parsed?.state?.managementKey) {
-          return String(parsed.state.managementKey).trim();
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed?.state?.managementKey) {
+            return String(parsed.state.managementKey).trim();
+          }
+        } catch {
+          // Non-JSON or malformed: fall through
         }
       }
     }
@@ -2381,12 +2297,13 @@ export const ANTIGRAVITY_PLAN_BY_TIER_ID = {
 };
 
 /**
- * Parses Antigravity tier summary (from loadCodeAssist).
+ * Safely unwraps an envelope payload and its optional string/object body.
+ * Deduplicates envelope unwrapping across quota, tier, and telemetry parsers.
  *
  * @param {Object|string} payload
- * @returns {{ plan: string, tierId: string|null, tierName: string|null }|null}
+ * @returns {any} Unwrapped body or payload
  */
-export function parseAntigravityTierSummary(payload) {
+export function unwrapPayloadBody(payload) {
   if (!payload) return null;
   let envelope = payload;
   if (typeof envelope === 'string') {
@@ -2396,18 +2313,29 @@ export function parseAntigravityTierSummary(payload) {
       return null;
     }
   }
-  const parsed =
-    envelope && typeof envelope.body === 'object' && envelope.body !== null
-      ? envelope.body
-      : typeof envelope.body === 'string'
-      ? (() => {
-          try {
-            return JSON.parse(envelope.body);
-          } catch {
-            return envelope;
-          }
-        })()
-      : envelope;
+  if (!envelope || typeof envelope !== 'object') return envelope;
+  if (typeof envelope.body === 'string') {
+    try {
+      return JSON.parse(envelope.body);
+    } catch {
+      return envelope.body;
+    }
+  }
+  if (typeof envelope.body === 'object' && envelope.body !== null) {
+    return envelope.body;
+  }
+  return envelope;
+}
+
+/**
+ * Parses Antigravity tier summary (from loadCodeAssist).
+ *
+ * @param {Object|string} payload
+ * @returns {{ plan: string, tierId: string|null, tierName: string|null }|null}
+ */
+export function parseAntigravityTierSummary(payload) {
+  if (!payload) return null;
+  const parsed = unwrapPayloadBody(payload);
 
   const normalizeTier = (val) => {
     if (!val || typeof val !== 'object') return null;
@@ -2471,26 +2399,7 @@ export function formatQuotaDuration(dateStr, serverTimeOffsetMs = 0) {
  */
 export function parseAntigravityQuotaPayload(payload, serverTimeOffsetMs = 0) {
   if (!payload) return [];
-  let envelope = payload;
-  if (typeof envelope === 'string') {
-    try {
-      envelope = JSON.parse(envelope);
-    } catch {
-      return [];
-    }
-  }
-  const body =
-    envelope && typeof envelope.body === 'object' && envelope.body !== null
-      ? envelope.body
-      : typeof envelope.body === 'string'
-      ? (() => {
-          try {
-            return JSON.parse(envelope.body);
-          } catch {
-            return envelope;
-          }
-        })()
-      : envelope;
+  const body = unwrapPayloadBody(payload);
 
   const rawGroups = Array.isArray(body?.groups) ? body.groups : [];
   if (!rawGroups.length) {
@@ -2779,18 +2688,7 @@ export function adaptCardQuotaResult(rawEnvelopeOrQuotaResult, provider = 'antig
     };
   }
 
-  let payload = rawEnvelopeOrQuotaResult;
-  if (rawEnvelopeOrQuotaResult && rawEnvelopeOrQuotaResult.body) {
-    if (typeof rawEnvelopeOrQuotaResult.body === 'string') {
-      try {
-        payload = JSON.parse(rawEnvelopeOrQuotaResult.body);
-      } catch {
-        payload = rawEnvelopeOrQuotaResult.body;
-      }
-    } else {
-      payload = rawEnvelopeOrQuotaResult.body;
-    }
-  }
+  const payload = unwrapPayloadBody(rawEnvelopeOrQuotaResult);
 
   const prov = (provider || '').toLowerCase();
   const prof = (prefix || '').replace(/^(agy|codex)_?/, '').toLowerCase();

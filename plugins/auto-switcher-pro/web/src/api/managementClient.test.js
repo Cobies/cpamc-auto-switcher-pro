@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
-  deobfuscateCPAMC,
-  obfuscateCPAMC,
+  unwrapPayloadBody,
   getManagementKey,
   assertSafeSameOrigin,
   apiFetch,
@@ -37,40 +36,27 @@ import {
 } from './managementClient';
 
 describe('Management API Client - Auth & Security Invariants', () => {
-  const TEST_HOST = 'cpamc.local:8080';
-  const TEST_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)';
   const TEST_KEY = 'secret-mgmt-key-998877';
 
-  it('correctly round-trips obfuscation and deobfuscation with CPAMC cipher', () => {
-    const rawPayload = JSON.stringify({ state: { managementKey: TEST_KEY } });
-    const obfuscated = obfuscateCPAMC(rawPayload, TEST_HOST, TEST_UA);
-
-    expect(obfuscated.startsWith('enc::v1::')).toBe(true);
-
-    const deobfuscated = deobfuscateCPAMC(obfuscated, TEST_HOST, TEST_UA);
-    expect(deobfuscated).toBe(rawPayload);
-    expect(JSON.parse(deobfuscated).state.managementKey).toBe(TEST_KEY);
-  });
-
-  it('returns raw text unchanged if not starting with enc::v1::', () => {
-    const plain = JSON.stringify({ state: { managementKey: 'plain_key' } });
-    expect(deobfuscateCPAMC(plain, TEST_HOST, TEST_UA)).toBe(plain);
-    expect(deobfuscateCPAMC('', TEST_HOST, TEST_UA)).toBe('');
-    expect(deobfuscateCPAMC(null, TEST_HOST, TEST_UA)).toBe('');
+  it('unwraps envelope payload and string or object body correctly', () => {
+    expect(unwrapPayloadBody(null)).toBeNull();
+    expect(unwrapPayloadBody('')).toBeNull();
+    expect(unwrapPayloadBody({ key: 'val' })).toEqual({ key: 'val' });
+    expect(unwrapPayloadBody(JSON.stringify({ key: 'val' }))).toEqual({ key: 'val' });
+    expect(unwrapPayloadBody({ body: { nested: 123 } })).toEqual({ nested: 123 });
+    expect(unwrapPayloadBody({ body: JSON.stringify({ nested: 456 }) })).toEqual({ nested: 456 });
+    expect(unwrapPayloadBody(JSON.stringify({ body: JSON.stringify({ nested: 789 }) }))).toEqual({ nested: 789 });
   });
 
   it('extracts management key from parent storage in iframe mode', () => {
     const rawPayload = JSON.stringify({ state: { managementKey: TEST_KEY } });
-    const obfuscated = obfuscateCPAMC(rawPayload, TEST_HOST, TEST_UA);
 
     const mockParentStorage = {
-      getItem: vi.fn((key) => (key === 'cli-proxy-auth' ? obfuscated : null)),
+      getItem: vi.fn((key) => (key === 'cli-proxy-auth' ? rawPayload : null)),
     };
 
     const key = getManagementKey({
       parentStorage: mockParentStorage,
-      host: TEST_HOST,
-      userAgent: TEST_UA,
     });
 
     expect(key).toBe(TEST_KEY);
@@ -79,20 +65,24 @@ describe('Management API Client - Auth & Security Invariants', () => {
 
   it('falls back to local storage when parent storage is absent', () => {
     const rawPayload = JSON.stringify({ state: { managementKey: 'local-key-456' } });
-    const obfuscated = obfuscateCPAMC(rawPayload, TEST_HOST, TEST_UA);
 
     const mockLocalStorage = {
-      getItem: vi.fn((key) => (key === 'cli-proxy-auth' ? obfuscated : null)),
+      getItem: vi.fn((key) => (key === 'cli-proxy-auth' ? rawPayload : null)),
     };
 
     const key = getManagementKey({
       parentStorage: null,
       localStorage: mockLocalStorage,
-      host: TEST_HOST,
-      userAgent: TEST_UA,
     });
 
     expect(key).toBe('local-key-456');
+  });
+
+  it('returns empty string when storage payload contains invalid JSON or no managementKey', () => {
+    const mockStorage = {
+      getItem: vi.fn((key) => (key === 'cli-proxy-auth' ? 'not-valid-json' : null)),
+    };
+    expect(getManagementKey({ parentStorage: mockStorage })).toBe('');
   });
 
   it('fails closed and returns empty string when storage has no key', () => {

@@ -83,14 +83,32 @@ export function SpectralGauge({ percentage = 0, label = 'Context', compact = fal
  * ControlSwitcher: CPAMC · Centro de Control de Infraestructura IA
  * Réplica idéntica y Pixel-Perfect según la especificación visual (tres.jpg)
  */
-export default function ControlSwitcher({ nodes = [], onReloadRequested, onNavigateTab }) {
+export default function ControlSwitcher({
+  nodes = [],
+  onReloadRequested,
+  onNavigateTab,
+  registeredPools: propPools,
+  initialQuotas,
+}) {
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
   const [checkOutput, setCheckOutput] = useState('');
   const [actionError, setActionError] = useState('');
   const [rawFiles, setRawFiles] = useState([]);
-  const [quotasMap, setQuotasMap] = useState({});
-  const [registeredPools, setRegisteredPools] = useState([]);
+  const [quotasMap, setQuotasMap] = useState(initialQuotas || {});
+  const [registeredPools, setRegisteredPools] = useState(propPools ? sortPoolsByNumber(propPools) : []);
+
+  useEffect(() => {
+    if (initialQuotas && Object.keys(initialQuotas).length > 0) {
+      setQuotasMap((prev) => ({ ...prev, ...initialQuotas }));
+    }
+  }, [initialQuotas]);
+
+  useEffect(() => {
+    if (Array.isArray(propPools) && propPools.length > 0) {
+      setRegisteredPools(sortPoolsByNumber(propPools));
+    }
+  }, [propPools]);
 
   // Motor Predictivo (Anti-429)
   const [predictiveConfig, setPredictiveConfig] = useState({ enabled: true, max_reqs_per_hour: 80, threshold_pct: 80 });
@@ -167,13 +185,30 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested, onNavig
         (f) => f.name && !f.name.includes('/') && !f.name.includes('\\') && !f.disabled
       );
 
-      // 3. Consultar cuotas para cada archivo mediante la función canónica fetchCardQuota
-      const newQuotas = {};
+      // 3. Consultar cuotas para cada archivo deduplicando por cuenta física (evita llamadas N+1)
+      const newQuotas = { ...(initialQuotas || {}) };
+      const quotaCache = new Map();
       const enrichedFiles = await Promise.all(
         validFiles.map(async (f) => {
           const prefix = (f.note || f.prefix || '').trim();
           try {
             const isCodex = (f.provider || '').toLowerCase() === 'codex';
+            const cacheKey = isCodex
+              ? `codex:${f.auth_index || f.name}:${f.chatgpt_account_id || f.account_id || ''}`
+              : `antigravity:${f.auth_index ?? f.name}:${f.project_id || ''}`;
+
+            if (quotaCache.has(cacheKey)) {
+              const cachedRaw = quotaCache.get(cacheKey);
+              const adapted = adaptCardQuotaResult(cachedRaw, f.provider, prefix);
+              newQuotas[f.name] = adapted;
+              if (f.id) newQuotas[f.id] = adapted;
+              return {
+                ...f,
+                prefix,
+                note: prefix,
+              };
+            }
+
             if (isCodex) {
               const chatgptId = f.chatgpt_account_id || f.account_id || '';
               const qRes = await apiFetch('/v0/management/api-call', {
@@ -194,6 +229,7 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested, onNavig
               });
               if (qRes && qRes.ok) {
                 const qRaw = await qRes.json();
+                quotaCache.set(cacheKey, qRaw);
                 const adapted = adaptCardQuotaResult(qRaw, f.provider, prefix);
                 newQuotas[f.name] = adapted;
                 if (f.id) newQuotas[f.id] = adapted;
@@ -214,6 +250,7 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested, onNavig
 
               // Si fetchCardQuota retornó grupos válidos, adaptamos
               if (qResult && Array.isArray(qResult.groups) && qResult.groups.length > 0) {
+                quotaCache.set(cacheKey, qResult);
                 const adapted = adaptCardQuotaResult(qResult, f.provider, prefix);
                 newQuotas[f.name] = adapted;
                 if (f.id) newQuotas[f.id] = adapted;
@@ -236,6 +273,7 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested, onNavig
                 });
                 if (qRes && qRes.ok) {
                   const qRaw = await qRes.json();
+                  quotaCache.set(cacheKey, qRaw);
                   const adapted = adaptCardQuotaResult(qRaw, f.provider, prefix);
                   newQuotas[f.name] = adapted;
                   if (f.id) newQuotas[f.id] = adapted;
@@ -256,14 +294,18 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested, onNavig
       setRawFiles(enrichedFiles);
       setQuotasMap(newQuotas);
 
-      // Cargar lista canónica de pools registrados
-      try {
-        const poolRes = await listPools();
-        if (poolRes && Array.isArray(poolRes.pools)) {
-          setRegisteredPools(sortPoolsByNumber(poolRes.pools));
+      // Cargar lista canónica de pools registrados (evita N+1 si ya se suministró por props)
+      if (Array.isArray(propPools) && propPools.length > 0) {
+        setRegisteredPools(sortPoolsByNumber(propPools));
+      } else {
+        try {
+          const poolRes = await listPools();
+          if (poolRes && Array.isArray(poolRes.pools)) {
+            setRegisteredPools(sortPoolsByNumber(poolRes.pools));
+          }
+        } catch {
+          // Fallback a pools descubiertos dinámicamente si no hay backend activo
         }
-      } catch {
-        // Fallback a pools descubiertos dinámicamente si no hay backend activo
       }
 
       // Cargar estado de Rebalanceo Predictivo

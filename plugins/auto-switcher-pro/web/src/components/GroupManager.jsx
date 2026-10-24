@@ -1,16 +1,11 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
-  saveAuthFilePrefixes,
   listModels,
   listPools,
-  patchAuthFileExclusions,
-  classifyAuthAccount,
-  deleteAuthFile,
   buildManagedPoolCards,
   savePool,
   dissolvePool,
   resolveInheritedCardModels,
-  CANONICAL_PROVIDER_MODELS,
   extractPoolNumber,
   sortPoolsByNumber,
   getAuthFileModels,
@@ -92,29 +87,6 @@ const MODEL_FAMILIES = {
   },
 };
 
-// Patrones de nombre por familia objetivo: se usan para liberar modelos del
-// origen al virtualizar aunque el catálogo no los liste (p.ej. excluidos).
-const FAMILY_TARGET_PATTERNS = {
-  gemini_pure: ['gemini'],
-  gemini_sonnet: ['sonnet'],
-  gemini_opus: ['opus'],
-  gemini_claude: ['claude', 'gpt'],
-  claude: ['claude', 'gpt'],
-  codex: ['codex'],
-};
-
-// Determina si un prefijo es descendiente estricto de un pool base:
-// 'agy' -> 'agy_1', 'agy_2' (SI), pero 'agy_clau' (NO, porque su sufijo es alfabético).
-function isPoolDescendant(poolBase, prefix) {
-  const p = (prefix || '').trim();
-  const b = (poolBase || '').trim();
-  if (!p || !b) return false;
-  if (p === b) return true;
-  if (!p.startsWith(`${b}_`)) return false;
-  const suffix = p.slice(b.length + 1);
-  return /^\d+/.test(suffix);
-}
-
 // Filtra rutas modelo por familia del pool según su convención de prefijo:
 // agy_clau* / clau* / son* -> solo claude/gpt
 // agy* / g* -> solo gemini
@@ -187,9 +159,7 @@ function nextReserveNumber(nodes, base, extraAssigned) {
  */
 export default function GroupManager({
   nodes = [],
-  edges = [],
   onReloadRequested,
-  onSwitchTab,
 }) {
   const [activeTab, setActiveTab] = useState('create'); // 'create' | 'dissolve'
   const [groupBasePrefix, setGroupBasePrefix] = useState('');
@@ -356,10 +326,6 @@ export default function GroupManager({
       note: fam.note,
     };
   }, [family, geminiSubtype]);
-
-  const isGeminiPackageFamily = !!effectiveFamily && (
-    effectiveFamily.key.startsWith('gemini_')
-  );
 
   // 1. Managed pool cards abstraction (N -> 2N scalable model sincronizado con Auto Auth Files)
   const managedCards = useMemo(() => buildManagedPoolCards(nodes), [nodes]);
@@ -535,25 +501,6 @@ export default function GroupManager({
     return targetRoleCards.filter((c) => !c.assignedPrefix || c.assignedPrefix.startsWith('unlinked_'));
   }, [targetRoleCards]);
 
-  // ¿El nodo requiere clonación virtual? (master que sirve a la familia opuesta)
-  const isVirtualSource = useCallback(
-    (node) => {
-      if (!node || !targetFamilyRole) return false;
-      const classification = classifyAuthAccount(node);
-      if (classification.isVirtual) return false; // ya es credencial derivada: se parchea
-      const pref = (node.data?.prefix || '').trim();
-      if (!pref || pref.startsWith('unlinked_')) return false; // master libre: parche in-place
-      const isClaudePref =
-        pref.startsWith('agy_son') || pref.startsWith('agy_opus') ||
-        pref.startsWith('agy_clau') || pref.startsWith('clau') || pref.startsWith('son');
-      const isGeminiPref = (pref.startsWith('agy') || pref.startsWith('g')) && !isClaudePref;
-      if (targetFamilyRole === 'claude') return isGeminiPref; // master gemini → clonar para Claude
-      if (targetFamilyRole === 'gemini') return isClaudePref; // master claude → clonar para Gemini
-      return false;
-    },
-    [targetFamilyRole]
-  );
-
   // Candidatos para líder: SOLO tarjetas LIBRES del rol objetivo (modelo 2N de Auto Auth Files)
   const leaderCandidates = useMemo(() => {
     if (!effectiveFamily) return [];
@@ -601,8 +548,7 @@ export default function GroupManager({
         },
       };
 
-      const needsVirtualize = isVirtualSource(node);
-      return { node, card, virtual: needsVirtualize };
+      return { node, card, virtual: false };
     }).filter(({ node }) => {
       // [2N] Los miembros de un pool registrado de la MISMA familia-rol NO son candidatos
       // libres; estar en el pool Gemini NO impide armar el pool Claude con la misma cuenta
@@ -610,7 +556,7 @@ export default function GroupManager({
       const sameRoleMembers = registryMembersByRole.get(targetFamilyRole);
       return !(sameRoleMembers && sameRoleMembers.has(fileName));
     });
-  }, [effectiveFamily, nodes, freeCardsInTargetRole, isVirtualSource, registryMembersByRole, targetFamilyRole]);
+  }, [effectiveFamily, nodes, freeCardsInTargetRole, registryMembersByRole, targetFamilyRole]);
 
   // Cuentas de reserva compatibles: excluyen la cuenta líder seleccionada
   const reserveCandidates = useMemo(() => {
@@ -938,49 +884,13 @@ export default function GroupManager({
       return;
     }
 
-    const updates = [];
-    const virtualJobs = [];
-    const registryOnlyFiles = [];
-    const queueAssignment = (node, prefix) => {
-      const fileName = node.data?.fileName || node.name;
-      if (!fileName) return;
-      // [2N] Una cuenta que ya pertenece a un pool registrado NO se toca en disco
-      // (ni clon virtual ni parche de prefijo: preserva la otra familia). Su membresía
-      // a esta nueva familia queda definida exclusivamente en el registro del plugin.
-      if (registryMemberFileNames.has(fileName)) {
-        registryOnlyFiles.push(fileName);
-        return;
-      }
-      if (isVirtualSource(node)) {
-        virtualJobs.push({ sourceFile: fileName, prefix, email: node.data?.email });
-      } else {
-        updates.push({ name: fileName, prefix });
-      }
-    };
-
-    queueAssignment(activeNode, trimmedBase);
-    const assignedPrefixes = new Set();
+    const leaderFileName = activeNode.data?.fileName || activeNode.name;
     const reserveFileNames = [];
     selectedReserveNodeIds.forEach((resId) => {
       const resNode = nodes.find((n) => n.id === resId);
       const resFileName = resNode?.data?.fileName || resNode?.name;
-      if (!resFileName) return;
-      reserveFileNames.push(resFileName);
-      // Homologación: Las cuentas de reserva maestras reciben prefijo indexado (_1, _2...)
-      // para que el planificador nativo de CPAMC no las confunda con cuentas libres sin prefijo.
-      // La regla /_(\d+)$/ de la extensión de Pi las oculta automáticamente de /model.
-      if (registryMemberFileNames.has(resFileName)) {
-        registryOnlyFiles.push(resFileName);
-      } else if (isVirtualSource(resNode)) {
-        const reserveNum = nextReserveNumber(nodes, trimmedBase, assignedPrefixes);
-        const reservePrefix = `${trimmedBase}_${reserveNum}`;
-        assignedPrefixes.add(reservePrefix);
-        virtualJobs.push({ sourceFile: resFileName, prefix: reservePrefix, email: resNode.data?.email });
-      } else {
-        const reserveNum = nextReserveNumber(nodes, trimmedBase, assignedPrefixes);
-        const reservePrefix = `${trimmedBase}_${reserveNum}`;
-        assignedPrefixes.add(reservePrefix);
-        updates.push({ name: resFileName, prefix: reservePrefix });
+      if (resFileName && !reserveFileNames.includes(resFileName)) {
+        reserveFileNames.push(resFileName);
       }
     });
 
@@ -989,12 +899,8 @@ export default function GroupManager({
     try {
       let targetModels = [];
       let oppositeModels = [];
-      let allBaseModels = [];
       try {
         const { models } = await listModels();
-        const knownPrefixes = new Set(
-          nodes.map((n) => (n.data?.prefix || '').trim()).filter(Boolean)
-        );
         const toBaseModelId = (id) => {
           let cur = (id || '').trim();
           while (cur.includes('/')) {
@@ -1049,52 +955,11 @@ export default function GroupManager({
 
         targetModels = [...targetSet];
         oppositeModels = [...oppositeSet];
-        allBaseModels = [...new Set(models.map(toBaseModelId).filter(Boolean).filter(isAntigravityModel))];
       } catch {
         // Model listing is non-blocking
       }
 
-      // [2N] Exclusiones union-aware: excluido = catálogo base − unión de los targets
-      // de TODOS los pools a los que pertenece cada cuenta asignada. Para cuentas
-      // solo en este pool equivale a la lista opuesta de la familia (legacy).
-      const computeUnionExclusions = async (files, newPoolTargets) => {
-        const exclusionsByFile = new Map();
-        let existingPools = [];
-        try {
-          const res = await listPools();
-          existingPools = Array.isArray(res?.pools) ? res.pools : [];
-        } catch {
-          // Registro no disponible: tratar todas como cuentas de un solo pool
-        }
-        const poolsByFile = new Map();
-        existingPools.forEach((p) => {
-          if (!p || !p.base_prefix) return;
-          if (String(p.base_prefix).toLowerCase() === trimmedBase.toLowerCase()) return;
-          const members = [p.leader_auth, ...(Array.isArray(p.reserves) ? p.reserves : [])].filter(Boolean);
-          members.forEach((file) => {
-            const list = poolsByFile.get(file) || [];
-            list.push(p);
-            poolsByFile.set(file, list);
-          });
-        });
-        files.forEach((file) => {
-          const union = new Set(newPoolTargets || []);
-          (poolsByFile.get(file) || []).forEach((p) => {
-            (p.policy?.target_models || []).forEach((m) => union.add(m));
-          });
-          exclusionsByFile.set(file, allBaseModels.filter((m) => !union.has(m)));
-        });
-        return exclusionsByFile;
-      };
-
-      // In-place patch of prefixes for non-virtual accounts
-      const patchReport = updates.length > 0
-        ? await saveAuthFilePrefixes(updates)
-        : { successful: [], failed: [] };
-
-      // Guardar definición de pool en el registro del plugin PRIMERO: el watcher de
-      // archivos dispara re-registro (model.for_auth) que ya debe ver este pool.
-      const leaderFileName = activeNode.data?.fileName || activeNode.name;
+      // Guardar definición de pool 100% en el registro RAM del plugin (Zero Disk Mutation).
       const nextPoolIndex = existingPools.length + 1;
       const famKey = (effectiveFamily?.key || trimmedBase || '').toLowerCase();
       const famSuffix = famKey.includes('codex')
@@ -1130,220 +995,87 @@ export default function GroupManager({
         },
       };
 
+      await savePool(poolPayload);
+
+      setSaveReport(null);
+      setSuccessFeedback(`⚡ Pool "${trimmedBase}" creado y guardado con éxito (${1 + reserveFileNames.length} cuentas en RAM).`);
+      setGroupBasePrefix('');
+      setSelectedActiveNodeId('');
+      setSelectedReserveNodeIds([]);
       try {
-        await savePool(poolPayload);
-      } catch (poolErr) {
-        console.warn('savePool error in registry:', poolErr);
+        const { models } = await listModels();
+        setModelRoutes({
+          base: trimmedBase,
+          routes: models.filter((id) => id.startsWith(`${trimmedBase}/`) && matchesFamilyModel(trimmedBase, id, excludeVersion55)),
+        });
+      } catch {
+        setModelRoutes(null);
       }
-
-      // NOTA ARQUITECTÓNICA (Gobernanza Virtual Pura):
-      // Las cuentas físicas en disco NO deben mutar su `excluded_models`.
-      // Si se inyecta `excluded_models` en el archivo .json, CPAMC nativo oculta y mutila
-      // el catálogo de modelos de la credencial en su vista nativa de Auth Files.
-      // El aislamiento de modelo especialista (1 Pool = 1 Modelo) lo gestiona 100% el plugin
-      // a través de `poolPayload.policy` y el enrutador virtual `model.route` / `scheduler.pick`.
-      // Por ende, NUNCA sobreescribimos las exclusiones físicas del disco al crear pools.
-
-      const successful = [
-        ...patchReport.successful,
-        ...virtualJobs.map((j) => ({ name: j.sourceFile, prefix: j.prefix })),
-      ];
-      const failed = patchReport.failed.map((f) => ({ ...f, kind: 'patch' }));
-
-      const total = updates.length + virtualJobs.length + registryOnlyFiles.length;
-      if (failed.length > 0) {
-        setSaveReport({ base: trimmedBase, successful, failed });
-        setErrorMessage(
-          `Pool "${trimmedBase}" guardado con errores parciales: fallaron ${failed.length} de ${total} cuentas.`
-        );
-      } else {
-        setSaveReport(null);
-        const virtualNote = virtualJobs.length > 0 ? ` (${virtualJobs.length} virtualizada[s])` : '';
-        const registryNote = registryOnlyFiles.length > 0 ? ` · ${registryOnlyFiles.length} vía registro (2N)` : '';
-        setSuccessFeedback(`⚡ Pool "${trimmedBase}" creado y guardado con éxito (${updates.length + virtualJobs.length + registryOnlyFiles.length} cuentas${virtualNote})${registryNote}.`);
-        setGroupBasePrefix('');
-        setSelectedActiveNodeId('');
-        setSelectedReserveNodeIds([]);
-        try {
-          const { models } = await listModels();
-          setModelRoutes({
-            base: trimmedBase,
-            routes: models.filter((id) => id.startsWith(`${trimmedBase}/`) && matchesFamilyModel(trimmedBase, id, excludeVersion55)),
-          });
-        } catch {
-          setModelRoutes(null);
-        }
-        if (typeof onReloadRequested === 'function') {
-          await onReloadRequested();
-        }
+      if (typeof onReloadRequested === 'function') {
+        await onReloadRequested();
       }
       if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
       feedbackTimeoutRef.current = setTimeout(() => setSuccessFeedback(''), 4000);
     } catch (err) {
+      if (err.failed && Array.isArray(err.failed)) {
+        setSaveReport({
+          base: trimmedBase,
+          poolPayload: {
+            base_prefix: trimmedBase,
+            members: [leaderFileName, ...reserveFileNames],
+          },
+          successful: err.successful || [],
+          failed: err.failed,
+        });
+      }
       setErrorMessage(`Error al guardar pool: ${err.message}`);
     } finally {
       setIsSubmitting(false);
     }
-  }, [groupBasePrefix, selectedActiveNodeId, selectedReserveNodeIds, nodes, onReloadRequested, effectiveFamily, excludeVersion55, selectedSpecialistModel, isVirtualSource, registryMemberFileNames, registryMembersByRole]);
+  }, [groupBasePrefix, selectedActiveNodeId, selectedReserveNodeIds, nodes, onReloadRequested, effectiveFamily, excludeVersion55, selectedSpecialistModel, existingPools]);
 
   // Reintentar solo las cuentas que fallaron en el último guardado
   const handleRetryFailed = useCallback(async () => {
-    if (!saveReport || saveReport.failed.length === 0) return;
+    if (!saveReport) return;
     setIsSubmitting(true);
     setErrorMessage('');
     try {
-      const results = await Promise.allSettled(
-        saveReport.failed.map((entry) => {
-          if (entry.kind === 'virtual') {
-            return virtualizeAccount({
-              sourceFileName: entry.sourceFile,
-              prefix: entry.prefix,
-              targetModels: entry.targetModels,
-              targetPatterns: entry.targetPatterns,
-              oppositeModels: entry.oppositeModels,
-            });
-          }
-          return saveAuthFilePrefixes([{ name: entry.name, prefix: entry.prefix }]);
-        })
-      );
-
-      const successful = [...saveReport.successful];
-      const failed = [];
-      results.forEach((res, idx) => {
-        const entry = saveReport.failed[idx];
-        if (res.status === 'fulfilled') {
-          if (entry.kind === 'virtual') {
-            successful.push({ name: res.value?.name || entry.name, prefix: entry.prefix });
-          } else if (res.value.failed.length > 0) {
-            failed.push(entry);
-          } else {
-            successful.push({ name: entry.name, prefix: entry.prefix });
-          }
-        } else {
-          failed.push({ ...entry, error: res.reason?.message || entry.error });
-        }
-      });
-
-      if (failed.length > 0) {
-        setSaveReport((prev) => ({ base: prev.base, successful, failed }));
-        setErrorMessage(`Reintento fallido para ${failed.length} cuenta(s).`);
-      } else {
-        setSaveReport(null);
-        setSuccessFeedback(`⚡ Pool "${saveReport.base}" creado y guardado con éxito (reintento completado).`);
-        if (typeof onReloadRequested === 'function') {
-          await onReloadRequested();
-        }
-        try {
-          const { models } = await listModels();
-          setModelRoutes({
-            base: saveReport.base,
-            routes: models.filter((id) => id.startsWith(`${saveReport.base}/`) && matchesFamilyModel(saveReport.base, id)),
-          });
-        } catch {
-          setModelRoutes(null);
-        }
-        if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
-        feedbackTimeoutRef.current = setTimeout(() => setSuccessFeedback(''), 4000);
+      if (saveReport.poolPayload) {
+        await savePool(saveReport.poolPayload);
       }
+      setSaveReport(null);
+      setSuccessFeedback(`⚡ Pool "${saveReport.base}" creado y guardado con éxito (reintento completado).`);
+      if (typeof onReloadRequested === 'function') {
+        await onReloadRequested();
+      }
+      try {
+        const { models } = await listModels();
+        setModelRoutes({
+          base: saveReport.base,
+          routes: models.filter((id) => id.startsWith(`${saveReport.base}/`) && matchesFamilyModel(saveReport.base, id)),
+        });
+      } catch {
+        setModelRoutes(null);
+      }
+      if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
+      feedbackTimeoutRef.current = setTimeout(() => setSuccessFeedback(''), 4000);
     } catch (err) {
       setErrorMessage(`Error al reintentar: ${err.message}`);
     } finally {
       setIsSubmitting(false);
     }
-  }, [saveReport, nodes, onReloadRequested]);
+  }, [saveReport, onReloadRequested]);
 
-  // Disolver un pool completo liberando sus cuentas.
-  // CRÍTICO: incluye también descendientes profundos (agy_1_1, agy_2_3_1, ...)
-  // pero NUNCA disuelve pools hermanos con nombres parecidos (ej. 'agy' no disuelve 'agy_clau'
-  // porque el sufijo de este último es alfabético y no numérico).
+  // Disolver un pool completo liberando sus cuentas en RAM (Zero Disk Mutation)
   const handleDissolvePool = useCallback(async (pool) => {
-    const descendants = nodes.filter((n) => {
-      const pref = (n.data?.prefix || '').trim();
-      return isPoolDescendant(pool.basePrefix, pref);
-    });
-    const memberIds = new Set([
-      ...(pool.root ? [pool.root.id] : []),
-      ...pool.reserves.map(({ node }) => node.id),
-    ]);
-    const deepNodes = descendants.filter((n) => !memberIds.has(n.id));
-
-    const confirmMsg = deepNodes.length > 0
-      ? `¿Seguro que deseas disolver el pool "${pool.basePrefix}"? Se liberarán ${(pool.root ? 1 : 0) + pool.reserves.length} cuentas directas y ${deepNodes.length} descendiente(s) profundo(s) (ej. "${pool.basePrefix}_1_1").`
-      : `¿Seguro que deseas disolver el pool "${pool.basePrefix}"? Todas sus cuentas volverán a estar libres.`;
+    const memberCount = (pool.root ? 1 : 0) + (pool.reserves ? pool.reserves.length : 0);
+    const confirmMsg = `¿Seguro que deseas disolver el pool "${pool.basePrefix}"? Todas sus cuentas volverán a estar libres.`;
     if (!window.confirm(confirmMsg)) return;
-
-    const masterUpdates = [];
-    const virtualDeletions = [];
-    const memberMasterFiles = new Set();
-
-    descendants.forEach((node) => {
-      const fileName = node.data?.fileName || node.name || '';
-      if (!fileName) return;
-      const classification = classifyAuthAccount(node);
-      if (classification.isVirtual) {
-        virtualDeletions.push(fileName);
-      } else {
-        masterUpdates.push({ name: fileName, prefix: '' });
-        memberMasterFiles.add(fileName);
-      }
-    });
-
-    // [2N] Miembros del pool definidos solo en el registro (sin prefijo propio en disco):
-    // también deben recuperar su catálogo al disolver.
-    (pool.reserves || []).forEach(({ node }) => {
-      const fileName = node?.data?.fileName || node?.name || '';
-      if (fileName) memberMasterFiles.add(fileName);
-    });
-    if (pool.root?.data?.fileName) {
-      memberMasterFiles.add(pool.root.data.fileName);
-    }
 
     setIsSubmitting(true);
     try {
-      try {
-        await dissolvePool(pool.basePrefix);
-      } catch (dissolveErr) {
-        console.warn('dissolvePool registry error:', dissolveErr);
-      }
-
-      const deleteResults = virtualDeletions.length > 0
-        ? await Promise.allSettled(virtualDeletions.map((fn) => deleteAuthFile(fn)))
-        : [];
-      const patchReport = masterUpdates.length > 0
-        ? await saveAuthFilePrefixes(masterUpdates)
-        : { successful: [], failed: [] };
-
-      // [2N] Re-parche union-aware de exclusiones para los miembros liberados:
-      // excluido = catálogo base − unión de los targets de los pools REMANENTES de la
-      // cuenta (vacío cuando ya no pertenece a ningún pool: catálogo base completo).
-      try {
-        // Gobernanza Virtual Pura (Cero Mutación en Disco):
-        // Al disolver un pool NO inyectamos exclusiones físicas en disco (/root/.cli-proxy-api/*.json).
-        // Las credenciales físicas en disco deben mantener excluded_models: [] de fábrica para que
-        // CPAMC native "Auth Files Management" conserve el catálogo completo y el failover opere sin trabas.
-        await Promise.allSettled(
-          [...memberMasterFiles].map((file) => patchAuthFileExclusions(file, []))
-        );
-      } catch (exclusionErr) {
-        console.warn('dissolve exclusion reset error:', exclusionErr);
-      }
-
-      const failedDeletions = deleteResults.filter((r) => r.status === 'rejected');
-      const totalFailed = failedDeletions.length + patchReport.failed.length;
-      if (totalFailed > 0) {
-        setErrorMessage(
-          `Error al disolver pool: fallaron ${totalFailed} de ${masterUpdates.length + virtualDeletions.length} operaciones.`
-        );
-      } else {
-        const parts = [];
-        if (virtualDeletions.length > 0) {
-          parts.push(`${virtualDeletions.length} cuenta(s) virtual(es) eliminada(s) de disco`);
-        }
-        if (masterUpdates.length > 0) {
-          parts.push(`${masterUpdates.length} cuenta(s) maestra(s) liberada(s)`);
-        }
-        setSuccessFeedback(`💥 Pool "${pool.basePrefix}" disuelto exitosamente (${parts.join(', ')}).`);
-      }
+      await dissolvePool(pool.basePrefix);
+      setSuccessFeedback(`💥 Pool "${pool.basePrefix}" disuelto exitosamente (${memberCount} cuentas liberadas).`);
       if (typeof onReloadRequested === 'function') {
         await onReloadRequested();
       }
@@ -1352,7 +1084,7 @@ export default function GroupManager({
     } finally {
       setIsSubmitting(false);
     }
-  }, [nodes, onReloadRequested]);
+  }, [onReloadRequested]);
 
   // Adoptar una cuenta libre dentro de un pool existente como nueva reserva
   const handleAdoptAccountIntoPool = useCallback(async (targetPoolBase, targetNode, customSpecialistModel = '') => {
@@ -1372,18 +1104,6 @@ export default function GroupManager({
         : (existingPool?.reserves || [])
             .map((r) => r.node?.data?.fileName || r.node?.name || r.node?.id)
             .filter(Boolean);
-
-      const nextNum = Math.max(
-        nextReserveNumber(nodes, targetPoolBase),
-        currentReserves.length + 1
-      );
-      const newPrefix = `${targetPoolBase}_${nextNum}`;
-
-      try {
-        await saveAuthFilePrefixes([{ name: fileName, prefix: newPrefix }]);
-      } catch (patchErr) {
-        console.warn('saveAuthFilePrefixes warning on adopt:', patchErr);
-      }
 
       if (!currentReserves.includes(fileName)) {
         currentReserves.push(fileName);
@@ -1454,7 +1174,7 @@ export default function GroupManager({
       });
 
       setSuccessFeedback(
-        `✅ Cuenta "${email}" adoptada con éxito como Reserva en el pool "${targetPoolBase}" (prefijo [${newPrefix}] · Modelo: ${effectiveModel}).`
+        `✅ Cuenta "${email}" adoptada con éxito como Reserva en el pool "${targetPoolBase}" (Modelo: ${effectiveModel}).`
       );
       if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
       feedbackTimeoutRef.current = setTimeout(() => setSuccessFeedback(''), 5000);
@@ -1498,12 +1218,6 @@ export default function GroupManager({
     setIsSubmitting(true);
     setErrorMessage('');
     try {
-      try {
-        await saveAuthFilePrefixes([{ name: fileName, prefix: '' }]);
-      } catch (patchErr) {
-        console.warn('saveAuthFilePrefixes warning on release reserve:', patchErr);
-      }
-
       const poolDef = registeredPools.find((p) => p.base_prefix === targetPoolBase);
       if (poolDef) {
         const updatedReserves = (poolDef.reserves || []).filter((f) => f !== fileName);
@@ -1582,22 +1296,6 @@ export default function GroupManager({
       const nextLeaderNode = reserves[0].node;
       const nextLeaderFile = nextLeaderNode?.data?.fileName || nextLeaderNode?.name || nextLeaderNode?.id || '';
       const remainingReserves = reserves.slice(1);
-
-      // Parchear prefijos en disco
-      const prefixUpdates = [
-        { name: fileName, prefix: '' },
-        { name: nextLeaderFile, prefix: targetPoolBase },
-        ...remainingReserves.map((r, idx) => ({
-          name: r.node?.data?.fileName || r.node?.name || r.node?.id || '',
-          prefix: `${targetPoolBase}_${idx + 1}`,
-        })),
-      ].filter((u) => Boolean(u.name));
-
-      try {
-        await saveAuthFilePrefixes(prefixUpdates);
-      } catch (patchErr) {
-        console.warn('saveAuthFilePrefixes warning on release leader:', patchErr);
-      }
 
       const poolDef = registeredPools.find((p) => p.base_prefix === targetPoolBase);
       const remainingReserveFiles = remainingReserves.map((r) => r.node?.data?.fileName || r.node?.name || r.node?.id).filter(Boolean);

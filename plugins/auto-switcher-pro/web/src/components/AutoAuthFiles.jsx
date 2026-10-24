@@ -107,6 +107,7 @@ export default function AutoAuthFiles({
   catalogModels = [],
   initialQuotas = {},
   onReloadRequested,
+  registeredPools: propPools,
 }) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -121,9 +122,11 @@ export default function AutoAuthFiles({
     inheritedModels: [],
   });
   // Pools registrados en el plugin PoolRegistry (auto-switcher-pro-state.json)
-  const [registeredPools, setRegisteredPools] = useState([]);
+  const [registeredPools, setRegisteredPools] = useState(
+    propPools ? sortPoolsByNumber(propPools) : []
+  );
   // Guard so live quota is auto-fetched once per physical master per mount cycle
-  const autoFetchedMastersRef = useRef(new Set());
+  const autoFetchedMastersRef = useRef(new Set(initialQuotas ? Object.keys(initialQuotas) : []));
   const isMountedRef = useRef(true);
 
   useEffect(() => {
@@ -133,18 +136,21 @@ export default function AutoAuthFiles({
     };
   }, []);
 
-  // Sync initialQuotas if prop updates
+  // Sync initialQuotas if prop updates and mark keys as fetched to avoid N+1 requests
   useEffect(() => {
     if (initialQuotas && Object.keys(initialQuotas).length > 0) {
       setQuotasMap((prev) => ({ ...prev, ...initialQuotas }));
+      Object.keys(initialQuotas).forEach((k) => autoFetchedMastersRef.current.add(k));
     }
   }, [initialQuotas]);
 
   // [registeredPools] Sincroniza el PoolRegistry del plugin (fuente única de verdad).
-  // GroupManager es el único generador: 0 pools registrados ⇒ estrictamente 0 tarjetas.
-  // Se resincroniza cada vez que cambian los nodos (p.ej. tras crear/disolver un pool
-  // GroupManager dispara onReloadRequested → nuevos nodos → re-consulta del registro).
+  // Si propPools viene suministrado, lo usa directamente para evitar llamadas N+1 duplicadas.
   useEffect(() => {
+    if (Array.isArray(propPools) && propPools.length > 0) {
+      setRegisteredPools(sortPoolsByNumber(propPools));
+      return;
+    }
     let cancelled = false;
     listPools()
       .then((res) => {
@@ -157,7 +163,7 @@ export default function AutoAuthFiles({
     return () => {
       cancelled = true;
     };
-  }, [nodes]);
+  }, [nodes, propPools]);
 
   // Load catalog models via GET /v1/models if not passed via props
   useEffect(() => {

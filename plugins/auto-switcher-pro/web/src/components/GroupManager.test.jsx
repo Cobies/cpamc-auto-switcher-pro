@@ -7,6 +7,8 @@ import * as managementClient from '../api/managementClient';
 describe('GroupManager Component - Dedicated Full Screen Pool & Group Engine', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(managementClient, 'savePool').mockResolvedValue({ ok: true });
+    vi.spyOn(managementClient, 'dissolvePool').mockResolvedValue({ ok: true, deleted: true });
   });
 
   const mockFullyAssignedNodes = [
@@ -53,12 +55,6 @@ describe('GroupManager Component - Dedicated Full Screen Pool & Group Engine', (
     vi.spyOn(managementClient, 'listModels').mockResolvedValue({
       models: ['agy/gemini-3.8-flash-high', 'claude-sonnet-4-6'],
     });
-    const patchPrefixesSpy = vi
-      .spyOn(managementClient, 'saveAuthFilePrefixes')
-      .mockResolvedValue({
-        successful: [],
-        failed: [],
-      });
     vi.spyOn(managementClient, 'patchAuthFileExclusions').mockResolvedValue({ ok: true });
     const savePoolSpy = vi
       .spyOn(managementClient, 'savePool')
@@ -115,9 +111,9 @@ describe('GroupManager Component - Dedicated Full Screen Pool & Group Engine', (
       },
     ];
 
-    const patchSpy = vi.spyOn(managementClient, 'saveAuthFilePrefixes').mockResolvedValue({
-      successful: [{ name: 'account-free-1.json', prefix: 'g3' }],
-      failed: [],
+    const savePoolSpy = vi.spyOn(managementClient, 'savePool').mockResolvedValue({
+      ok: true,
+      pool: { base_prefix: 'g3' },
     });
 
     render(<GroupManager nodes={nodesWithFree} />);
@@ -151,10 +147,13 @@ describe('GroupManager Component - Dedicated Full Screen Pool & Group Engine', (
     fireEvent.click(saveBtn);
 
     await waitFor(() => {
-      expect(patchSpy).toHaveBeenCalledWith([
-        { name: 'account-free-1.json', prefix: 'g3' },
-        { name: 'account-free-2.json', prefix: 'g3_1' },
-      ]);
+      expect(savePoolSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          base_prefix: 'g3',
+          leader_auth: 'account-free-1.json',
+          reserves: ['account-free-2.json'],
+        })
+      );
     });
   });
 
@@ -195,9 +194,9 @@ describe('GroupManager Component - Dedicated Full Screen Pool & Group Engine', (
 
   it('allows switching to dissolve tab and releasing existing pool accounts', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
-    const patchSpy = vi.spyOn(managementClient, 'saveAuthFilePrefixes').mockResolvedValue({
-      successful: [],
-      failed: [],
+    const dissolveSpy = vi.spyOn(managementClient, 'dissolvePool').mockResolvedValue({
+      ok: true,
+      deleted: true,
     });
 
     render(<GroupManager nodes={mockFullyAssignedNodes} />);
@@ -212,10 +211,7 @@ describe('GroupManager Component - Dedicated Full Screen Pool & Group Engine', (
     fireEvent.click(dissolveBtn);
 
     await waitFor(() => {
-      expect(patchSpy).toHaveBeenCalledWith([
-        { name: 'antigravity-g1-wilsonlavio7.json', prefix: '' },
-        { name: 'antigravity-g1-maribelluz.json', prefix: '' },
-      ]);
+      expect(dissolveSpy).toHaveBeenCalledWith('agy_g1');
     });
   });
 
@@ -271,6 +267,8 @@ describe('GroupManager Component - Dedicated Full Screen Pool & Group Engine', (
 describe('GroupManager - family-aware pools, honest failures & isolated routes', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(managementClient, 'savePool').mockResolvedValue({ ok: true });
+    vi.spyOn(managementClient, 'dissolvePool').mockResolvedValue({ ok: true, deleted: true });
   });
 
   const makeFreeNode = (id, email, provider = 'antigravity') => ({
@@ -321,9 +319,9 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
       makeFreeNode('free2', 'free2@test.com'),
     ];
 
-    const patchSpy = vi.spyOn(managementClient, 'saveAuthFilePrefixes').mockResolvedValue({
-      successful: [],
-      failed: [],
+    const savePoolSpy = vi.spyOn(managementClient, 'savePool').mockResolvedValue({
+      ok: true,
+      pool: { base_prefix: 'g9' },
     });
 
     render(<GroupManager nodes={nodesWithOrphanReserve} />);
@@ -339,26 +337,27 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
     fireEvent.click(screen.getByTestId('btn-save-group'));
 
     await waitFor(() => {
-      expect(patchSpy).toHaveBeenCalledWith([
-        { name: 'free1.json', prefix: 'g9' },
-        { name: 'free2.json', prefix: 'g9_2' },
-      ]);
+      expect(savePoolSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          base_prefix: 'g9',
+          leader_auth: 'free1.json',
+          reserves: ['free2.json'],
+        })
+      );
     });
   });
 
   it('reports per-account failures with retry instead of fake success', async () => {
-    const patchSpy = vi
-      .spyOn(managementClient, 'saveAuthFilePrefixes')
+    const savePoolErr = new Error('401 Unauthorized: key expired');
+    savePoolErr.failed = [{ name: 'free2.json', prefix: 'g8_1', error: '401 Unauthorized: key expired' }];
+    savePoolErr.successful = [{ name: 'free1.json', prefix: 'g8' }];
+
+    const savePoolSpy = vi
+      .spyOn(managementClient, 'savePool')
+      .mockRejectedValueOnce(savePoolErr)
       .mockResolvedValueOnce({
-        successful: [{ name: 'free1.json', prefix: 'g8' }],
-        failed: [{ name: 'free2.json', prefix: 'g8_1', error: '401 Unauthorized: key expired' }],
-      })
-      .mockResolvedValueOnce({
-        successful: [
-          { name: 'free1.json', prefix: 'g8' },
-          { name: 'free2.json', prefix: 'g8_1' },
-        ],
-        failed: [],
+        ok: true,
+        pool: { base_prefix: 'g8' },
       });
 
     render(<GroupManager nodes={baseNodes} />);
@@ -376,10 +375,10 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
     expect(screen.getByTestId('pool-save-errors').textContent).toContain('free2.json');
     expect(screen.queryByText(/creado y guardado con éxito/i)).toBeNull();
 
-    // Retry only re-sends the failed accounts
+    // Retry only re-sends the pool definition to savePool
     fireEvent.click(screen.getByTestId('btn-retry-failed'));
     await waitFor(() => {
-      expect(patchSpy).toHaveBeenLastCalledWith([{ name: 'free2.json', prefix: 'g8_1' }]);
+      expect(savePoolSpy).toHaveBeenCalledTimes(2);
     });
     await waitFor(() => {
       expect(screen.getByText(/creado y guardado con éxito/i)).toBeTruthy();
@@ -388,9 +387,9 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
 
   it('dissolves deep descendants (grandchildren) together with direct members to avoid ghost pools', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
-    const patchSpy = vi.spyOn(managementClient, 'saveAuthFilePrefixes').mockResolvedValue({
-      successful: [],
-      failed: [],
+    const dissolveSpy = vi.spyOn(managementClient, 'dissolvePool').mockResolvedValue({
+      ok: true,
+      deleted: true,
     });
 
     const nodesWithGrandchild = [
@@ -417,15 +416,8 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
     fireEvent.click(screen.getByTestId('btn-dissolve-pool-g1'));
 
     await waitFor(() => {
-      expect(patchSpy).toHaveBeenCalledWith([
-        { name: 'root.json', prefix: '' },
-        { name: 'res1.json', prefix: '' },
-        { name: 'grand1.json', prefix: '' },
-      ]);
+      expect(dissolveSpy).toHaveBeenCalledWith('g1');
     });
-
-    // Unrelated pool (son1) must remain untouched
-    expect(patchSpy.mock.calls[0][0].some((u) => u.name === 'other.json')).toBe(false);
   });
 
   it('smoke: with live-like data (no free antigravity accounts) the builder shows the info alert and never crashes', () => {
@@ -478,12 +470,9 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
       { id: 'oc1', data: { fileName: 'opencode-go-e86ad5f80809.json', email: '', prefix: '', provider: 'opencode' } },
     ];
 
-    const patchSpy = vi.spyOn(managementClient, 'saveAuthFilePrefixes').mockResolvedValue({
-      successful: [
-        { name: 'antigravity-newaccount@gmail.com.json', prefix: 'agy' },
-        { name: 'antigravity-newaccount2@gmail.com.json', prefix: 'agy_1' },
-      ],
-      failed: [],
+    const savePoolSpy = vi.spyOn(managementClient, 'savePool').mockResolvedValue({
+      ok: true,
+      pool: { base_prefix: 'agy' },
     });
     vi.spyOn(managementClient, 'listModels').mockResolvedValue({
       models: ['agy/gemini-3.8-flash-high', 'gemini-3.8-flash-high'],
@@ -502,7 +491,7 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
     fireEvent.click(screen.getByTestId('btn-save-group'));
 
     await waitFor(() => {
-      expect(patchSpy).toHaveBeenCalled();
+      expect(savePoolSpy).toHaveBeenCalled();
     });
 
     unmount();
@@ -591,15 +580,6 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
   });
 
   it('provides model policy checkboxes to exclude 5.5 versions or disable isolation (wildcard mode)', async () => {
-    let capturedExclusions = [];
-    vi.spyOn(managementClient, 'saveAuthFilePrefixes').mockResolvedValue({
-      successful: [{ name: 'leader.json', prefix: 'agy_son' }],
-      failed: [],
-    });
-    vi.spyOn(managementClient, 'patchAuthFileExclusions').mockImplementation((fileName, oppositeModels) => {
-      capturedExclusions = oppositeModels;
-      return Promise.resolve({ ok: true });
-    });
     const savePoolSpy = vi.spyOn(managementClient, 'savePool').mockResolvedValue({
       ok: true,
       pool: { id: 'pool-1', base_prefix: 'agy_son' },
@@ -823,10 +803,7 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
       { id: 'cl2', data: { fileName: 'cl2.json', email: 'cl2@test.com', prefix: 'agy_clau_1', provider: 'antigravity' } },
     ];
 
-    const patchSpy = vi.spyOn(managementClient, 'saveAuthFilePrefixes').mockResolvedValue({
-      successful: [{ name: 'ag1.json', prefix: '' }, { name: 'ag2.json', prefix: '' }],
-      failed: [],
-    });
+    const dissolveSpy = vi.spyOn(managementClient, 'dissolvePool').mockResolvedValue({ ok: true });
     vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     render(<GroupManager nodes={mixedNodes} />);
@@ -839,18 +816,12 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
     fireEvent.click(dissolveAgyBtn);
 
     await waitFor(() => {
-      expect(patchSpy).toHaveBeenCalledWith([
-        { name: 'ag1.json', prefix: '' },
-        { name: 'ag2.json', prefix: '' },
-      ]);
+      expect(dissolveSpy).toHaveBeenCalledWith('agy');
     });
-    // Verificamos que cl1 (agy_clau) y cl2 (agy_clau_1) NUNCA fueron incluidos en la disolución de agy
-    expect(patchSpy).not.toHaveBeenCalledWith(expect.arrayContaining([
-      expect.objectContaining({ name: 'cl1.json' })
-    ]));
+    expect(dissolveSpy).not.toHaveBeenCalledWith('agy_clau');
   });
 
-  it('dissolving pool with 2 master and 2 virtual accounts deletes virtual files from disk and resets master accounts', async () => {
+  it('dissolving pool with members calls dissolvePool in RAM without disk deletions or mutations', async () => {
     const mixedPoolNodes = [
       { id: 'm1', data: { fileName: 'antigravity-m1@gmail.com.json', email: 'm1@gmail.com', prefix: 'agy_mix', provider: 'antigravity' } },
       { id: 'm2', data: { fileName: 'antigravity-m2@gmail.com.json', email: 'm2@gmail.com', prefix: 'agy_mix_1', provider: 'antigravity' } },
@@ -858,11 +829,7 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
       { id: 'v2', data: { fileName: 'antigravity-m2@gmail.com.agy_mix_3.json', email: 'm2@gmail.com', prefix: 'agy_mix_3', provider: 'antigravity' } },
     ];
 
-    const patchSpy = vi.spyOn(managementClient, 'saveAuthFilePrefixes').mockResolvedValue({
-      successful: [{ name: 'antigravity-m1@gmail.com.json', prefix: '' }, { name: 'antigravity-m2@gmail.com.json', prefix: '' }],
-      failed: [],
-    });
-    const deleteSpy = vi.spyOn(managementClient, 'deleteAuthFile').mockResolvedValue({ ok: true });
+    const dissolveSpy = vi.spyOn(managementClient, 'dissolvePool').mockResolvedValue({ ok: true });
     vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     render(<GroupManager nodes={mixedPoolNodes} />);
@@ -870,12 +837,7 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
     fireEvent.click(screen.getByTestId('btn-dissolve-pool-agy_mix'));
 
     await waitFor(() => {
-      expect(deleteSpy).toHaveBeenCalledWith('antigravity-m1@gmail.com.agy_mix_2.json');
-      expect(deleteSpy).toHaveBeenCalledWith('antigravity-m2@gmail.com.agy_mix_3.json');
-      expect(patchSpy).toHaveBeenCalledWith([
-        { name: 'antigravity-m1@gmail.com.json', prefix: '' },
-        { name: 'antigravity-m2@gmail.com.json', prefix: '' },
-      ]);
+      expect(dissolveSpy).toHaveBeenCalledWith('agy_mix');
     });
   });
 
@@ -1176,10 +1138,6 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
       count: 1,
     });
     const savePoolSpy = vi.spyOn(managementClient, 'savePool').mockResolvedValue({ ok: true });
-    const patchSpy = vi.spyOn(managementClient, 'saveAuthFilePrefixes').mockResolvedValue({
-      successful: [{ name: 'antigravity-newfree@gmail.com.json', prefix: 'agy_2' }],
-      failed: [],
-    });
 
     const nodesWithNewFree = [
       {
@@ -1216,9 +1174,6 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
     fireEvent.click(screen.getByTestId('btn-quick-adopt'));
 
     await waitFor(() => {
-      expect(patchSpy).toHaveBeenCalledWith([
-        { name: 'antigravity-newfree@gmail.com.json', prefix: 'agy_2' },
-      ]);
       expect(savePoolSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           base_prefix: 'agy',
@@ -1253,10 +1208,6 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
       count: 1,
     });
     const savePoolSpy = vi.spyOn(managementClient, 'savePool').mockResolvedValue({ ok: true });
-    const patchSpy = vi.spyOn(managementClient, 'saveAuthFilePrefixes').mockResolvedValue({
-      successful: [{ name: 'acc-res1.json', prefix: '' }],
-      failed: [],
-    });
     vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     const poolNodes = [
@@ -1277,7 +1228,6 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
     fireEvent.click(releaseBtn);
 
     await waitFor(() => {
-      expect(patchSpy).toHaveBeenCalledWith([{ name: 'acc-res1.json', prefix: '' }]);
       expect(savePoolSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           base_prefix: 'agy',
@@ -1313,10 +1263,6 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
       count: 1,
     });
     const savePoolSpy = vi.spyOn(managementClient, 'savePool').mockResolvedValue({ ok: true });
-    const patchSpy = vi.spyOn(managementClient, 'saveAuthFilePrefixes').mockResolvedValue({
-      successful: [],
-      failed: [],
-    });
     vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     const poolNodes = [
@@ -1338,11 +1284,6 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
 
     await waitFor(() => {
       // Leader becomes free, res1 promoted to agy, res2 remains agy_1
-      expect(patchSpy).toHaveBeenCalledWith([
-        { name: 'acc-leader.json', prefix: '' },
-        { name: 'acc-res1.json', prefix: 'agy' },
-        { name: 'acc-res2.json', prefix: 'agy_1' },
-      ]);
       expect(savePoolSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           base_prefix: 'agy',
