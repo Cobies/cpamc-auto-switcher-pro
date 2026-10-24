@@ -556,5 +556,4 @@ describe('AgentMatrix Component', () => {
     expect(screen.getByText(/En espera de ejecuciones/i)).toBeDefined();
     expect(screen.queryByText(/Estrés Crítico de Cuota/i)).toBeNull();
   });
-  });
 });
