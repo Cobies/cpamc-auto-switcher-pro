@@ -18,16 +18,33 @@ import (
 	"time"
 )
 
-// MasterPublicKeyHex is the embedded Ed25519 public key.
-// Only the corresponding private key (held exclusively by Wilox) can sign valid licenses.
-const MasterPublicKeyHex = "5703fbe52952c260651807d527db5e6021b38cdb40f4ff7ef5b898f3288ab1e1"
+// ErrLicenseExpired se retorna cuando la firma criptográfica y el MachineID son válidos
+// pero la fecha límite de la licencia ha sido superada.
+var ErrLicenseExpired = errors.New("la licencia ha expirado")
+
+// IsAirgapModeEnabled verifica si el sistema opera en modo aislado sin red externa.
+func IsAirgapModeEnabled() bool {
+	val := strings.ToLower(strings.TrimSpace(os.Getenv("CPAMC_AIRGAP_MODE")))
+	return val == "1" || val == "true"
+}
+
+// MasterPublicKeyHexV2 es la clave pública Ed25519 primaria de última generación.
+// Las licencias emitidas con la nueva semilla privada serán validadas prioritariamente por esta clave.
+const MasterPublicKeyHexV2 = "8c310a1ee2a8e20d6222e717762b696d0bb0a7ea516dfd79a857f39aff98fabb"
+
+// MasterPublicKeyHexV1 es la clave pública histórica (legacy), mantenida de forma transitoria
+// en el anillo de claves para asegurar migración transparente sin brickeo de clientes existentes.
+const MasterPublicKeyHexV1 = "5703fbe52952c260651807d527db5e6021b38cdb40f4ff7ef5b898f3288ab1e1"
+
+// MasterPublicKeyHex mantiene compatibilidad hacia atrás con referencias directas al símbolo clásico.
+const MasterPublicKeyHex = MasterPublicKeyHexV2
 
 const (
 	TrialDurationDays = 30
 	StatusTrial       = "trial"
 	StatusActive      = "active"
 	StatusExpired     = "expired"
-	DefaultHubURL     = "http://31.220.81.105:8444"
+	DefaultHubURL     = "https://hub.wiloxdev.com"
 )
 
 // LicenseClaims represents the payload signed inside an activation key.
@@ -150,13 +167,42 @@ func saveLicenseFileLocked(path string, lf *LicenseFile) error {
 	return os.Rename(tmp, path)
 }
 
-// VerifyActivationKey validates an Ed25519 signature against current machine ID.
+// VerifyActivationKey validates an Ed25519 signature against current machine ID
+// using the master dual-key ring (prioritizing V2, with graceful fallback to V1 legacy).
 func VerifyActivationKey(keyStr string, currentMachineID string) (*LicenseClaims, error) {
-	pubBytes, err := hex.DecodeString(MasterPublicKeyHex)
-	if err != nil || len(pubBytes) != ed25519.PublicKeySize {
-		return nil, errors.New("error en clave pública del sistema")
+	var expiredClaims *LicenseClaims
+
+	// 1. Validar contra clave primaria V2
+	pubV2Hex := os.Getenv("CPAMC_MASTER_PUBKEY_V2")
+	if pubV2Hex == "" {
+		pubV2Hex = MasterPublicKeyHexV2
 	}
-	return verifyActivationKeyWithPub(keyStr, currentMachineID, pubBytes)
+	if pubV2Bytes, err := hex.DecodeString(pubV2Hex); err == nil && len(pubV2Bytes) == ed25519.PublicKeySize {
+		if claims, err := verifyActivationKeyWithPub(keyStr, currentMachineID, pubV2Bytes); err == nil {
+			return claims, nil
+		} else if errors.Is(err, ErrLicenseExpired) {
+			expiredClaims = claims
+		}
+	}
+
+	// 2. Fallback transitorio a clave legacy V1
+	pubV1Hex := os.Getenv("CPAMC_MASTER_PUBKEY_V1")
+	if pubV1Hex == "" {
+		pubV1Hex = MasterPublicKeyHexV1
+	}
+	if pubV1Bytes, err := hex.DecodeString(pubV1Hex); err == nil && len(pubV1Bytes) == ed25519.PublicKeySize {
+		if claims, err := verifyActivationKeyWithPub(keyStr, currentMachineID, pubV1Bytes); err == nil {
+			return claims, nil
+		} else if errors.Is(err, ErrLicenseExpired) && expiredClaims == nil {
+			expiredClaims = claims
+		}
+	}
+
+	if expiredClaims != nil {
+		return expiredClaims, ErrLicenseExpired
+	}
+
+	return nil, errors.New("firma criptográfica inválida o clave adulterada")
 }
 
 // verifyActivationKeyWithPub es el núcleo de verificación inyectable (usado por tests con pares efímeros).
@@ -195,7 +241,7 @@ func verifyActivationKeyWithPub(keyStr string, currentMachineID string, pubBytes
 	// Expiration check (0 means lifetime)
 	now := time.Now().Unix()
 	if claims.ExpiresAt > 0 && now > claims.ExpiresAt {
-		return nil, errors.New("la licencia ha expirado")
+		return &claims, ErrLicenseExpired
 	}
 
 	return &claims, nil
@@ -332,6 +378,11 @@ func anonymizeIdentifier(raw string) string {
 
 // SyncWithCloudHub contacts the central Contabo VPS to verify/update status in background.
 func SyncWithCloudHub(machineID string) {
+	// Entornos aislados (air-gapped / intranet): silenciar telemetría si está explícitamente configurado
+	if IsAirgapModeEnabled() {
+		return
+	}
+
 	now := time.Now().Unix()
 	syncMutex.Lock()
 	if now-lastSyncUnix < 20 { // Throttle: máximo un ping cada 20 segundos
@@ -402,51 +453,72 @@ func SyncWithCloudHub(machineID string) {
 	}()
 }
 
-// GetLicenseStatus computes the current operational status.
-func GetLicenseStatus() *StatusReport {
-	currentMachine := GetMachineID()
-	lf, _ := LoadOrInitLicense()
-	now := time.Now().Unix()
-
-	// Asynchronously ping cloud hub for auto-activation without blocking local execution
-	SyncWithCloudHub(currentMachine)
-
-	// 1. Check if an active Pro license is installed
-	if lf.LicenseKey != "" && lf.ActiveClaims != nil {
-		claims, err := VerifyActivationKey(lf.LicenseKey, currentMachine)
-		if err == nil && claims != nil {
-			var expStr string
-			daysRemaining := 9999
-			if claims.ExpiresAt > 0 {
-				diff := claims.ExpiresAt - now
-				if diff > 0 {
-					daysRemaining = int(diff / 86400)
-					expStr = time.Unix(claims.ExpiresAt, 0).Format("2006-01-02")
-				} else {
-					daysRemaining = 0
-				}
+// ComputeStatusForClaims es una función pura desacoplada que calcula el estado operativo
+// en base a los claims, resultado de verificación, máquina actual y marcas de tiempo.
+func ComputeStatusForClaims(claims *LicenseClaims, verifyErr error, currentMachine string, now int64, trialEnd int64) *StatusReport {
+	// 1. Licencia Pro válida o en período de gracia
+	if claims != nil && (verifyErr == nil || errors.Is(verifyErr, ErrLicenseExpired)) {
+		var expStr string
+		daysRemaining := 9999
+		if claims.ExpiresAt > 0 {
+			diff := claims.ExpiresAt - now
+			if diff > 0 {
+				daysRemaining = int(diff / 86400)
+				expStr = time.Unix(claims.ExpiresAt, 0).Format("2006-01-02")
 			} else {
-				expStr = "De por vida (Lifetime)"
+				daysRemaining = 0
+				expStr = time.Unix(claims.ExpiresAt, 0).Format("2006-01-02")
 			}
+		} else {
+			expStr = "De por vida (Lifetime)"
+		}
 
-			if claims.ExpiresAt == 0 || daysRemaining > 0 {
-				return &StatusReport{
-					MachineID:      currentMachine,
-					Status:         StatusActive,
-					DaysRemaining:  daysRemaining,
-					TrialTotalDays: TrialDurationDays,
-					Tier:           strings.ToUpper(claims.Tier),
-					Client:         claims.Client,
-					ExpiresAt:      expStr,
-					IsPro:          true,
-					CanRotate:      true,
-				}
+		// Licencia activa (no expirada)
+		if claims.ExpiresAt == 0 || (claims.ExpiresAt > now) {
+			return &StatusReport{
+				MachineID:      currentMachine,
+				Status:         StatusActive,
+				DaysRemaining:  daysRemaining,
+				TrialTotalDays: TrialDurationDays,
+				Tier:           strings.ToUpper(claims.Tier),
+				Client:         claims.Client,
+				ExpiresAt:      expStr,
+				IsPro:          true,
+				CanRotate:      true,
 			}
+		}
+
+		// Período de gracia de 7 días: si venció hace <= 7 días, mantiene CanRotate activo
+		const gracePeriodSeconds = int64(7 * 86400)
+		if now-claims.ExpiresAt <= gracePeriodSeconds {
+			return &StatusReport{
+				MachineID:      currentMachine,
+				Status:         "grace_period",
+				DaysRemaining:  0,
+				TrialTotalDays: TrialDurationDays,
+				Tier:           strings.ToUpper(claims.Tier) + " (PERÍODO DE GRACIA)",
+				Client:         claims.Client,
+				ExpiresAt:      expStr,
+				IsPro:          true,
+				CanRotate:      true,
+			}
+		}
+
+		// Venció hace más de 7 días -> expirado
+		return &StatusReport{
+			MachineID:      currentMachine,
+			Status:         StatusExpired,
+			DaysRemaining:  0,
+			TrialTotalDays: TrialDurationDays,
+			Tier:           strings.ToUpper(claims.Tier) + " (EXPIRADO)",
+			Client:         claims.Client,
+			ExpiresAt:      expStr,
+			IsPro:          true,
+			CanRotate:      false,
 		}
 	}
 
-	// 2. Evaluate 30-day Trial
-	trialEnd := lf.FirstBootAt + int64(TrialDurationDays*86400)
+	// 2. Evaluar Trial de 30 días
 	diff := trialEnd - now
 	daysLeft := int(diff / 86400)
 	if daysLeft < 0 {
@@ -466,7 +538,7 @@ func GetLicenseStatus() *StatusReport {
 		}
 	}
 
-	// 3. Expired trial
+	// 3. Trial expirado
 	return &StatusReport{
 		MachineID:      currentMachine,
 		Status:         StatusExpired,
@@ -475,8 +547,30 @@ func GetLicenseStatus() *StatusReport {
 		Tier:           "EXPIRADO",
 		ExpiresAt:      time.Unix(trialEnd, 0).Format("2006-01-02"),
 		IsPro:          false,
-		CanRotate:      false, // Rotation degraded/locked
+		CanRotate:      false,
 	}
+}
+
+// GetLicenseStatus computes the current operational status.
+func GetLicenseStatus() *StatusReport {
+	currentMachine := GetMachineID()
+	lf, _ := LoadOrInitLicense()
+	now := time.Now().Unix()
+
+	// Asynchronously ping cloud hub for auto-activation without blocking local execution
+	SyncWithCloudHub(currentMachine)
+
+	trialEnd := lf.FirstBootAt + int64(TrialDurationDays*86400)
+
+	// Check if a persisted license key exists
+	if lf.LicenseKey != "" {
+		claims, err := VerifyActivationKey(lf.LicenseKey, currentMachine)
+		if claims != nil && (err == nil || errors.Is(err, ErrLicenseExpired)) {
+			return ComputeStatusForClaims(claims, err, currentMachine, now, trialEnd)
+		}
+	}
+
+	return ComputeStatusForClaims(nil, nil, currentMachine, now, trialEnd)
 }
 
 // RequestReset sends a request to the cloud hub to generate a reset PIN for this machine.

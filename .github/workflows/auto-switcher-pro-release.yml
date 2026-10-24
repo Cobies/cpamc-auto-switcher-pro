@@ -71,7 +71,12 @@ jobs:
             BASE_VER="${LATEST_TAG#v}"
             IFS='.' read -r MAJOR MINOR PATCH <<< "${BASE_VER}"
 
-            COMMITS=$(git log "${LATEST_TAG}..HEAD" --format="%s")
+            if git rev-parse --verify "${LATEST_TAG}" >/dev/null 2>&1; then
+              COMMITS=$(git log "${LATEST_TAG}..HEAD" --format="%s")
+            else
+              echo "Notice: Tag ${LATEST_TAG} not found in commit history. Reading commits up to HEAD."
+              COMMITS=$(git log --format="%s")
+            fi
             if [ -z "${COMMITS}" ]; then
               echo "No new commits since ${LATEST_TAG}. Skipping release."
               echo "should_release=false" >> "$GITHUB_OUTPUT"

@@ -549,7 +549,7 @@ func (s *Server) handleDashboardUI(w http.ResponseWriter, r *http.Request) {
           <div class="nav-title">Centro de Mando de Licencias</div>
           <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Contabo Cloud Hub · Controles Comerciales</div>
         </div>
-        <span class="nav-badge-host">31.220.81.105:8444</span>
+        <span class="nav-badge-host">hub.wiloxdev.com</span>
       </div>
       <div class="nav-actions">
         <button onclick="openApproveModal()" class="btn-action btn-create-modal">

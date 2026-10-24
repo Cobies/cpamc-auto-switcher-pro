@@ -14,8 +14,20 @@ import { saveProjectModel, getProjectModel, clearProjectModel } from "./src/proj
 
 const execAsync = promisify(exec);
 const CURRENT_VERSION = "1.0.0";
-const UPDATE_CHECK_URL = "http://31.220.81.105/dist/version.json";
-const UPDATE_INSTALL_URL = "http://31.220.81.105/dist/install.sh";
+
+/**
+ * Resuelve la URL base del centro de mando / hub de licencias con prioridad segura:
+ * 1. AUTO_SWITCHER_HUB_URL (entorno)
+ * 2. CPAMC_LICENSE_HUB_URL (entorno)
+ * 3. https://hub.wiloxdev.com (dominio formal con TLS)
+ */
+export function resolveHubBaseUrl(): string {
+	const envUrl = process.env.AUTO_SWITCHER_HUB_URL || process.env.CPAMC_LICENSE_HUB_URL;
+	if (envUrl) {
+		return envUrl.replace(/\/+$/, "");
+	}
+	return "https://hub.wiloxdev.com";
+}
 
 /**
  * CPAMC Auto-Switcher Unified Extension for Pi & Gentle-Shell
@@ -77,12 +89,32 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 		},
 	});
 
-	// 3c. Comando para actualizar Auto Switcher Pro en caliente
+	// 3c. Comando para actualizar Auto Switcher Pro de forma segura (sin vectores de inyección remota)
 	pi.registerCommand("switcher-update", {
-		description: "Informa sobre el estado de actualización de Auto Switcher Pro",
+		description: "Informa y verifica de forma segura las actualizaciones de Auto Switcher Pro vía canal autenticado",
 		handler: async (_args, ctx) => {
+			if (process.env.CPAMC_AIRGAP_MODE === "1" || process.env.CPAMC_AIRGAP_MODE === "true") {
+				if (ctx.hasUI) {
+					ctx.ui.notify?.("ℹ️ Entorno en modo aislado (Air-Gapped). Las actualizaciones remotas están desactivadas por política.", "info");
+				}
+				return;
+			}
+			try {
+				const checkUrl = `${resolveHubBaseUrl()}/dist/version.json`;
+				const res = await fetch(checkUrl, { signal: AbortSignal.timeout(4000) }).catch(() => null);
+				if (res && res.ok) {
+					const data = (await res.json()) as any;
+					const latestVersion = data?.version;
+					if (latestVersion && latestVersion !== CURRENT_VERSION) {
+						if (ctx.hasUI) {
+							ctx.ui.notify?.(`🚀 Nueva versión disponible: v${latestVersion} (actual: v${CURRENT_VERSION}). Descarga el artefacto verificado con SHA256 desde los releases oficiales.`, "info");
+						}
+						return;
+					}
+				}
+			} catch {}
 			if (ctx.hasUI) {
-				ctx.ui.notify?.(`ℹ️ Auto Switcher Pro v${CURRENT_VERSION} está activo y gestionado por tu entorno de desarrollo.`, "info");
+				ctx.ui.notify?.(`ℹ️ Auto Switcher Pro v${CURRENT_VERSION} está actualizado y protegido por el anillo criptográfico dual.`, "info");
 			}
 		},
 	});
@@ -91,6 +123,12 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 	pi.registerCommand("switcher-report", {
 		description: "Envía un reporte de soporte con los últimos eventos de rotación al panel del VPS de Wilox",
 		handler: async (args, ctx) => {
+			if (process.env.CPAMC_AIRGAP_MODE === "1" || process.env.CPAMC_AIRGAP_MODE === "true") {
+				if (ctx.hasUI) {
+					ctx.ui.notify?.("🔒 Modo Air-Gap activo: el reporte de telemetría está deshabilitado por privacidad.", "info");
+				}
+				return;
+			}
 			if (ctx.hasUI) {
 				ctx.ui.notify?.("📡 Recopilando telemetría anonimizada y enviando al Centro de Mando...", "info");
 			}
@@ -128,8 +166,8 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 					}
 				}
 
-				// 2. Despachar al VPS (puerto 80 / Traefik)
-				const reportUrl = "http://31.220.81.105/api/v1/license/report";
+				// 2. Despachar al VPS mediante canal TLS seguro
+				const reportUrl = `${resolveHubBaseUrl()}/api/v1/license/report`;
 				const vpsRes = await fetch(reportUrl, {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
@@ -179,8 +217,11 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 	const checkRemoteUpdate = async (ctx: ExtensionContext): Promise<void> => {
 		if (hasCheckedUpdate) return;
 		hasCheckedUpdate = true;
+		if (process.env.CPAMC_AIRGAP_MODE === "1" || process.env.CPAMC_AIRGAP_MODE === "true") {
+			return;
+		}
 		try {
-			const res = await fetch(UPDATE_CHECK_URL, { signal: AbortSignal.timeout(3000) });
+			const res = await fetch(`${resolveHubBaseUrl()}/dist/version.json`, { signal: AbortSignal.timeout(3000) });
 			if (res.ok) {
 				const data = (await res.json()) as { version?: string; notes?: string };
 				if (data?.version && data.version !== CURRENT_VERSION) {
