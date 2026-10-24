@@ -1526,5 +1526,59 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
       expect(screen.queryByTestId('reserve-item-deepseek-acc1.json')).toBeNull();
       expect(screen.queryByTestId('reserve-item-nvidia-acc1.json')).toBeNull();
     });
+
+    it('isolates specialist models strictly to chosen OmniAuth Pro provider (e.g. nan) without defaulting or contaminating with Gemini', async () => {
+      const nanNodes = [
+        {
+          id: 'nan-acc1.json',
+          name: 'nan-acc1.json',
+          data: {
+            fileName: 'nan-acc1.json',
+            prefix: '',
+            provider: 'nan',
+            email: 'nan-user1@example.com',
+          },
+        },
+        {
+          id: 'nan-acc2.json',
+          name: 'nan-acc2.json',
+          data: {
+            fileName: 'nan-acc2.json',
+            prefix: '',
+            provider: 'nan',
+            email: 'nan-user2@example.com',
+          },
+        },
+        {
+          id: 'antigravity-acc.json',
+          name: 'antigravity-acc.json',
+          data: {
+            fileName: 'antigravity-acc.json',
+            prefix: '',
+            provider: 'antigravity',
+            email: 'gemini-user@example.com',
+          },
+        },
+      ];
+
+      render(<GroupManager nodes={nanNodes} />);
+
+      // Select NaN Builders family
+      const nanChip = screen.getByTestId('family-nan');
+      fireEvent.click(nanChip);
+
+      const specialistSelect = screen.getByTestId('select-specialist-model');
+      const specialistOptions = Array.from(specialistSelect.querySelectorAll('option')).map((o) => o.value);
+
+      // Verify specialist models are strictly NaN models, never Gemini
+      expect(specialistOptions).toContain('deepseek-v4-flash');
+      expect(specialistOptions).not.toContain('gemini-3.8-flash-high');
+      expect(specialistOptions).not.toContain('gemini-3.7-flash-high');
+
+      // The selected specialist model must be the top-version NaN flagship model
+      expect(specialistSelect.value).toBe('deepseek-v4-flash');
+      const firstOptionText = specialistSelect.querySelectorAll('option')[0].textContent;
+      expect(firstOptionText).toContain('⭐ (Recomendado)');
+    });
   });
 });

@@ -1667,6 +1667,29 @@ describe('Specialist Engine - computeSpecialistExclusions, resolveInheritedCardM
       expect(resolved).not.toContain('Pool-01-gemini');
       expect(resolved).not.toContain('Pool-02-gemini');
     });
+
+    it('resolves dynamic OmniAuth Pro provider models (nan, nvidia, deepseek) and NEVER contaminates with Gemini', () => {
+      const nanCard = { familyRole: 'nan' };
+      const omniCatalog = [
+        'gemini-3.8-flash-high',
+        'nan/deepseek-v4-flash',
+        'nan/deepseek-chat',
+        'nvidia/meta-llama-3.1-70b',
+        'claude-3-7-sonnet',
+      ];
+      const nanResolved = resolveInheritedCardModels(nanCard, omniCatalog);
+      expect(nanResolved).toContain('deepseek-v4-flash');
+      expect(nanResolved).toContain('deepseek-chat');
+      expect(nanResolved).not.toContain('gemini-3.8-flash-high');
+      expect(nanResolved).not.toContain('claude-3-7-sonnet');
+
+      // Fallback a modelos canónicos cuando el catálogo upstream está vacío
+      const emptyCatalogCard = { familyRole: 'nan' };
+      const fallbackResolved = resolveInheritedCardModels(emptyCatalogCard, []);
+      expect(fallbackResolved.length).toBeGreaterThan(0);
+      expect(fallbackResolved).toContain('deepseek-v4-flash');
+      expect(fallbackResolved).not.toContain('gemini-3.8-flash-high');
+    });
   });
 
   describe('patchAuthFileExclusions', () => {

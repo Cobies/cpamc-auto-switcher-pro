@@ -1625,6 +1625,8 @@ export async function deleteAuthFile(fileName, options = {}) {
 export const CANONICAL_PROVIDER_MODELS = {
   gemini: [
     'gemini-3.8-flash-high',
+    'gemini-3.7-flash-high',
+    'gemini-3.6-flash-high',
     'gemini-3.5-flash-lite',
     'gemini-3.1-flash-lite',
     'gemini-3-flash',
@@ -1640,6 +1642,9 @@ export const CANONICAL_PROVIDER_MODELS = {
     'claude-opus-5-5-high',
   ],
   codex: [
+    'gpt-6.1',
+    'gpt-6.1-sol',
+    'gpt-6.1-astra',
     'gpt-6-astra',
     'gpt-6-sol',
     'gpt-6-luna',
@@ -1672,6 +1677,56 @@ export const CANONICAL_PROVIDER_MODELS = {
     'gpt-4.1',
     'gpt-4-turbo',
     'gpt-4',
+  ],
+  nan: [
+    'deepseek-v4-flash',
+    'glm-5.3-flash',
+    'mimo-v2.6-flash',
+    'qwen3.8-flash',
+    'deepseek-v4-pro',
+    'glm-5.3',
+  ],
+  nvidia: [
+    'meta/llama-3.3-70b-instruct',
+    'deepseek-ai/deepseek-r1',
+    'nvidia/llama-3.1-nemotron-70b-instruct',
+    'qwen/qwen2.5-coder-32b-instruct',
+    'meta/llama-3.1-405b-instruct',
+  ],
+  deepseek: [
+    'deepseek-chat',
+    'deepseek-reasoner',
+  ],
+  groq: [
+    'llama-3.3-70b-versatile',
+    'llama-3.1-8b-instant',
+    'mixtral-8x7b-32768',
+    'gemma2-9b-it',
+  ],
+  cerebras: [
+    'llama-3.3-70b',
+    'llama3.1-8b',
+  ],
+  mistral: [
+    'mistral-large-latest',
+    'codestral-latest',
+    'pixtral-large-latest',
+    'ministral-8b-latest',
+  ],
+  typesafe: [
+    'jev-latest',
+    'jev-1.13',
+  ],
+  vercel: [
+    'anthropic/claude-3-7-sonnet',
+    'openai/gpt-4o',
+    'deepseek/deepseek-chat',
+    'google/gemini-2.0-flash',
+    'meta/llama-3.3-70b',
+  ],
+  opencode: [
+    'deepseek-chat',
+    'gemini-2.5-flash',
   ],
 };
 
@@ -2143,6 +2198,10 @@ export function resolveInheritedCardModels(card, catalogModels = [], globalDisab
     effectiveFamily = 'codex';
   } else if (familyRole === 'gemini' || prefix.startsWith('agy') || prefix.startsWith('g')) {
     effectiveFamily = 'gemini';
+  } else if (familyRole && CANONICAL_PROVIDER_MODELS[familyRole]) {
+    effectiveFamily = familyRole;
+  } else if (familyRole) {
+    effectiveFamily = familyRole;
   }
 
   const toBaseModelId = (id) => {
@@ -2184,11 +2243,17 @@ export function resolveInheritedCardModels(card, catalogModels = [], globalDisab
     if (effectiveFamily === 'gemini') {
       matches = lower.includes('gemini');
     } else if (effectiveFamily === 'claude') {
-      matches =
-        lower.includes('claude') ||
-        lower.includes('sonnet') ||
-        lower.includes('opus') ||
-        /^gpt/.test(lower);
+      const isDirectClaude = prefix.startsWith('clau');
+      if (isDirectClaude) {
+        matches = (lower.includes('claude') || lower.includes('haiku') || lower.includes('sonnet') || lower.includes('opus')) &&
+                  !lower.includes('4-6') && !lower.includes('5-5') && !lower.startsWith('gpt');
+      } else {
+        matches =
+          lower.includes('claude') ||
+          lower.includes('sonnet') ||
+          lower.includes('opus') ||
+          /^gpt/.test(lower);
+      }
     } else if (effectiveFamily === 'codex') {
       matches =
         lower.includes('codex') ||
@@ -2201,10 +2266,29 @@ export function resolveInheritedCardModels(card, catalogModels = [], globalDisab
         lower.includes('o1') ||
         lower.includes('o3') ||
         lower.includes('o4');
+    } else if (CANONICAL_PROVIDER_MODELS[effectiveFamily]) {
+      const canonicalSet = new Set(CANONICAL_PROVIDER_MODELS[effectiveFamily].map((m) => m.toLowerCase()));
+      matches =
+        canonicalSet.has(lower) ||
+        lower.includes(effectiveFamily) ||
+        rawId.toLowerCase().startsWith(`${effectiveFamily}/`);
+    } else {
+      matches = lower.includes(effectiveFamily) || rawId.toLowerCase().startsWith(`${effectiveFamily}/`);
     }
 
     if (matches) {
       resultSet.add(baseId);
+    }
+  }
+
+  // Fallback transparente: si el catálogo upstream aún no expone modelos para esta familia,
+  // proveer el catálogo canónico del proveedor para garantizar selección honesta en la UI.
+  if (resultSet.size === 0 && CANONICAL_PROVIDER_MODELS[effectiveFamily]) {
+    for (const m of CANONICAL_PROVIDER_MODELS[effectiveFamily]) {
+      const lower = m.toLowerCase();
+      if (!disabledSet.has(lower)) {
+        resultSet.add(m);
+      }
     }
   }
 

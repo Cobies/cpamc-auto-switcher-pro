@@ -81,6 +81,13 @@ const MODEL_FAMILIES = {
     provider: 'antigravity',
     quota: 'Claude and GPT models',
     note: 'Cuentas directas oficiales Anthropic (prefijo clau*). Convención: clau, clau2...',
+    models: [
+      'claude-3-7-sonnet',
+      'claude-3-5-sonnet',
+      'claude-3-5-haiku',
+      'claude-3-opus',
+      'claude-3-haiku',
+    ],
   },
   codex: {
     label: 'OpenAI Codex',
@@ -89,6 +96,43 @@ const MODEL_FAMILIES = {
     provider: 'codex',
     quota: 'Codex',
     note: 'Cuentas individuales Codex / OpenAI (prefijo codex*). Convención: codex, codex2...',
+    models: [
+      'gpt-6.1',
+      'gpt-6.1-sol',
+      'gpt-6.1-astra',
+      'gpt-6-astra',
+      'gpt-6-sol',
+      'gpt-6-luna',
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+      'gpt-5.5',
+      'gpt-5.5-pro',
+      'gpt-5.4',
+      'gpt-5.4-mini',
+      'gpt-5.4-nano',
+      'gpt-5.4-pro',
+      'gpt-5.3-codex',
+      'gpt-5.3-codex-spark',
+      'gpt-5.2',
+      'gpt-5.2-pro',
+      'gpt-5.1',
+      'gpt-5',
+      'o4-mini',
+      'o3',
+      'o3-mini',
+      'o3-pro',
+      'o1',
+      'o1-mini',
+      'o1-pro',
+      'o1-preview',
+      'chatgpt-4o-latest',
+      'gpt-4o',
+      'gpt-4o-mini',
+      'gpt-4.1',
+      'gpt-4-turbo',
+      'gpt-4',
+    ],
   },
 };
 
@@ -517,15 +561,101 @@ export default function GroupManager({
     return null;
   }, [effectiveFamily]);
 
+// Helper para extraer dinámicamente versiones numéricas de cualquier modelo (SemVer / float)
+// Ejemplos: "gpt-6.1" -> 6.1, "claude-3-7-sonnet" -> 3.7, "gemini-3.8-flash-high" -> 3.8, "glm-5.3" -> 5.3
+function extractModelVersion(modelName) {
+  if (typeof modelName !== 'string') return 0;
+  const clean = modelName.toLowerCase();
+
+  // 1. Número con punto: gpt-6.1, gpt-5.6, gemini-3.8, glm-5.3, etc.
+  const dotMatch = clean.match(/(?:gpt-|gemini-|claude-|v|glm-|mimo-v|qwen|kimi-k|grok-)?(\d+)\.(\d+)/);
+  if (dotMatch) {
+    return parseFloat(`${dotMatch[1]}.${dotMatch[2]}`);
+  }
+  // 2. Formato con guiones: claude-3-7 -> 3.7, claude-3-5 -> 3.5, sonnet-5-5 -> 5.5, sonnet-4-6 -> 4.6
+  const dashMatch = clean.match(/(?:claude-|sonnet-|opus-)(\d+)-(\d+)/);
+  if (dashMatch) {
+    return parseFloat(`${dashMatch[1]}.${dashMatch[2]}`);
+  }
+  // 3. Versión mayor única: gpt-6 -> 6.0, gpt-5 -> 5.0, o3 -> 3.0, o1 -> 1.0, gemini-3 -> 3.0
+  const singleMatch = clean.match(/(?:gpt-|gemini-|claude-|o|glm-)(\d+)/);
+  if (singleMatch) {
+    return parseFloat(singleMatch[1]);
+  }
+  return 0;
+}
+
+// Ordenamiento dinámico y universal por versión más avanzada (flagship primero)
+function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
+  const canonicalList = CANONICAL_PROVIDER_MODELS[familyRole] || [];
+  const canonicalMap = new Map();
+  canonicalList.forEach((m, idx) => {
+    canonicalMap.set(m.toLowerCase(), idx);
+  });
+
+  return [...models].sort((a, b) => {
+    const aLower = a.toLowerCase();
+    const bLower = b.toLowerCase();
+    const aIdx = canonicalMap.has(aLower) ? canonicalMap.get(aLower) : -1;
+    const bIdx = canonicalMap.has(bLower) ? canonicalMap.get(bLower) : -1;
+
+    // Si ambos están en la lista canónica curada, respetar el orden de prioridad canónico (flagship primero)
+    if (aIdx !== -1 && bIdx !== -1) {
+      return aIdx - bIdx;
+    }
+    if (aIdx !== -1) return -1;
+    if (bIdx !== -1) return 1;
+
+    // Si no están en la lista canónica, ordenar por versión numérica (SemVer más alto primero)
+    const vA = extractModelVersion(a);
+    const vB = extractModelVersion(b);
+    if (vB !== vA) {
+      return vB - vA; // Versión más alta primero (6.1 > 6.0 > 5.6..., 3.8 > 3.7..., 3.7 > 3.5...)
+    }
+
+    if (isCodex) {
+      const getCodexSubPriority = (name) => {
+        const lower = name.toLowerCase();
+        if (lower.includes('6.1')) return 610;
+        if (lower.includes('astra')) return 600;
+        if (lower.includes('sol')) return 590;
+        if (lower.includes('luna')) return 580;
+        if (lower.includes('terra')) return 570;
+        return 0;
+      };
+      const pDiff = getCodexSubPriority(b) - getCodexSubPriority(a);
+      if (pDiff !== 0) return pDiff;
+    }
+
+    if (isGemini) {
+      const a38 = a.includes('3.8');
+      const b38 = b.includes('3.8');
+      if (a38 && !b38) return -1;
+      if (!a38 && b38) return 1;
+    }
+
+    return a.localeCompare(b);
+  });
+}
+
   // Modelos candidatos disponibles para el pool según la familia efectiva seleccionada
   const availableSpecialistModels = useMemo(() => {
     if (!effectiveFamily) return [];
+
+    // Si la cuenta física seleccionada tiene modelos nativos inspeccionados vía getAuthFileModels:
+    if (selectedAuthModels.length > 0) {
+      let models = [...selectedAuthModels];
+      if (excludeVersion55) {
+        models = models.filter((m) => !m.includes('5-5') && !m.includes('5.5'));
+      }
+      const isGem = (targetFamilyRole || '') === 'gemini';
+      const isCod = (targetFamilyRole || '') === 'codex';
+      return sortModelsByFamilyAndVersion(models, targetFamilyRole, isCod, isGem);
+    }
+
     const sourceModels = Array.isArray(catalogModels) && catalogModels.length > 0
       ? catalogModels
       : [];
-    if (selectedAuthModels.length > 0) {
-      sourceModels.push(...selectedAuthModels);
-    }
     const dummyCard = {
       familyRole: targetFamilyRole || 'gemini',
       assignedPrefix: effectiveFamily.hintPrefix,
@@ -534,7 +664,9 @@ export default function GroupManager({
 
     // Si el catálogo aún no cargó o está vacío en tests, proveer los modelos canónicos conocidos
     if (models.length === 0) {
-      if (effectiveFamily.key === 'gemini_pure') {
+      if (effectiveFamily.models && effectiveFamily.models.length > 0) {
+        models = [...effectiveFamily.models];
+      } else if (effectiveFamily.key === 'gemini_pure') {
         models = [
           'gemini-3.8-flash-high',
           'gemini-3.7-flash-high',
@@ -550,15 +682,24 @@ export default function GroupManager({
         models = ['claude-sonnet-4-6', 'claude-sonnet-5-5-high'];
       } else if (effectiveFamily.key === 'gemini_opus') {
         models = ['claude-opus-4-6-thinking', 'claude-opus-5-5-high'];
-      } else if (effectiveFamily.key === 'gemini_claude' || effectiveFamily.key === 'claude') {
+      } else if (effectiveFamily.key === 'gemini_claude') {
         models = [
-          'claude-3-7-sonnet',
-          'claude-3-5-haiku',
           'claude-sonnet-4-6',
           'claude-opus-4-6-thinking',
         ];
+      } else if (effectiveFamily.key === 'claude') {
+        models = [
+          'claude-3-7-sonnet',
+          'claude-3-5-sonnet',
+          'claude-3-5-haiku',
+          'claude-3-opus',
+          'claude-3-haiku',
+        ];
       } else if (effectiveFamily.key === 'codex') {
         models = [
+          'gpt-6.1',
+          'gpt-6.1-sol',
+          'gpt-6.1-astra',
           'gpt-6-astra',
           'gpt-6-sol',
           'gpt-6-luna',
@@ -592,8 +733,8 @@ export default function GroupManager({
           'gpt-4-turbo',
           'gpt-4',
         ];
-      } else if (effectiveFamily.models && effectiveFamily.models.length > 0) {
-        models = [...effectiveFamily.models];
+      } else if (CANONICAL_PROVIDER_MODELS[targetFamilyRole]) {
+        models = [...CANONICAL_PROVIDER_MODELS[targetFamilyRole]];
       }
     }
 
@@ -601,33 +742,9 @@ export default function GroupManager({
       models = models.filter((m) => !m.includes('5-5') && !m.includes('5.5'));
     }
 
-    // Ordenar con 3.8 primero para gemini, o A-Z para claude/otros (Astra y Sol preservan prioridad en codex)
     const isGemini = (targetFamilyRole || '') === 'gemini';
     const isCodex = (targetFamilyRole || '') === 'codex';
-    return [...models].sort((a, b) => {
-      if (isGemini) {
-        const a38 = a.includes('3.8');
-        const b38 = b.includes('3.8');
-        if (a38 && !b38) return -1;
-        if (!a38 && b38) return 1;
-      }
-      if (isCodex) {
-        const priorityOrder = [
-          'gpt-6-astra',
-          'gpt-6-sol',
-          'gpt-6-luna',
-          'gpt-5.6-sol',
-          'gpt-5.6-terra',
-          'gpt-5.6-luna',
-        ];
-        const aIdx = priorityOrder.indexOf(a);
-        const bIdx = priorityOrder.indexOf(b);
-        if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
-        if (aIdx !== -1) return -1;
-        if (bIdx !== -1) return 1;
-      }
-      return a.localeCompare(b);
-    });
+    return sortModelsByFamilyAndVersion(models, targetFamilyRole, isCodex, isGemini);
   }, [effectiveFamily, catalogModels, selectedAuthModels, targetFamilyRole, excludeVersion55]);
 
   // Actualizar el modelo especialista predeterminado cuando cambie la familia o subtipo
@@ -635,8 +752,8 @@ export default function GroupManager({
     if (availableSpecialistModels.length > 0) {
       setSelectedSpecialistModel((prev) => {
         if (prev && availableSpecialistModels.includes(prev)) return prev;
-        const default38 = availableSpecialistModels.find((m) => m.includes('3.8'));
-        return default38 || availableSpecialistModels[0] || '';
+        // Al estar ordenado por versión más alta / recomendada, el primer elemento es el modelo estrella
+        return availableSpecialistModels[0] || '';
       });
     } else {
       setSelectedSpecialistModel('');
@@ -1993,9 +2110,9 @@ export default function GroupManager({
                         onChange={(e) => setSelectedSpecialistModel(e.target.value)}
                         data-testid="select-specialist-model"
                       >
-                        {availableSpecialistModels.map((m) => (
+                        {availableSpecialistModels.map((m, idx) => (
                           <option key={m} value={m}>
-                            {m}{m.includes('3.8') ? ' ⭐ (Recomendado)' : ''}
+                            {m}{idx === 0 ? ' ⭐ (Recomendado)' : ''}
                           </option>
                         ))}
                       </select>
