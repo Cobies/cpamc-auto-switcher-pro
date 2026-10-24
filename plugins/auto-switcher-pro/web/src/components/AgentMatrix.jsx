@@ -107,6 +107,7 @@ export default function AgentMatrix() {
   const [harnesses, setHarnesses] = useState([]);
   const [availablePools, setAvailablePools] = useState([]);
   const [poolCapabilities, setPoolCapabilities] = useState({});
+  const [modelThinkingLevels, setModelThinkingLevels] = useState({});
   const [poolDetails, setPoolDetails] = useState({});
   const [upstreamModels, setUpstreamModels] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -159,6 +160,7 @@ export default function AgentMatrix() {
     setHarnesses(detected);
     setAvailablePools(data.available_pools || []);
     setPoolCapabilities(data.pool_capabilities || {});
+    setModelThinkingLevels(data.model_thinking_levels || {});
     setPoolDetails(data.pool_details || {});
     setUpstreamModels(data.upstream_models || []);
 
@@ -244,6 +246,127 @@ export default function AgentMatrix() {
     return false;
   }, [poolDetails]);
 
+  // Resolver dinámicamente los niveles soportados por un modelo o pool
+  const getThinkingLevelsForTarget = useCallback(
+    (targetId) => {
+      if (!targetId) return [];
+
+      // 1. Si el backend envió directamente los niveles para este target
+      if (modelThinkingLevels[targetId]) {
+        return modelThinkingLevels[targetId];
+      }
+
+      // 2. Si es un pool registrado, verificar el target model del pool
+      if (poolDetails[targetId]?.target_model) {
+        const mod = poolDetails[targetId].target_model;
+        if (modelThinkingLevels[mod]) {
+          return modelThinkingLevels[mod];
+        }
+      }
+
+      // 3. Si en upstreamModels viene declarada la capacidad
+      const foundUp = upstreamModels.find((u) => u.id === targetId);
+      if (foundUp) {
+        if (foundUp.supports_thinking === false) return [];
+        if (Array.isArray(foundUp.thinking_levels) && foundUp.thinking_levels.length > 0) {
+          return foundUp.thinking_levels;
+        }
+      }
+
+      // 4. Si poolCapabilities marcó false explícitamente
+      if (poolCapabilities[targetId] === false) {
+        return [];
+      }
+
+      const lower = targetId.toLowerCase();
+
+      // Modelos explícitamente sin thinking
+      if (
+        lower.includes('codex') &&
+        !lower.includes('sol') &&
+        !lower.includes('astra') &&
+        !lower.includes('luna') &&
+        !lower.includes('o3') &&
+        !lower.includes('o1')
+      ) {
+        return [];
+      }
+      if (
+        lower.includes('gpt-4o') ||
+        lower.includes('legacy') ||
+        lower.includes('gpt-3.5') ||
+        lower.includes('gpt-5.4') ||
+        lower.includes('gpt-5.3-codex')
+      ) {
+        return [];
+      }
+
+      // 5 niveles: Luna, Opus, Haiku 5.5, Claude 3.7
+      if (
+        lower.includes('luna') ||
+        lower.includes('opus') ||
+        lower.includes('haiku-5-5') ||
+        lower.includes('claude-3-7')
+      ) {
+        return ['minimal', 'low', 'medium', 'high', 'max'];
+      }
+
+      // 4 niveles: Gemini
+      if (lower.includes('gemini')) {
+        return ['low', 'medium', 'high', 'xhigh'];
+      }
+
+      // DeepSeek Reasoner
+      if (lower.includes('deepseek-reasoner') || lower.includes('deepseek-r1') || lower.includes('deepseek-v4')) {
+        return ['low', 'high', 'max'];
+      }
+
+      // 3 niveles estándar para reasoning
+      if (
+        lower.includes('o1') ||
+        lower.includes('o3') ||
+        lower.includes('o4') ||
+        lower.includes('astra') ||
+        lower.includes('sol') ||
+        lower.includes('terra') ||
+        lower.includes('sonnet') ||
+        lower.includes('claude') ||
+        lower.includes('gpt-5.5') ||
+        lower.includes('gpt-5.6') ||
+        lower.includes('gpt-6')
+      ) {
+        return ['low', 'medium', 'high'];
+      }
+
+      return [];
+    },
+    [modelThinkingLevels, poolDetails, upstreamModels, poolCapabilities]
+  );
+
+  const formatThinkingLevelBadge = (lvl) => {
+    switch (lvl) {
+      case 'minimal':
+        return { short: 'MIN', label: 'Minimal (Mínimo)', full: 'MINIMAL' };
+      case 'low':
+        return { short: 'L', label: 'Low (Bajo)', full: 'LOW' };
+      case 'medium':
+        return { short: 'M', label: 'Medium (Medio)', full: 'MEDIUM' };
+      case 'high':
+        return { short: 'H', label: 'High (Alto)', full: 'HIGH' };
+      case 'xhigh':
+        return { short: 'XH', label: 'X-High (Muy Alto)', full: 'X-HIGH' };
+      case 'max':
+        return { short: 'MAX', label: 'Max (Máximo)', full: 'MAX' };
+      default:
+        return { short: lvl.toUpperCase().slice(0, 3), label: lvl, full: lvl.toUpperCase() };
+    }
+  };
+
+  const isPoolTarget = (targetId) => {
+    if (!targetId) return false;
+    return availablePools.includes(targetId);
+  };
+
   const handleApplyPreset = (preset) => {
     setHarnesses((prev) =>
       prev.map((h) => ({
@@ -283,11 +406,14 @@ export default function AgentMatrix() {
 
           // Cascada y Exclusión Mutua por Fila
           if (field === 'primary_pool') {
-            // 1. Thinking capability sync
-            if (poolCapabilities[value] === false) {
+            // 1. Dynamic thinking capability and levels sync
+            const suppLevels = getThinkingLevelsForTarget(value);
+            if (!suppLevels || suppLevels.length === 0) {
               updated.thinking_level = 'none';
-            } else if (poolCapabilities[value] !== false && updated.thinking_level === 'none') {
+            } else if (updated.thinking_level === 'none' || !updated.thinking_level) {
               updated.thinking_level = 'medium';
+            } else if (!suppLevels.includes(updated.thinking_level)) {
+              updated.thinking_level = suppLevels.includes('medium') ? 'medium' : suppLevels[suppLevels.length - 1];
             }
 
             // 2. Si el nuevo primario colisiona con el rescate actual, reasignar el rescate automáticamente
@@ -450,11 +576,6 @@ export default function AgentMatrix() {
       </div>
     );
   }
-
-  const isPoolTarget = (targetId) => {
-    if (!targetId) return false;
-    return availablePools.includes(targetId);
-  };
 
   const formatPoolLabel = (poolId) => {
     const detail = poolDetails[poolId];
@@ -665,27 +786,37 @@ export default function AgentMatrix() {
             <span style={{ fontSize: 11, color: '#94a3b8', display: 'block', marginBottom: 4 }}>
               THINKING
             </span>
-            {poolCapabilities[agent.primary_pool] === false ? (
-              <span
-                className="thinking-na-badge"
-                title="Este modelo no requiere ni admite parámetros de razonamiento/thinking"
-              >
-                🚫 N/A - Sin Razonamiento
-              </span>
-            ) : (
-              <div className="thinking-toggle">
-                {['low', 'medium', 'high'].map((lvl) => (
-                  <button
-                    key={lvl}
-                    type="button"
-                    className={`thinking-btn ${agent.thinking_level === lvl ? `active ${lvl}` : ''}`}
-                    onClick={() => handlePoolChange(harnessId, agent.agent_id, 'thinking_level', lvl)}
+            {(() => {
+              const suppLevels = getThinkingLevelsForTarget(agent.primary_pool);
+              if (!suppLevels || suppLevels.length === 0) {
+                return (
+                  <span
+                    className="thinking-na-badge"
+                    title="Este modelo no requiere ni admite parámetros de razonamiento/thinking"
                   >
-                    {lvl.toUpperCase()}
-                  </button>
-                ))}
-              </div>
-            )}
+                    🚫 N/A - Sin Razonamiento
+                  </span>
+                );
+              }
+              return (
+                <div className="thinking-toggle">
+                  {suppLevels.map((lvl) => {
+                    const info = formatThinkingLevelBadge(lvl);
+                    return (
+                      <button
+                        key={lvl}
+                        type="button"
+                        className={`thinking-btn ${agent.thinking_level === lvl ? `active ${lvl}` : ''}`}
+                        onClick={() => handlePoolChange(harnessId, agent.agent_id, 'thinking_level', lvl)}
+                        title={info.label}
+                      >
+                        {info.full}
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </div>
         </div>
       </div>
@@ -831,27 +962,37 @@ export default function AgentMatrix() {
                   )}
                 </td>
                 <td>
-                  {poolCapabilities[a.primary_pool] === false ? (
-                    <span
-                      className="thinking-na-badge"
-                      title="Este modelo no requiere ni admite parámetros de razonamiento/thinking"
-                    >
-                      🚫 N/A
-                    </span>
-                  ) : (
-                    <div className="thinking-toggle">
-                      {['low', 'medium', 'high'].map((lvl) => (
-                        <button
-                          key={lvl}
-                          type="button"
-                          className={`thinking-btn ${a.thinking_level === lvl ? `active ${lvl}` : ''}`}
-                          onClick={() => handlePoolChange(harnessId, a.agent_id, 'thinking_level', lvl)}
+                  {(() => {
+                    const suppLevels = getThinkingLevelsForTarget(a.primary_pool);
+                    if (!suppLevels || suppLevels.length === 0) {
+                      return (
+                        <span
+                          className="thinking-na-badge"
+                          title="Este modelo no requiere ni admite parámetros de razonamiento/thinking"
                         >
-                          {lvl.charAt(0).toUpperCase()}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                          🚫 N/A
+                        </span>
+                      );
+                    }
+                    return (
+                      <div className="thinking-toggle">
+                        {suppLevels.map((lvl) => {
+                          const info = formatThinkingLevelBadge(lvl);
+                          return (
+                            <button
+                              key={lvl}
+                              type="button"
+                              className={`thinking-btn ${a.thinking_level === lvl ? `active ${lvl}` : ''}`}
+                              onClick={() => handlePoolChange(harnessId, a.agent_id, 'thinking_level', lvl)}
+                              title={info.label}
+                            >
+                              {info.short}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
                 </td>
                 <td>
                   {isWriter ? (

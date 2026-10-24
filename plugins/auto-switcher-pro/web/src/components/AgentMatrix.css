@@ -634,14 +634,34 @@
   color: #ffffff;
 }
 
-.thinking-btn.active.high {
-  background: #f59e0b;
+.thinking-btn.active.minimal {
+  background: #06b6d4;
   color: #0f172a;
 }
 
 .thinking-btn.active.low {
   background: #10b981;
   color: #0f172a;
+}
+
+.thinking-btn.active.medium {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.thinking-btn.active.high {
+  background: #f59e0b;
+  color: #0f172a;
+}
+
+.thinking-btn.active.xhigh {
+  background: #8b5cf6;
+  color: #ffffff;
+}
+
+.thinking-btn.active.max {
+  background: #ef4444;
+  color: #ffffff;
 }
 
 .thinking-na-badge {

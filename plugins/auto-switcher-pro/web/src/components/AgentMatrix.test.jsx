@@ -399,4 +399,90 @@ describe('AgentMatrix Component', () => {
       expect(screen.getByText('Freno Anti-Bucle:')).toBeDefined();
     });
   });
+
+  it('renders dynamic thinking levels according to selected model and provider capabilities', async () => {
+    vi.spyOn(managementClient, 'fetchAgentMatrix').mockResolvedValue({
+      ok: true,
+      jok3r_detected: true,
+      available_pools: ['Pool-01-gemini', 'Pool-03-codex'],
+      pool_capabilities: {
+        'Pool-01-gemini': true,
+        'Pool-03-codex': false,
+      },
+      model_thinking_levels: {
+        'Pool-01-gemini': ['low', 'medium', 'high', 'xhigh'],
+        'Pool-03-codex': [],
+        'openai/gpt-6-luna': ['minimal', 'low', 'medium', 'high', 'max'],
+        'openai/o3-mini': ['low', 'medium', 'high'],
+      },
+      pool_details: {
+        'Pool-01-gemini': { id: 'Pool-01-gemini', target_model: 'gemini-3.8-flash-high' },
+        'Pool-03-codex': { id: 'Pool-03-codex', target_model: 'gpt-4o' },
+      },
+      upstream_models: [
+        {
+          id: 'openai/gpt-6-luna',
+          provider: 'openai',
+          display_name: 'GPT-6 Luna (OPENAI)',
+          supports_thinking: true,
+          thinking_levels: ['minimal', 'low', 'medium', 'high', 'max'],
+        },
+        {
+          id: 'openai/o3-mini',
+          provider: 'openai',
+          display_name: 'o3-mini (OPENAI)',
+          supports_thinking: true,
+          thinking_levels: ['low', 'medium', 'high'],
+        },
+      ],
+      gentle_agents: [
+        {
+          universe: 'gentle_shell',
+          agent_id: 'orchestrator',
+          displayName: '👑 ORQUESTADOR GENTLE',
+          is_orchestrator: true,
+          primary_pool: 'Pool-01-gemini', // 4 levels
+          fallback_pool: 'Pool-03-codex',
+          thinking_level: 'high',
+        },
+        {
+          universe: 'gentle_shell',
+          agent_id: '02-apply',
+          displayName: '⚡ 02-apply',
+          role_type: 'apply',
+          primary_pool: 'Pool-03-codex', // Non-reasoning (0 levels)
+          fallback_pool: 'Pool-01-gemini',
+          thinking_level: 'none',
+          concurrency: 1,
+        },
+        {
+          universe: 'gentle_shell',
+          agent_id: '01-planning',
+          displayName: '📐 01-planning',
+          role_type: 'planning',
+          primary_pool: 'openai/gpt-6-luna', // 5 levels
+          fallback_pool: 'Pool-01-gemini',
+          thinking_level: 'medium',
+          concurrency: 1,
+        },
+      ],
+      jok3r_agents: [],
+    });
+
+    render(<AgentMatrix />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Matriz de Agentes & Orquestación')).toBeDefined();
+    });
+
+    // 1. Non-reasoning model (Pool-03-codex) renders N/A badge
+    expect(screen.getByText('🚫 N/A')).toBeDefined();
+
+    // 2. Gemini model (Pool-01-gemini) renders 4 levels: L, M, H, XH in table
+    expect(screen.getByTitle('X-High (Muy Alto)')).toBeDefined();
+
+    // 3. 5-level model (GPT-6 Luna) renders MIN, L, M, H, MAX in table
+    expect(screen.getByTitle('Minimal (Mínimo)')).toBeDefined();
+    expect(screen.getByTitle('Max (Máximo)')).toBeDefined();
+  });
 });

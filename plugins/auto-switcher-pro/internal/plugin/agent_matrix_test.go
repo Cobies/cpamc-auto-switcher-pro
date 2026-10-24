@@ -69,6 +69,12 @@ func TestAgentMatrixHandler_GET(t *testing.T) {
 	if val, ok := data.PoolCapabilities["Pool-04-claude"]; !ok || !val {
 		t.Errorf("expected Pool-04-claude to have supports_thinking=true, got %v", val)
 	}
+	if levels, ok := data.ModelThinkingLevels["Pool-01-gemini"]; !ok || len(levels) != 4 {
+		t.Errorf("expected Pool-01-gemini to have 4 thinking levels, got %v", levels)
+	}
+	if levels, ok := data.ModelThinkingLevels["Pool-03-codex"]; !ok || len(levels) != 0 {
+		t.Errorf("expected Pool-03-codex (gpt-4o) to have 0 thinking levels, got %v", levels)
+	}
 }
 
 func TestAgentMatrixHandler_POST(t *testing.T) {
@@ -482,4 +488,71 @@ func TestAgentMatrix_DirectUpstreamModelPersistence(t *testing.T) {
 		t.Errorf("gentle_shell orchestrator not found in GET response")
 	}
 }
+
+func TestAgentMatrix_DynamicThinkingLevels(t *testing.T) {
+	// 1. Verify resolveModelThinkingLevels
+	suppGemini, levelsGemini := resolveModelThinkingLevels("gemini-3.8-flash-high")
+	if !suppGemini || len(levelsGemini) != 4 {
+		t.Errorf("expected gemini-3.8-flash-high to have 4 levels, got %v", levelsGemini)
+	}
+
+	suppLuna, levelsLuna := resolveModelThinkingLevels("gpt-6-luna")
+	if !suppLuna || len(levelsLuna) != 5 {
+		t.Errorf("expected gpt-6-luna to have 5 levels, got %v", levelsLuna)
+	}
+
+	suppCodexReasoning, levelsCodex := resolveModelThinkingLevels("openai/o3-mini")
+	if !suppCodexReasoning || len(levelsCodex) != 3 {
+		t.Errorf("expected o3-mini to have 3 levels, got %v", levelsCodex)
+	}
+
+	suppGpt4o, levelsGpt4o := resolveModelThinkingLevels("openai/gpt-4o")
+	if suppGpt4o || len(levelsGpt4o) != 0 {
+		t.Errorf("expected gpt-4o to have 0 levels, got %v", levelsGpt4o)
+	}
+
+	// 2. Verify POST preserves thinking level on Codex reasoning model
+	input := struct {
+		Agents []AgentInfo `json:"agents"`
+	}{
+		Agents: []AgentInfo{
+			{
+				Universe:      "gentle_ai",
+				AgentID:       "orchestrator",
+				RoleType:      "orchestrator",
+				PrimaryPool:   "openai/o3-mini",
+				FallbackPool:  "Pool-01-gemini",
+				ThinkingLevel: "high",
+				Concurrency:   1,
+			},
+		},
+	}
+	body, _ := json.Marshal(input)
+	req := ManagementRequestPayload{
+		Method: http.MethodPost,
+		Path:   "/v0/management/auto-switcher-pro/agent-matrix",
+		Body:   body,
+	}
+	raw, err := handleAgentMatrixHTTP(req)
+	if err != nil {
+		t.Fatalf("handleAgentMatrixHTTP failed: %v", err)
+	}
+	var env Envelope
+	_ = json.Unmarshal(raw, &env)
+	var resp ManagementResponsePayload
+	_ = json.Unmarshal(env.Result, &resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	records, _ := analytics.GetAgentProfiles("gentle_ai")
+	for _, r := range records {
+		if r.AgentID == "orchestrator" {
+			if r.ThinkingLevel != "high" {
+				t.Errorf("expected thinking=high to be preserved on o3-mini, got %s", r.ThinkingLevel)
+			}
+		}
+	}
+}
+
 

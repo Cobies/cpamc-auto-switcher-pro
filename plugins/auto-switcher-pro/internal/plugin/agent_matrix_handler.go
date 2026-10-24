@@ -89,23 +89,26 @@ type PoolDetailInfo struct {
 
 // DiscoveredUpstreamModel represents an unassigned account model or upstream provider route.
 type DiscoveredUpstreamModel struct {
-	ID          string `json:"id"`           // e.g. "openai/gpt-4o", "deepseek/deepseek-chat"
-	Provider    string `json:"provider"`     // e.g. "openai", "deepseek", "antigravity"
-	DisplayName string `json:"display_name"` // e.g. "OpenAI GPT-4o"
+	ID               string   `json:"id"`           // e.g. "openai/gpt-4o", "deepseek/deepseek-chat"
+	Provider         string   `json:"provider"`     // e.g. "openai", "deepseek", "antigravity"
+	DisplayName      string   `json:"display_name"` // e.g. "OpenAI GPT-4o"
+	SupportsThinking bool     `json:"supports_thinking"`
+	ThinkingLevels   []string `json:"thinking_levels"`
 }
 
 // AgentMatrixPayload represents the JSON wire format for GET/POST /agent-matrix.
 type AgentMatrixPayload struct {
-	OK               bool                      `json:"ok"`
-	Harnesses        []DiscoveredHarness       `json:"harnesses"`
-	GentleAgents     []AgentInfo               `json:"gentle_agents"`
-	Jok3rAgents      []AgentInfo               `json:"jok3r_agents"`
-	Jok3rDetected    bool                      `json:"jok3r_detected"`
-	AvailablePools   []string                  `json:"available_pools"`
-	PoolCapabilities map[string]bool           `json:"pool_capabilities"` // pool_id -> supports_thinking
-	PoolDetails      map[string]PoolDetailInfo `json:"pool_details"`      // pool_id -> physical reality & model
-	UpstreamModels   []DiscoveredUpstreamModel `json:"upstream_models"`   // Unassigned accounts & upstream direct models
-	Message          string                    `json:"message,omitempty"`
+	OK                  bool                      `json:"ok"`
+	Harnesses           []DiscoveredHarness       `json:"harnesses"`
+	GentleAgents        []AgentInfo               `json:"gentle_agents"`
+	Jok3rAgents         []AgentInfo               `json:"jok3r_agents"`
+	Jok3rDetected       bool                      `json:"jok3r_detected"`
+	AvailablePools      []string                  `json:"available_pools"`
+	PoolCapabilities    map[string]bool           `json:"pool_capabilities"`     // pool_id -> supports_thinking
+	ModelThinkingLevels map[string][]string       `json:"model_thinking_levels"` // pool_id or model_id -> ["low", "medium", ...]
+	PoolDetails         map[string]PoolDetailInfo `json:"pool_details"`          // pool_id -> physical reality & model
+	UpstreamModels      []DiscoveredUpstreamModel `json:"upstream_models"`       // Unassigned accounts & upstream direct models
+	Message             string                    `json:"message,omitempty"`
 }
 
 func getJok3rRootDir() string {
@@ -579,6 +582,7 @@ func getAgentMatrixResponse() ([]byte, error) {
 	reg := activeRegistry()
 	var availablePools []string
 	poolCapabilities := make(map[string]bool)
+	modelThinkingLevels := make(map[string][]string)
 	poolDetails := make(map[string]PoolDetailInfo)
 
 	if reg != nil {
@@ -588,7 +592,6 @@ func getAgentMatrixResponse() ([]byte, error) {
 				poolName = p.BasePrefix
 			}
 			availablePools = append(availablePools, poolName)
-			poolCapabilities[poolName] = poolSupportsThinking(poolName, p)
 
 			targetModel := ""
 			if len(p.Policy.TargetModels) > 0 {
@@ -600,6 +603,10 @@ func getAgentMatrixResponse() ([]byte, error) {
 			} else {
 				targetModel = "gemini-3.8-flash-high"
 			}
+
+			supp, levels := poolSupportsThinking(poolName, targetModel, p)
+			poolCapabilities[poolName] = supp
+			modelThinkingLevels[poolName] = levels
 
 			totalMembers := len(p.Members)
 			if totalMembers == 0 {
@@ -629,9 +636,13 @@ func getAgentMatrixResponse() ([]byte, error) {
 	if len(availablePools) == 0 {
 		availablePools = []string{"Pool-01-gemini", "Pool-02-gemini", "Pool-03-codex", "Pool-04-claude"}
 		poolCapabilities["Pool-01-gemini"] = true
+		modelThinkingLevels["Pool-01-gemini"] = []string{"low", "medium", "high", "xhigh"}
 		poolCapabilities["Pool-02-gemini"] = true
+		modelThinkingLevels["Pool-02-gemini"] = []string{"low", "medium", "high", "xhigh"}
 		poolCapabilities["Pool-03-codex"] = false
+		modelThinkingLevels["Pool-03-codex"] = []string{}
 		poolCapabilities["Pool-04-claude"] = true
+		modelThinkingLevels["Pool-04-claude"] = []string{"low", "medium", "high"}
 
 		poolDetails["Pool-01-gemini"] = PoolDetailInfo{
 			ID: "Pool-01-gemini", Family: "gemini_pure", TargetModel: "gemini-3.8-flash-high", LeaderEmail: "antigravity-leader@gmail.com", TotalMembers: 4, ReservesCount: 3,
@@ -647,28 +658,32 @@ func getAgentMatrixResponse() ([]byte, error) {
 		}
 	}
 
-	// 1. Fetch dynamic manifests and discovered harnesses
-	harnesses, gentleAgents, jok3rAgents, jok3rDetected := loadManifestOrDiscover(availablePools, poolCapabilities)
-
-	// 2. Discover Upstream / Unassigned direct models from baseline & host auth files
+	// 1. Discover Upstream / Unassigned direct models from baseline & host auth files
 	upstreamModels := discoverUpstreamModels(availablePools)
+	for _, u := range upstreamModels {
+		modelThinkingLevels[u.ID] = u.ThinkingLevels
+	}
+
+	// 2. Fetch dynamic manifests and discovered harnesses
+	harnesses, gentleAgents, jok3rAgents, jok3rDetected := loadManifestOrDiscover(availablePools, poolCapabilities, modelThinkingLevels)
 
 	payload := AgentMatrixPayload{
-		OK:               true,
-		Harnesses:        harnesses,
-		GentleAgents:     gentleAgents,
-		Jok3rAgents:      jok3rAgents,
-		Jok3rDetected:    jok3rDetected,
-		AvailablePools:   availablePools,
-		PoolCapabilities: poolCapabilities,
-		PoolDetails:      poolDetails,
-		UpstreamModels:   upstreamModels,
+		OK:                  true,
+		Harnesses:           harnesses,
+		GentleAgents:        gentleAgents,
+		Jok3rAgents:         jok3rAgents,
+		Jok3rDetected:       jok3rDetected,
+		AvailablePools:      availablePools,
+		PoolCapabilities:    poolCapabilities,
+		ModelThinkingLevels: modelThinkingLevels,
+		PoolDetails:         poolDetails,
+		UpstreamModels:      upstreamModels,
 	}
 
 	return jsonManagementResponse(http.StatusOK, payload)
 }
 
-func loadManifestOrDiscover(availablePools []string, poolCapabilities map[string]bool) ([]DiscoveredHarness, []AgentInfo, []AgentInfo, bool) {
+func loadManifestOrDiscover(availablePools []string, poolCapabilities map[string]bool, modelThinkingLevels map[string][]string) ([]DiscoveredHarness, []AgentInfo, []AgentInfo, bool) {
 	manifestPaths := []string{
 		"/CLIProxyAPI/plugins/.harnesses/manifest.json",
 		filepath.Join(os.Getenv("HOME"), "services/cliproxy/plugins/.harnesses/manifest.json"),
@@ -767,12 +782,16 @@ func loadManifestOrDiscover(availablePools []string, poolCapabilities map[string
 						a.AutoDowngrade = true
 					}
 
-					if capVal, ok := poolCapabilities[a.PrimaryPool]; ok {
+					if levels, has := modelThinkingLevels[a.PrimaryPool]; has {
+						if len(levels) == 0 {
+							a.ThinkingLevel = "none"
+						} else if a.ThinkingLevel == "" {
+							a.ThinkingLevel = "medium"
+						}
+					} else if capVal, ok := poolCapabilities[a.PrimaryPool]; ok {
 						if !capVal {
 							a.ThinkingLevel = "none"
 						}
-					} else if strings.Contains(strings.ToLower(a.PrimaryPool), "codex") {
-						a.ThinkingLevel = "none"
 					}
 					agentsWithState = append(agentsWithState, a)
 				}
@@ -781,12 +800,16 @@ func loadManifestOrDiscover(availablePools []string, poolCapabilities map[string
 				for _, da := range dynamicDiscovered {
 					if !seenAgent[da.AgentID] {
 						seenAgent[da.AgentID] = true
-						if capVal, ok := poolCapabilities[da.PrimaryPool]; ok {
+						if levels, has := modelThinkingLevels[da.PrimaryPool]; has {
+							if len(levels) == 0 {
+								da.ThinkingLevel = "none"
+							} else if da.ThinkingLevel == "" {
+								da.ThinkingLevel = "medium"
+							}
+						} else if capVal, ok := poolCapabilities[da.PrimaryPool]; ok {
 							if !capVal {
 								da.ThinkingLevel = "none"
 							}
-						} else if strings.Contains(strings.ToLower(da.PrimaryPool), "codex") {
-							da.ThinkingLevel = "none"
 						}
 						agentsWithState = append(agentsWithState, da)
 					}
@@ -939,10 +962,13 @@ func discoverUpstreamModels(pools []string) []DiscoveredUpstreamModel {
 				displayLabel := mod + " (" + cleanName + ")"
 				if !seen[targetID] {
 					seen[targetID] = true
+					supp, levels := resolveModelThinkingLevels(mod)
 					list = append(list, DiscoveredUpstreamModel{
-						ID:          targetID,
-						Provider:    provider,
-						DisplayName: displayLabel,
+						ID:               targetID,
+						Provider:         provider,
+						DisplayName:      displayLabel,
+						SupportsThinking: supp,
+						ThinkingLevels:   levels,
 					})
 				}
 			}
@@ -1024,10 +1050,13 @@ func discoverUpstreamModels(pools []string) []DiscoveredUpstreamModel {
 					displayLabel := cleanModelName + " (" + strings.ToUpper(provLower) + ")"
 					if !seen[targetID] {
 						seen[targetID] = true
+						supp, levels := resolveModelThinkingLevels(mItem.ID)
 						list = append(list, DiscoveredUpstreamModel{
-							ID:          targetID,
-							Provider:    "local_harness",
-							DisplayName: displayLabel,
+							ID:               targetID,
+							Provider:         "local_harness",
+							DisplayName:      displayLabel,
+							SupportsThinking: supp,
+							ThinkingLevels:   levels,
 						})
 					}
 				}
@@ -1036,10 +1065,13 @@ func discoverUpstreamModels(pools []string) []DiscoveredUpstreamModel {
 				targetID := "provider/" + provLower
 				if !seen[targetID] {
 					seen[targetID] = true
+					supp, levels := resolveModelThinkingLevels(provLower)
 					list = append(list, DiscoveredUpstreamModel{
-						ID:          targetID,
-						Provider:    "local_harness",
-						DisplayName: strings.ToUpper(provLower) + " (Login Local)",
+						ID:               targetID,
+						Provider:         "local_harness",
+						DisplayName:      strings.ToUpper(provLower) + " (Login Local)",
+						SupportsThinking: supp,
+						ThinkingLevels:   levels,
 					})
 				}
 			}
@@ -1049,25 +1081,161 @@ func discoverUpstreamModels(pools []string) []DiscoveredUpstreamModel {
 	return list
 }
 
-func poolSupportsThinking(poolName string, def PoolDefinition) bool {
-	lower := strings.ToLower(poolName)
-	if strings.Contains(lower, "codex") || strings.Contains(lower, "gpt-4o-mini") || strings.Contains(lower, "legacy") {
-		return false
+var cachedReasoningMap sync.Map
+var cachedReasoningLoaded bool
+var cachedReasoningMu sync.Mutex
+
+func loadCPAMCModelsCache() {
+	cachedReasoningMu.Lock()
+	defer cachedReasoningMu.Unlock()
+	if cachedReasoningLoaded {
+		return
 	}
-	if strings.Contains(lower, "gemini") || strings.Contains(lower, "claude") || strings.Contains(lower, "opus") || strings.Contains(lower, "sonnet") {
-		return true
+
+	home, _ := os.UserHomeDir()
+	cachePaths := []string{
+		filepath.Join(home, ".pi", "agent-wilox", "cpamc-models-cache.json"),
+		filepath.Join(home, ".gentle-shell", "agent", "cpamc-models-cache.json"),
+		filepath.Join(home, ".pi", "agent-j0k3r", "cpamc-models-cache.json"),
+		filepath.Join(home, ".pi", "agent", "cpamc-models-cache.json"),
 	}
-	// Check target models if available
-	for _, m := range def.Policy.TargetModels {
-		mLower := strings.ToLower(m)
-		if strings.Contains(mLower, "codex") {
-			return false
+
+	type cacheEntry struct {
+		ID               string         `json:"id"`
+		Reasoning        bool           `json:"reasoning"`
+		ReasoningEfforts []string       `json:"reasoningEfforts"`
+		ThinkingLevelMap map[string]any `json:"thinkingLevelMap"`
+	}
+
+	for _, p := range cachePaths {
+		data, err := os.ReadFile(p)
+		if err != nil || len(data) == 0 {
+			continue
 		}
-		if strings.Contains(mLower, "claude") || strings.Contains(mLower, "gemini") {
+		var entries []cacheEntry
+		if err := json.Unmarshal(data, &entries); err == nil {
+			for _, e := range entries {
+				if !e.Reasoning {
+					continue
+				}
+				var levels []string
+				if len(e.ReasoningEfforts) > 0 {
+					levels = e.ReasoningEfforts
+				} else if len(e.ThinkingLevelMap) > 0 {
+					order := []string{"minimal", "low", "medium", "high", "xhigh", "max"}
+					for _, lvl := range order {
+						if v, ok := e.ThinkingLevelMap[lvl]; ok && v != nil {
+							levels = append(levels, lvl)
+						}
+					}
+				}
+				if len(levels) > 0 {
+					cachedReasoningMap.Store(strings.ToLower(e.ID), levels)
+				}
+			}
+		}
+	}
+	cachedReasoningLoaded = true
+}
+
+func getCachedReasoningLevels(modelID string) []string {
+	if !cachedReasoningLoaded {
+		loadCPAMCModelsCache()
+	}
+	if val, ok := cachedReasoningMap.Load(strings.ToLower(modelID)); ok {
+		if slice, ok := val.([]string); ok {
+			return slice
+		}
+	}
+	return nil
+}
+
+func isExplicitNonReasoning(model string) bool {
+	lower := strings.ToLower(model)
+	return strings.Contains(lower, "gpt-4o") || strings.Contains(lower, "gpt-4-turbo") || strings.Contains(lower, "gpt-3.5") || strings.Contains(lower, "legacy") || strings.Contains(lower, "gpt-5.4") || strings.Contains(lower, "gpt-5.3-codex")
+}
+
+func resolveModelThinkingLevels(modelID string) (bool, []string) {
+	id := strings.ToLower(strings.TrimSpace(modelID))
+	if id == "" {
+		return false, nil
+	}
+
+	unprefixed := id
+	if idx := strings.LastIndex(unprefixed, "/"); idx >= 0 && idx < len(unprefixed)-1 {
+		unprefixed = unprefixed[idx+1:]
+	}
+
+	if isExplicitNonReasoning(unprefixed) {
+		return false, nil
+	}
+
+	// Try cached reasoning levels from CPAMC models cache
+	if levels := getCachedReasoningLevels(unprefixed); len(levels) > 0 {
+		return true, levels
+	}
+	if levels := getCachedReasoningLevels(id); len(levels) > 0 {
+		return true, levels
+	}
+
+	// Canonical rule mapping based on active provider capabilities and CPAMC native models
+	if strings.Contains(unprefixed, "luna") || strings.Contains(unprefixed, "opus") || strings.Contains(unprefixed, "haiku-5-5") || strings.Contains(unprefixed, "claude-3-7") {
+		return true, []string{"minimal", "low", "medium", "high", "max"}
+	}
+
+	if strings.Contains(unprefixed, "gemini") {
+		return true, []string{"low", "medium", "high", "xhigh"}
+	}
+
+	if strings.Contains(unprefixed, "deepseek-reasoner") || strings.Contains(unprefixed, "deepseek-r1") || strings.Contains(unprefixed, "deepseek-v4") {
+		return true, []string{"low", "high", "max"}
+	}
+
+	if strings.HasPrefix(unprefixed, "o1") || strings.HasPrefix(unprefixed, "o3") || strings.HasPrefix(unprefixed, "o4") ||
+		strings.Contains(unprefixed, "astra") || strings.Contains(unprefixed, "sol") || strings.Contains(unprefixed, "terra") ||
+		strings.Contains(unprefixed, "sonnet") || strings.Contains(unprefixed, "gpt-5.5") || strings.Contains(unprefixed, "gpt-5.6") || strings.Contains(unprefixed, "gpt-6") {
+		return true, []string{"low", "medium", "high"}
+	}
+
+	return false, nil
+}
+
+func poolSupportsThinking(poolName string, targetModel string, def PoolDefinition) (bool, []string) {
+	if targetModel != "" {
+		if supp, levels := resolveModelThinkingLevels(targetModel); supp {
+			return true, levels
+		}
+		if isExplicitNonReasoning(targetModel) {
+			return false, nil
+		}
+	}
+
+	for _, m := range def.Policy.TargetModels {
+		if supp, levels := resolveModelThinkingLevels(m); supp {
+			return true, levels
+		}
+		if isExplicitNonReasoning(m) {
+			return false, nil
+		}
+	}
+
+	return resolveModelThinkingLevels(poolName)
+}
+
+func resolveModelThinkingLevelsForTarget(target string, poolDetails map[string]PoolDetailInfo) (bool, []string) {
+	if pd, ok := poolDetails[target]; ok && pd.TargetModel != "" {
+		return resolveModelThinkingLevels(pd.TargetModel)
+	}
+	return resolveModelThinkingLevels(target)
+}
+
+func containsString(slice []string, val string) bool {
+	for _, s := range slice {
+		if strings.EqualFold(s, val) {
 			return true
 		}
 	}
-	return true
+	return false
 }
 
 // Discovers agents by combining known canonical agents and scanning disk Markdown definitions.
@@ -1470,6 +1638,7 @@ func postAgentMatrixResponse(body []byte) ([]byte, error) {
 	now := time.Now().UnixMilli()
 
 	var availablePools []string
+	poolDetails := make(map[string]PoolDetailInfo)
 	if reg := activeRegistry(); reg != nil {
 		for _, p := range reg.ListPools() {
 			poolName := p.ID
@@ -1477,7 +1646,21 @@ func postAgentMatrixResponse(body []byte) ([]byte, error) {
 				poolName = p.BasePrefix
 			}
 			availablePools = append(availablePools, poolName)
+			targetModel := ""
+			if len(p.Policy.TargetModels) > 0 {
+				targetModel = p.Policy.TargetModels[0]
+			}
+			poolDetails[poolName] = PoolDetailInfo{
+				ID:          poolName,
+				TargetModel: targetModel,
+			}
 		}
+	}
+	if len(availablePools) == 0 {
+		poolDetails["Pool-01-gemini"] = PoolDetailInfo{ID: "Pool-01-gemini", TargetModel: "gemini-3.8-flash-high"}
+		poolDetails["Pool-02-gemini"] = PoolDetailInfo{ID: "Pool-02-gemini", TargetModel: "gemini-3.8-flash-high"}
+		poolDetails["Pool-03-codex"] = PoolDetailInfo{ID: "Pool-03-codex", TargetModel: "gpt-4o"}
+		poolDetails["Pool-04-claude"] = PoolDetailInfo{ID: "Pool-04-claude", TargetModel: "claude-sonnet-4-6"}
 	}
 
 	jok3rProfiles := make(map[string]any)
@@ -1488,10 +1671,19 @@ func postAgentMatrixResponse(body []byte) ([]byte, error) {
 			continue
 		}
 
-		// Sanitize thinking if pool does not support it
+		// Sanitize thinking based on actual model capabilities
 		effort := a.ThinkingLevel
-		if strings.Contains(strings.ToLower(a.PrimaryPool), "codex") {
+		supp, levels := resolveModelThinkingLevelsForTarget(a.PrimaryPool, poolDetails)
+		if !supp || len(levels) == 0 {
 			effort = "none"
+		} else if effort == "" {
+			effort = "medium"
+		} else if effort != "none" && !containsString(levels, effort) {
+			if containsString(levels, "medium") {
+				effort = "medium"
+			} else {
+				effort = levels[len(levels)-1]
+			}
 		}
 
 		maxClaudeTurns := a.MaxClaudeTurns
