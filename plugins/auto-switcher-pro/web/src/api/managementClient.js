@@ -12,7 +12,6 @@
  * - Graph construction with immutable exact auth-file name IDs, strictly avoiding credential keys in state.
  */
 
-import { computeGraphLayout } from '../graph/layout';
 
 const SECRET_SALT = 'cli-proxy-api-webui::secure-storage';
 const ENC_PREFIX = 'enc::v1::';
@@ -924,10 +923,7 @@ export function buildGraphFromAuthFiles(authFiles = [], options = {}) {
     };
   });
 
-  // Deterministic topology-aware layout: roots above descendants, collision-free separate lanes
-  const nodes = computeGraphLayout(rawNodes, edges);
-
-  return { nodes, edges };
+  return { nodes: rawNodes, edges };
 }
 
 /**

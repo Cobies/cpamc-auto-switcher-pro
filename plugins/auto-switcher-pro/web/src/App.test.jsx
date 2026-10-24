@@ -84,7 +84,7 @@ describe('App Host Component Integration', () => {
     global.fetch = origFetch;
   });
 
-  it('switches to offline demo graph when user clicks View Offline Demo', async () => {
+  it('switches to offline demo view when user clicks View Offline Demo', async () => {
     vi.spyOn(managementClient, 'getManagementKey').mockReturnValue('');
 
     render(<App />);
@@ -92,12 +92,11 @@ describe('App Host Component Integration', () => {
     const demoBtn = await screen.findByTestId('btn-load-demo');
     fireEvent.click(demoBtn);
 
-    // In demo mode, allowSynthetic is true, so btn-add-root is available
-    expect(await screen.findByTestId('btn-add-root')).toBeTruthy();
-    expect(screen.getByText('Editor Only — Local Graph')).toBeTruthy();
+    expect(await screen.findByTestId('demo-view')).toBeTruthy();
+    expect(screen.getByText('Modo Demostración Offline')).toBeTruthy();
   });
 
-  it('loads real auth files into ProfileGraph when management key is present', async () => {
+  it('loads real auth files into profiles view when management key is present', async () => {
     vi.spyOn(managementClient, 'getManagementKey').mockReturnValue('valid-key-123');
     vi.spyOn(managementClient, 'loadAuthFilesWithPrefixes').mockResolvedValue([
       { name: 'antigravity-1.json', prefix: 'agy_p1' },
@@ -133,7 +132,7 @@ describe('App Host Component Integration', () => {
       screen.getByText('Failed to load auth file "corrupted-account.json": 404 Not Found')
     ).toBeTruthy();
 
-    // MUST NOT render ProfileGraph or any editable node
+    // MUST NOT render deprecated graph or any editable node
     expect(screen.queryByTestId('rf-wrapper')).toBeNull();
     expect(screen.queryByTestId('btn-add-root')).toBeNull();
     expect(screen.getByTestId('btn-retry-error')).toBeTruthy();
@@ -155,36 +154,18 @@ describe('App Host Component Integration', () => {
     expect(screen.queryByTestId('rf-wrapper')).toBeNull();
   });
 
-  it('prompts confirmation when reloading with dirty edits and aborts if cancelled', async () => {
+  it('reloads auth files when clicking reload button in header', async () => {
     vi.spyOn(managementClient, 'getManagementKey').mockReturnValue('valid-key-123');
     const loadSpy = vi.spyOn(managementClient, 'loadAuthFilesWithPrefixes').mockResolvedValue([
       { name: 'acc1.json', prefix: 'agy_p1' },
     ]);
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
 
     render(<App />);
 
     expect(await screen.findByText('agy_p1')).toBeTruthy();
     expect(loadSpy).toHaveBeenCalledTimes(1);
 
-    // Make node dirty via inline edit
-    fireEvent.click(screen.getByTestId('btn-edit-prefix-acc1.json'));
-    const input = screen.getByTestId('input-prefix-acc1.json');
-    fireEvent.change(input, { target: { value: 'custom_dirty_val' } });
-    fireEvent.click(screen.getByTestId('btn-save-prefix-acc1.json'));
-    expect(screen.getByText('custom_dirty_val')).toBeTruthy();
-
-    // Click Reload button: confirm prompt appears and returns false
     const reloadBtn = screen.getByTestId('btn-reload-profiles');
-    fireEvent.click(reloadBtn);
-
-    expect(confirmSpy).toHaveBeenCalled();
-    // loadAuthFilesWithPrefixes must NOT be called again
-    expect(loadSpy).toHaveBeenCalledTimes(1);
-    expect(screen.getByText('custom_dirty_val')).toBeTruthy();
-
-    // Now confirm reload
-    confirmSpy.mockReturnValue(true);
     await act(async () => {
       fireEvent.click(reloadBtn);
     });

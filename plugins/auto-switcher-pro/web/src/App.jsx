@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import HomeCenter from './components/HomeCenter';
-import ProfileGraph from './components/ProfileGraph';
 import ControlSwitcher from './components/ControlSwitcher';
 import PulseTokens from './components/PulseTokens';
 import PrefixManager from './components/PrefixManager';
@@ -166,7 +165,6 @@ export default function App() {
   const [manualKeyInput, setManualKeyInput] = useState('');
   const [manualKeyError, setManualKeyError] = useState('');
   const consoleCheckExecutedRef = useRef(false);
-  const graphRef = useRef(null);
 
   // Escuchar cambios de hash en la barra de direcciones de CPAMC
   useEffect(() => {
@@ -252,15 +250,8 @@ export default function App() {
 
   // Acciones invocadas desde el Header Global
   const handleHeaderOpenPrefixes = useCallback(() => {
-    if (activeTab !== 'profiles') {
-      setActiveTab('profiles');
-    }
-    setTimeout(() => {
-      if (graphRef.current && typeof graphRef.current.openPrefixManagement === 'function') {
-        graphRef.current.openPrefixManagement();
-      }
-    }, 100);
-  }, [activeTab]);
+    setActiveTab('create-prefixes');
+  }, []);
 
   const handleHeaderOpenGroupModal = useCallback(() => {
     setActiveTab('create-groups');
@@ -352,31 +343,9 @@ export default function App() {
   }, []);
 
   /**
-   * Reloads auth files with confirmation if graph contains unsaved dirty edits.
-   * State is retrieved imperatively from the Graph component ref, avoiding React render lag.
+   * Reloads auth files from Management API.
    */
   const handleReload = useCallback(() => {
-    if (graphRef.current) {
-      if (typeof graphRef.current.isSaving === 'function' && graphRef.current.isSaving()) {
-        return;
-      }
-      const currentNodes =
-        typeof graphRef.current.getNodes === 'function'
-          ? graphRef.current.getNodes()
-          : [];
-      const hasDirty = currentNodes.some((n) => Boolean(n?.data?.isDirty));
-      if (hasDirty) {
-        const confirmed =
-          typeof window !== 'undefined' && typeof window.confirm === 'function'
-            ? window.confirm(
-                'You have unsaved prefix modifications. Reloading will discard all changes. Continue?'
-              )
-            : true;
-        if (!confirmed) {
-          return;
-        }
-      }
-    }
     loadProfiles();
   }, [loadProfiles]);
 
@@ -1048,18 +1017,40 @@ export default function App() {
         )}
 
         {status === 'ready' && (
-          <ProfileGraph
-            ref={graphRef}
-            key={`live-graph-${datasetVersion}`}
-            initialNodes={graphData.nodes}
-            initialEdges={graphData.edges}
-            allowSynthetic={false}
-          />
+          <div className="state-container" data-testid="profiles-view">
+            <div className="info-card" style={{ maxWidth: '800px', margin: '40px auto', padding: '24px', background: '#161b22', borderRadius: '12px', border: '1px solid #30363d', color: '#c9d1d9' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+                <span style={{ fontSize: '24px' }}>🛡️</span>
+                <div>
+                  <h3 style={{ margin: 0, color: '#58a6ff' }}>Visual Profile (Modo Deprecado)</h3>
+                  <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#8b949e' }}>
+                    El subsistema de grafos físicos ha sido sustituido por Pools Soberanos en RAM.
+                  </p>
+                </div>
+              </div>
+              <div data-testid="badge-live-auth" style={{ marginBottom: '16px', display: 'inline-block', padding: '4px 10px', background: 'rgba(56, 189, 248, 0.1)', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: '6px', fontSize: '12px', color: '#38bdf8' }}>
+                Perfiles Activos Conectados: {graphData.nodes.length}
+              </div>
+              <div className="profiles-loaded-list" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {graphData.nodes.map((node) => (
+                  <div key={node.id} style={{ padding: '8px 12px', background: '#0d1117', borderRadius: '6px', border: '1px solid #30363d', fontSize: '12px' }}>
+                    <strong>{node.data?.prefix || node.id}</strong>
+                    <span style={{ marginLeft: '8px', color: '#8b949e' }}>{node.id}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         )}
 
-            {status === 'demo' && (
-              <ProfileGraph ref={graphRef} key="demo-graph" allowSynthetic={true} />
-            )}
+        {status === 'demo' && (
+          <div className="state-container" data-testid="demo-view">
+            <div className="info-card" style={{ maxWidth: '600px', margin: '40px auto', padding: '24px', background: '#161b22', borderRadius: '12px', border: '1px solid #30363d', color: '#c9d1d9', textAlign: 'center' }}>
+              <h3>Modo Demostración Offline</h3>
+              <p style={{ color: '#8b949e' }}>Vista previa local de infraestructura sin conexión al daemon CPAMC.</p>
+            </div>
+          </div>
+        )}
           </>
         )}
 
