@@ -380,8 +380,8 @@ function renderRaceBox(
 	safeW: number,
 	s: ThemeStyler,
 ): string[] {
-	// Ancho interior de la mini-caja = innerW - 2 (42 caracteres de ancho exacto)
-	const boxW = Math.max(20, innerW - 2);
+	// Ancho exacto de la mini-caja = innerW (44 caracteres para safeW=48)
+	const boxW = Math.max(20, innerW);
 
 	// Línea 1: ╭─ 5 HORAS ────────────── Quedan 5h 0m ────╮
 	const leftTitle = `${s.border("╭─ ")}${s.accent(title)} ${s.border("─")}`;
@@ -411,13 +411,10 @@ function renderRaceBox(
 	// Línea 4: ╰──────────────────────────────────────────╯
 	const boxBot = `${s.border("╰" + "─".repeat(boxW - 2) + "╯")}`;
 
-	// Envolver cada línea dentro del contenedor de 48 columnas (innerW = safeW - 4 = 44)
-	// boxW = 42 -> 1 espacio a la izquierda, 1 espacio a la derecha -> total 44 de innerW
+	// Envolver cada línea para garantizar ancho safeW cerrado
 	const wrapInContainer = (content: string) => {
-		const totalPad = Math.max(0, innerW - visibleLen(content));
-		const padLeft = Math.floor(totalPad / 2);
-		const padRight = totalPad - padLeft;
-		return fitToWidth(`${s.border("│")}${" ".repeat(padLeft)}${content}${" ".repeat(padRight)}${s.border("│")}`, safeW);
+		const pad = Math.max(0, innerW - visibleLen(content));
+		return fitToWidth(`${s.border("│")} ${content}${" ".repeat(pad)} ${s.border("│")}`, safeW);
 	};
 
 	return [
@@ -712,9 +709,10 @@ export function formatSidebarQuotaCardLines(
 		];
 	}
 
-		// Línea de cabecera en 2 líneas
+		// Línea de cabecera en 2 líneas (con Enfoque acortado para no desbordar las 44 cols)
+		const compactApproach = approachVal.replace("Misma cuenta fija", "Cuenta fija");
 		const line2Left = `${s.muted("Cuentas:")} ${s.text(String(pair.totalAccounts))} ${s.slate("· listas")}`;
-		const line2Right = `${s.muted("Enfoque:")} ${s.text(approachVal)}`;
+		const line2Right = `${s.muted("Enfoque:")} ${s.text(compactApproach)}`;
 		const spL2 = Math.max(1, innerW - visibleLen(line2Left) - visibleLen(line2Right));
 		const line2 = fitToWidth(`${s.border("│")} ${line2Left}${" ".repeat(spL2)}${line2Right} ${s.border("│")}`, safeW);
 
