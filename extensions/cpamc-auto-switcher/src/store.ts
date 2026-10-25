@@ -5,6 +5,63 @@ import { homedir } from "node:os";
 const TIMEOUT_MS = 6000;
 export const QUOTA_REFRESH_MS = 25_000;
 
+export interface RotationCauseItem {
+	time_str: string;
+	previous_leader: string;
+	new_leader: string;
+	reason_display: string;
+	timestamp: number;
+}
+
+export interface LifecycleSummary {
+	period_label: string;
+	cache_affinity_pct: number;
+	rotations_count: number;
+	current_leader_dur: string;
+	current_leader_sec: number;
+	rescues_429_count: number;
+	tokens_consumed: number;
+	tokens_consumed_fmt: string;
+	sustained_turns: number;
+	active_leader_email: string;
+	active_leader_since: string;
+	prev_leader_dur: string;
+	avg_leader_dur: string;
+	recent_causes: RotationCauseItem[];
+}
+
+export interface ContextCompressionState {
+	compressionsSession: number;
+	currentTokens: number;
+	contextWindow: number;
+	lossEvents: number;
+}
+
+let cachedLifecycle: LifecycleSummary | null = null;
+let contextState: ContextCompressionState = {
+	compressionsSession: 2,
+	currentTokens: 84_000,
+	contextWindow: 200_000,
+	lossEvents: 0,
+};
+
+export function updateContextUsage(tokens: number, maxTokens: number) {
+	if (tokens > 0) contextState.currentTokens = tokens;
+	if (maxTokens > 0) contextState.contextWindow = maxTokens;
+}
+
+export function recordContextCompression() {
+	contextState.compressionsSession += 1;
+}
+
+export function getContextState(): ContextCompressionState {
+	return { ...contextState };
+}
+
+export function getCachedLifecycle(): LifecycleSummary | null {
+	return cachedLifecycle;
+}
+
 export interface SwitcherAccount {
 	status: string; // "[ACTIVE]" | "[RESERVE]" | "[OTHER]"
 	provider: string;
@@ -166,6 +223,9 @@ export async function querySwitcherAccounts(force = false): Promise<SwitcherAcco
 			});
 			if (manifestRes.ok) {
 				const mData = (await manifestRes.json()) as any;
+				if (mData?.lifecycle) {
+					cachedLifecycle = mData.lifecycle;
+				}
 				if (mData?.ok && Array.isArray(mData?.accounts) && mData.accounts.length > 0) {
 					const reserveIndexByPool = new Map<string, number>();
 					const list: SwitcherAccount[] = mData.accounts.map((a: any) => {

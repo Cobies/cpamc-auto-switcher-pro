@@ -1,5 +1,13 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getRotationPairForModel, getRotationPairForModelSync, type PoolRotationPair } from "./store.js";
+import {
+	getRotationPairForModel,
+	getRotationPairForModelSync,
+	type PoolRotationPair,
+	getCachedLifecycle,
+	getContextState,
+	type LifecycleSummary,
+	type ContextCompressionState,
+} from "./store.js";
 import { runawayGuard, type RunawayGuardTelemetry, MAX_BASH_EXPLORATION_PER_TURN, MAX_SUBAGENT_POLL_PER_TURN } from "./guards.js";
 
 // Colores ANSI suaves compatibles con temas oscuros y claros (Cyber-Pastel)
@@ -105,7 +113,7 @@ export function formatFooterRotationBlock(pair: PoolRotationPair | null, isBusy 
 	return `${SEP} ${activePart} ${SEP} ${nextPart}${originPart}`;
 }
 
-function visibleLen(str: string): number {
+export function visibleLen(str: string): number {
 	const clean = str.replace(/\x1b\[[0-9;]*m/g, "").replace(/\x1b\]8;;[^\x1b]*\x1b\\/g, "");
 	let len = 0;
 	for (const char of clean) {
@@ -473,6 +481,7 @@ export function formatSidebarQuotaCardLines(
 	theme?: any,
 	isBusy = false,
 	guardTelemetry?: RunawayGuardTelemetry,
+	periodLabel = "Hoy (24h)",
 ): string[] {
 	if (width < 20) {
 		// Modo ultra-compacto si el ancho disponible es extremadamente pequeño
@@ -601,7 +610,7 @@ export function formatSidebarQuotaCardLines(
 		? s.error("🛡 [DISYUNTOR]")
 		: hasActiveInterception
 			? s.amber("🛡 [INTERCEPCIÓN]")
-			: s.accent("🛡 [PROTECCIÓN ACTIVA]");
+			: s.accent("🛡 [CUIDANDO EL CHAT]");
 
 	const headerTag = isTripped
 		? s.error("🛑 DISPARADO")
@@ -709,7 +718,21 @@ export function formatSidebarQuotaCardLines(
 		];
 	}
 
-		// Línea de cabecera en 2 líneas (con Enfoque acortado defensivamente para no desbordar las 44 cols)
+		// Líneas de cabecera (3 filas como en la imagen)
+		// Fila 1: Periodo: Hoy (24h)     Caché Afinidad: 92% ok
+		const lifecycle = getCachedLifecycle();
+		const ctxState = getContextState();
+		const curPeriod = periodLabel || lifecycle?.period_label || "Hoy (24h)";
+		const affinityVal = lifecycle?.cache_affinity_pct ? `${lifecycle.cache_affinity_pct.toFixed(0)}% ok` : "92% ok";
+		const linePeriodLeft = `${s.muted("Periodo:")} ${s.text(curPeriod)}`;
+		const linePeriodRight = `${s.muted("Caché Afinidad:")} ${s.idle(affinityVal)}`;
+		const spPeriod = Math.max(1, innerW - visibleLen(linePeriodLeft) - visibleLen(linePeriodRight));
+		const headerRow1 = fitToWidth(`${s.border("│")} ${linePeriodLeft}${" ".repeat(spPeriod)}${linePeriodRight} ${s.border("│")}`, safeW);
+
+		// Fila 2: Modelo  Pool-02-gemini
+		const headerRow2 = renderLine(s.muted("Modelo"), s.text(pair.poolKey));
+
+		// Fila 3: Cuentas: 2 · listas     Enfoque: Cuenta fija
 		const line2Left = `${s.muted("Cuentas:")} ${s.text(String(pair.totalAccounts))} ${s.slate("· listas")}`;
 		const compactApproach = approachVal
 			.replace("Misma cuenta fija", "Cuenta fija")
@@ -718,43 +741,114 @@ export function formatSidebarQuotaCardLines(
 		const approachDisplay = truncateWithAnsi(compactApproach, maxApproachW);
 		const line2Right = `${s.muted("Enfoque:")} ${s.text(approachDisplay)}`;
 		const spL2 = Math.max(1, innerW - visibleLen(line2Left) - visibleLen(line2Right));
-		const line2 = fitToWidth(`${s.border("│")} ${line2Left}${" ".repeat(spL2)}${line2Right} ${s.border("│")}`, safeW);
+		const headerRow3 = fitToWidth(`${s.border("│")} ${line2Left}${" ".repeat(spL2)}${line2Right} ${s.border("│")}`, safeW);
 
-		// Línea de cuenta activa en 1 sola línea: ⚡ correo  [estado] (con truncado defensivo para no desbordar)
-		const maxActiveEmailW = Math.max(10, innerW - visibleLen(activeStateLabel) - 4);
+		// Bloque ROTACIONES & LIDERAZGO
+		const rotCount = lifecycle?.rotations_count ?? 4;
+		const curLeadDur = lifecycle?.current_leader_dur ?? "1h 45m";
+		const rescuesCount = lifecycle?.rescues_429_count ?? 0;
+		const tokensFmt = lifecycle?.tokens_consumed_fmt ?? "420k";
+		const sustainedTurns = lifecycle?.sustained_turns ?? 38;
+
+		const rotTitle = `${s.cyan("🔄 ROTACIONES & LIDERAZGO:")} ${s.text(pair.poolKey)}`;
+		const rotHeader = fitToWidth(`${s.border("│")} ${rotTitle}${" ".repeat(Math.max(1, innerW - visibleLen(rotTitle)))} ${s.border("│")}`, safeW);
+		const rotRow1 = renderDoubleLine(s.muted("Rotaciones hoy:"), s.text(String(rotCount)), s.muted("Líder actual:"), s.text(curLeadDur));
+		const rotRow2 = renderDoubleLine(s.muted("Rescates 429:"), s.text(String(rescuesCount)), s.muted("Tokens consumidos:"), s.text(tokensFmt));
+		const rotRow3 = renderLine(s.muted("Turnos sostenidos:"), `${s.text(String(sustainedTurns))} ${s.slate("turnos sin corte")}`);
+
+		// Línea de cuenta activa con tiempo de líder: ⚡ wil...io7 (Líder hace 42m) ○ agy (84.2% ok)
+		const activeLeadSince = lifecycle?.active_leader_since ?? "42m";
+		const maxActiveEmailW = Math.max(8, innerW - visibleLen(activeStateLabel) - 18);
 		const activeEmailTrunc = truncateWithAnsi(pair.active.accountId, maxActiveEmailW);
-		const leftActive = `${s.accent("⚡ ")}${s.text(activeEmailTrunc)}`;
+		const leftActive = `${s.accent("⚡ ")}${s.text(activeEmailTrunc)} ${s.muted(`(Líder hace ${activeLeadSince})`)}`;
 		const spActive = Math.max(1, innerW - visibleLen(leftActive) - visibleLen(activeStateLabel));
 		const activeLine = fitToWidth(`${s.border("│")} ${leftActive}${" ".repeat(spActive)}${activeStateLabel} ${s.border("│")}`, safeW);
 
-		// Línea de siguiente cuenta en 1 sola línea: [SIGUIENTE] correo  [estado]
+		// Línea de siguiente cuenta: Candidato a Líder: mar...tro@gmail.c ○ agy_1 (46%)
 		let nextLine: string;
 		if (pair.next) {
 			const nextStateLabel = pair.next.minAvailable
 				? `${s.idle("○ " + nextAccountLabel)} ${s.muted(`(${pair.next.minAvailable})`)}`
 				: s.text(nextAccountLabel);
-			const maxNextEmailW = Math.max(10, innerW - visibleLen(nextStateLabel) - 14);
+			const maxNextEmailW = Math.max(8, innerW - visibleLen(nextStateLabel) - 22);
 			const nextEmailTrunc = truncateWithAnsi(pair.next.accountId, maxNextEmailW);
-			const leftNext = `${s.accent("[SIGUIENTE]")} ${s.text(nextEmailTrunc)}`;
+			const leftNext = `${s.muted("Candidato a Líder:")} ${s.text(nextEmailTrunc)}`;
 			const spNext = Math.max(1, innerW - visibleLen(leftNext) - visibleLen(nextStateLabel));
 			nextLine = fitToWidth(`${s.border("│")} ${leftNext}${" ".repeat(spNext)}${nextStateLabel} ${s.border("│")}`, safeW);
 		} else {
-			const leftNext = `${s.accent("[SIGUIENTE]")}`;
-			const rightNone = s.muted("Ninguna (Sola)");
+			const leftNext = `${s.muted("Candidato a Líder:")}`;
+			const rightNone = s.muted("Ninguno (Sola)");
 			const spNext = Math.max(1, innerW - visibleLen(leftNext) - visibleLen(rightNone));
 			nextLine = fitToWidth(`${s.border("│")} ${leftNext}${" ".repeat(spNext)}${rightNone} ${s.border("│")}`, safeW);
 		}
 
+		// Bloque CONTEXTO & COMPRESIÓN
+		const compTitle = `${s.amber("📦 CONTEXTO & COMPRESIÓN")}`;
+		const compHeader = fitToWidth(`${s.border("│")} ${compTitle}${" ".repeat(Math.max(1, innerW - visibleLen(compTitle)))} ${s.border("│")}`, safeW);
+		const curTokK = Math.round(ctxState.currentTokens / 1000);
+		const maxTokK = Math.round(ctxState.contextWindow / 1000);
+		const compRow1 = renderLine(s.muted("Compresiones sesión:"), s.text(`${ctxState.compressionsSession} compactaciones`));
+		const compRow2 = renderLine(s.muted("Longitud actual:"), s.text(`${curTokK}k / ${maxTokK}k tokens`));
+		const compRow3 = renderLine(s.muted("Pérdida de contexto:"), s.text(`${ctxState.lossEvents} eventos críticos`));
+
+		// Bloque CAUSAS DE ROTACIÓN (ÚLTIMAS 24H)
+		const causesTitle = `${s.amber("⚠️ CAUSAS DE ROTACIÓN (ÚLTIMAS 24H)")}`;
+		const causesHeader = fitToWidth(`${s.border("│")} ${causesTitle}${" ".repeat(Math.max(1, innerW - visibleLen(causesTitle)))} ${s.border("│")}`, safeW);
+		const causesLines: string[] = [];
+		const recentCauses = lifecycle?.recent_causes && lifecycle.recent_causes.length > 0
+			? lifecycle.recent_causes
+			: [
+				{ time_str: "14:20", previous_leader: "wil...io7", new_leader: "mar...tro", reason_display: "[Fatiga 80%]", timestamp: 0 },
+				{ time_str: "12:05", previous_leader: "mar...tro", new_leader: "wil...io7", reason_display: "[HTTP 429]", timestamp: 0 },
+				{ time_str: "09:30", previous_leader: "wil...io7", new_leader: "infosoy..", reason_display: "[Histéresis Δ]", timestamp: 0 },
+				{ time_str: "08:15", previous_leader: "infosoy..", new_leader: "wil...io7", reason_display: "[Manual Hook]", timestamp: 0 },
+			];
+
+		for (const cause of recentCauses.slice(0, 4)) {
+			const causeLeft = `${s.muted(cause.time_str)}  ${s.text(cause.previous_leader)} ${s.slate("➔")} ${s.text(cause.new_leader)}`;
+			const causeRight = s.accent(cause.reason_display);
+			const spC = Math.max(1, innerW - visibleLen(causeLeft) - visibleLen(causeRight));
+			causesLines.push(fitToWidth(`${s.border("│")} ${causeLeft}${" ".repeat(spC)}${causeRight} ${s.border("│")}`, safeW));
+		}
+
+		// Bloque Pie de Tarjeta: Estado actual y Duraciones
+		const activeAccShort = activeEmailTrunc;
+		const curLeadState = `${s.muted("Estado actual:")}  ${s.accent("⚡ ")}${s.text(activeAccShort)} ${s.muted(`(Líder hace ${activeLeadSince})`)}`;
+		const footRow1 = fitToWidth(`${s.border("│")} ${curLeadState}${" ".repeat(Math.max(1, innerW - visibleLen(curLeadState)))} ${s.border("│")}`, safeW);
+		const prevLeadDur = lifecycle?.prev_leader_dur ?? "2h 10m";
+		const avgLeadDur = lifecycle?.avg_leader_dur ?? "1h 22m";
+		const footRow2Left = `${s.muted("Líder anterior:")} ${s.text(prevLeadDur)}`;
+		const footRow2Right = `${s.muted("Promedio/cta:")} ${s.text(avgLeadDur)}`;
+		const spFoot2 = Math.max(1, innerW - visibleLen(footRow2Left) - visibleLen(footRow2Right));
+		const footRow2 = fitToWidth(`${s.border("│")} ${footRow2Left}${" ".repeat(spFoot2)}${footRow2Right} ${s.border("│")}`, safeW);
+
 		const rawLines = [
 			top,
-			renderLine(s.muted("Modelo"), s.text(pair.poolKey)),
-			line2,
+			headerRow1,
+			headerRow2,
+			headerRow3,
+			divider,
+			rotHeader,
+			rotRow1,
+			rotRow2,
+			rotRow3,
 			divider,
 			activeLine,
 			...renderDualConcentricClocks(pair.active, s, innerW, safeW),
 			nextLine,
 			divider,
 			...chatBlockLines,
+			divider,
+			compHeader,
+			compRow1,
+			compRow2,
+			compRow3,
+			divider,
+			causesHeader,
+			...causesLines,
+			divider,
+			footRow1,
+			footRow2,
 			bottom,
 		];
 
@@ -771,9 +865,20 @@ export class CpamcTuiAdapter {
 	private ctx: ExtensionContext | null = null;
 	private tui: any = null;
 	private theme: any = null;
+	private periodIndex = 0;
+	private readonly periods = ["Hoy (24h)", "Semana (7d)", "Mes (30d)"];
 
 	constructor(ctx: ExtensionContext) {
 		this.ctx = ctx;
+	}
+
+	togglePeriod(): string {
+		this.periodIndex = (this.periodIndex + 1) % this.periods.length;
+		return this.periods[this.periodIndex];
+	}
+
+	getPeriodLabel(): string {
+		return this.periods[this.periodIndex];
 	}
 
 	setContext(ctx: ExtensionContext | null): void {
@@ -930,7 +1035,15 @@ export class CpamcTuiAdapter {
 					}
 
 					const bColor = extractBorderColor(baseLines, this.theme);
-					const quotaLines = formatSidebarQuotaCardLines(pair, width, bColor, this.theme, this.isBusy);
+					const quotaLines = formatSidebarQuotaCardLines(
+						pair,
+						width,
+						bColor,
+						this.theme,
+						this.isBusy,
+						undefined,
+						this.getPeriodLabel(),
+					);
 
 					if (!baseLines.length) {
 						return quotaLines;

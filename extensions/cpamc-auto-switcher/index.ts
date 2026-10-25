@@ -9,7 +9,7 @@ import { initFailoverHook, scheduleAutoSwitcher } from "./src/failover.js";
 import { registerModelPicker } from "./src/picker.js";
 import { registerAgentMatrixCommand } from "./src/matrix-command.js";
 import { CpamcTuiAdapter } from "./src/adapter.js";
-import { querySwitcherAccounts, checkProactivePoolRebalance, applyOptimisticQuotaDecrement, getRotationPairForModelSync } from "./src/store.js";
+import { querySwitcherAccounts, checkProactivePoolRebalance, applyOptimisticQuotaDecrement, getRotationPairForModelSync, updateContextUsage, recordContextCompression } from "./src/store.js";
 import { saveProjectModel, getProjectModel, clearProjectModel } from "./src/project-model-store.js";
 import { runawayGuard } from "./src/guards.js";
 
@@ -193,7 +193,44 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 		},
 	});
 
-	// 4. Adaptador reactivo de UI (Sidebar QuotaCard + Footer)
+	// 3e. Comando para alternar el periodo de telemetría de ciclo de vida (Hoy -> Semana -> Mes)
+	pi.registerCommand("switcher-period", {
+		description: "Alterna el período de telemetría de ciclo de vida: Hoy (24h) -> Semana (7d) -> Mes (30d)",
+		handler: async (_args, ctx) => {
+			adapter?.togglePeriod();
+			await adapter?.update(true, ctx);
+			if (ctx.hasUI) {
+				ctx.ui.notify?.(`📊 Período de ciclo de vida actualizado`, "info");
+			}
+		},
+	});
+
+	// Atajo de teclado para alternar período con 1 clic (Ctrl+Alt+P)
+	pi.registerShortcut("ctrl+alt+p", {
+		description: "Alternar período de telemetría en el sidebar",
+		handler: async (ctx) => {
+			adapter?.togglePeriod();
+			await adapter?.update(true, ctx);
+		},
+	});
+
+	// 3f. Captura en caliente de eventos de compresión y uso de tokens de contexto
+	pi.on("session_compact", (_event, _ctx) => {
+		recordContextCompression();
+		if (adapter) {
+			void adapter.update(false, _ctx);
+		}
+	});
+
+	pi.on("turn_end", (_event, ctx) => {
+		try {
+			const usage = ctx.getContextUsage?.();
+			if (usage && typeof usage.tokens === "number") {
+				updateContextUsage(usage.tokens, usage.contextWindow || 200_000);
+			}
+		} catch {}
+	});
+
 	let adapter: CpamcTuiAdapter | null = null;
 	let timer: NodeJS.Timeout | null = null;
 	let epochWatchers: Array<ReturnType<typeof watch>> = [];

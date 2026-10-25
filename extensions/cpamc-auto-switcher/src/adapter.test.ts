@@ -37,6 +37,7 @@ const {
 	calculateQuotaPace,
 	parseConsumedNumber,
 	stripAnsi,
+	visibleLen,
 } = await import("./adapter.js");
 import type { PoolRotationPair } from "./store.js";
 
@@ -142,8 +143,8 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		assert.match(text, /Uso/);
 		assert.match(text, /90% libre/);
 		assert.match(text, /Ritmo/);
-		assert.match(text, /\[SIGUIENTE\]\s+acc-2/);
-		assert.match(text, /\[PROTECCIÓN ACTIVA\]/);
+		assert.match(text, /Candidato a Líder:\s+acc-2/);
+		assert.match(text, /\[CUIDANDO EL CHAT\]/);
 		assert.match(text, /● En guardia/);
 		assert.match(text, /Turno en vivo:/);
 		assert.match(text, /0\/15 acciones/);
@@ -159,7 +160,7 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		const lines = formatSidebarQuotaCardLines(mockPoolPair, 48, undefined, undefined, true);
 		const text = lines.map((l: string) => stripAnsi(l)).join("\n");
 		assert.match(text, /\[● Escribiendo\]/);
-		assert.match(text, /\[PROTECCIÓN ACTIVA\]/);
+		assert.match(text, /\[CUIDANDO EL CHAT\]/);
 		assert.match(text, /⚡ Monitoreando turno/);
 	});
 
@@ -310,5 +311,14 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		assert.equal(pace.consumedPct, 0);
 		assert.equal(pace.remainingPct, 100);
 		assert.equal(pace.remainingFormatted, "5h 0m");
+	});
+
+	it("renders unified sidebar card perfectly aligned to 48 columns matching reference screenshot", () => {
+		const lines = formatSidebarQuotaCardLines(mockPoolPair, 48);
+		assert.strictEqual(lines.length >= 25, true);
+		lines.forEach((l: string, idx: number) => {
+			const len = visibleLen(l);
+			assert.strictEqual(len, 48, `Fila ${idx} debe tener exactamente 48 caracteres visibles (actual: ${len}): "${stripAnsi(l)}"`);
+		});
 	});
 });

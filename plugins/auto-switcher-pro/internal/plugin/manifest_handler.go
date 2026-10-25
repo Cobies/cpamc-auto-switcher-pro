@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"auto-switcher-pro/internal/analytics"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -27,6 +28,7 @@ type ManifestResponse struct {
 	Pools     []PoolDefinition         `json:"pools"`
 	Telemetry []AccountQuotaTelemetry  `json:"telemetry"`
 	Accounts  []ManifestAccountSummary `json:"accounts"`
+	Lifecycle *analytics.LifecycleSummary `json:"lifecycle,omitempty"`
 }
 
 type ManifestAccountSummary struct {
@@ -145,6 +147,13 @@ func handleManifestHTTP(req ManagementRequestPayload) ([]byte, error) {
 		}
 	}
 
+	// Computar LifecycleSummary para la tarjeta unificada TUI
+	targetPoolID := ""
+	if len(pools) > 0 {
+		targetPoolID = pools[0].ID
+	}
+	lifecycleSumm, _ := analytics.GetLifecycleSummary(targetPoolID, "24h")
+
 	resp := ManifestResponse{
 		OK:        true,
 		Timestamp: time.Now().Unix(),
@@ -152,6 +161,7 @@ func handleManifestHTTP(req ManagementRequestPayload) ([]byte, error) {
 		Pools:     pools,
 		Telemetry: liveQuotas,
 		Accounts:  accountSummaries,
+		Lifecycle: lifecycleSumm,
 	}
 
 	return jsonManagementResponse(http.StatusOK, resp)
