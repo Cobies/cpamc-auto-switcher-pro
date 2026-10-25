@@ -66,9 +66,9 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 			"metadata": map[string]any{
 				"Name":             "Auto switcher pro",
 				"Version":          version.Version,
-				"Author":           "gonzalez962",
+				"Author":           "WiloxDev",
 				"Description":      "Auto Switcher Pro: Infrastructure Control, Visual Profile Topology & Pulse Tokens Telemetry",
-				"GitHubRepository": "https://github.com/gonzalez962/cpamc-auto-switcher",
+				"GitHubRepository": "https://github.com/WiloxDev/cpamc-auto-switcher-pro",
 				"Logo":             "",
 				"ConfigFields":     []any{},
 			},

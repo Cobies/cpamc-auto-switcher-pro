@@ -46,11 +46,11 @@ func TestPluginMetadataAndRegistration(t *testing.T) {
 	if payload.Metadata.Version != version.Version {
 		t.Errorf("expected plugin version %q, got %q", version.Version, payload.Metadata.Version)
 	}
-	if payload.Metadata.Author != "gonzalez962" {
-		t.Errorf("expected author 'gonzalez962', got %q", payload.Metadata.Author)
+	if payload.Metadata.Author != "WiloxDev" {
+		t.Errorf("expected author 'WiloxDev', got %q", payload.Metadata.Author)
 	}
-	if payload.Metadata.GitHubRepository != "https://github.com/gonzalez962/cpamc-auto-switcher" {
-		t.Errorf("expected GitHubRepository 'https://github.com/gonzalez962/cpamc-auto-switcher', got %q", payload.Metadata.GitHubRepository)
+	if payload.Metadata.GitHubRepository != "https://github.com/WiloxDev/cpamc-auto-switcher-pro" {
+		t.Errorf("expected GitHubRepository 'https://github.com/WiloxDev/cpamc-auto-switcher-pro', got %q", payload.Metadata.GitHubRepository)
 	}
 }
 

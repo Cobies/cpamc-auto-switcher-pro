@@ -237,7 +237,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 echo "==> Descargando suite de extensión desde CPAMC / GitHub..."
 
 if command -v git >/dev/null 2>&1; then
-    git clone --depth 1 https://github.com/gonzalez962/cpamc-auto-switcher.git "$TMP_DIR/repo" 2>/dev/null || true
+    git clone --depth 1 https://github.com/WiloxDev/cpamc-auto-switcher-pro.git "$TMP_DIR/repo" 2>/dev/null || true
 fi
 
 if [ -d "$TMP_DIR/repo/extensions/cpamc-auto-switcher" ]; then
