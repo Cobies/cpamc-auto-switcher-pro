@@ -30,7 +30,14 @@ export async function resolve(specifier, context, nextResolve) {
 
 register("data:text/javascript," + encodeURIComponent(loaderCode));
 
-const { CpamcTuiAdapter, formatFooterRotationBlock, formatSidebarQuotaCardLines, stripAnsi } = await import("./adapter.js");
+const {
+	CpamcTuiAdapter,
+	formatFooterRotationBlock,
+	formatSidebarQuotaCardLines,
+	calculateQuotaPace,
+	parseConsumedNumber,
+	stripAnsi,
+} = await import("./adapter.js");
 import type { PoolRotationPair } from "./store.js";
 
 describe("Adapter Footer Formatting & Origin Indicator", () => {
@@ -127,8 +134,12 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		const text = lines.map((l: string) => stripAnsi(l)).join("\n");
 		assert.match(text, /\[TRABAJANDO AHORA\]/);
 		assert.match(text, /Correo\s+acc-1/);
-		assert.match(text, /Consumido 5h:\s+10\/100/);
-		assert.match(text, /Consumido Sem:\s+50\/500/);
+		assert.match(text, /Ventana de 5 horas/);
+		assert.match(text, /Semanal/);
+		assert.match(text, /quedan/);
+		assert.match(text, /10% uso/);
+		assert.match(text, /90% restante/);
+		assert.match(text, /Ritmo/);
 		assert.match(text, /\[SIGUIENTE EN FILA\]/);
 		assert.match(text, /Correo\s+acc-2/);
 		assert.match(text, /\[CUIDANDO EL CHAT\]/);
@@ -240,5 +251,60 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		const digestStr = quotaWidget.digest();
 		assert.equal(typeof digestStr, "string");
 		assert.ok(digestStr.includes("none"));
+	});
+
+	it("satisfies Acceptance Criteria 1: 40% time elapsed and 25% consumed -> Ritmo holgado", () => {
+		const dummyStyler: any = {
+			easy: (t: string) => t,
+			amber: (t: string) => t,
+			error: (t: string) => t,
+		};
+		// total 300 mins (18000s), 40% elapsed means 60% remaining = 18000 * 0.6 = 10800s
+		const pace = calculateQuotaPace("25%", 10800, 300, dummyStyler);
+		assert.equal(pace.state, "easy");
+		assert.match(pace.pillLabel, /Ritmo holgado/);
+		assert.equal(pace.consumedPct, 25);
+		assert.equal(pace.remainingPct, 75);
+	});
+
+	it("satisfies Acceptance Criteria 2: 30% time elapsed and 62% consumed -> Vas muy rápido", () => {
+		const dummyStyler: any = {
+			easy: (t: string) => t,
+			amber: (t: string) => t,
+			error: (t: string) => t,
+		};
+		// total 300 mins (18000s), 30% elapsed means 70% remaining = 18000 * 0.7 = 12600s
+		const pace = calculateQuotaPace("62%", 12600, 300, dummyStyler);
+		assert.equal(pace.state, "fast");
+		assert.match(pace.pillLabel, /Vas muy rápido/);
+		assert.equal(pace.consumedPct, 62);
+		assert.equal(pace.remainingPct, 38);
+	});
+
+	it("satisfies Acceptance Criteria 3: 100% consumed before reset -> Cuota agotada", () => {
+		const dummyStyler: any = {
+			easy: (t: string) => t,
+			amber: (t: string) => t,
+			error: (t: string) => t,
+		};
+		const pace = calculateQuotaPace("100%", 7200, 300, dummyStyler);
+		assert.equal(pace.state, "exhausted");
+		assert.match(pace.pillLabel, /Cuota agotada/);
+		assert.equal(pace.consumedPct, 100);
+		assert.equal(pace.remainingPct, 0);
+	});
+
+	it("satisfies Acceptance Criteria 4: 5h 0m remaining and 0% consumed -> Ritmo holgado and clock empty", () => {
+		const dummyStyler: any = {
+			easy: (t: string) => t,
+			amber: (t: string) => t,
+			error: (t: string) => t,
+		};
+		const pace = calculateQuotaPace("0%", 18000, 300, dummyStyler);
+		assert.equal(pace.state, "easy");
+		assert.match(pace.pillLabel, /Ritmo holgado/);
+		assert.equal(pace.consumedPct, 0);
+		assert.equal(pace.remainingPct, 100);
+		assert.equal(pace.remainingFormatted, "5h 0m");
 	});
 });

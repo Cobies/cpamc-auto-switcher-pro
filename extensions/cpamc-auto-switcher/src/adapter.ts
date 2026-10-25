@@ -140,6 +140,10 @@ interface ThemeStyler {
 	idle(text: string): string;
 	live(text: string): string;
 	amber(text: string): string;
+	cyan(text: string): string;
+	boldWhite(text: string): string;
+	easy(text: string): string;
+	slate(text: string): string;
 	paintGauge(percentStr: string, cells?: number, isAmber?: boolean): string;
 }
 
@@ -164,13 +168,13 @@ function createThemeStyler(theme?: any, fallbackBorder = "\x1b[38;2;120;153;166m
 			case "warning":
 				return `\x1b[38;2;229;181;103m${t}${RESET}`;
 			case "error":
-				return `\x1b[38;2;222;116;155m${t}${RESET}`;
+				return `\x1b[1;38;2;239;68;68m${t}${RESET}`;
 			case "idle":
 				return `\x1b[38;2;120;175;135m${t}${RESET}`; // Verde suave / oliva tenue
 			case "live":
 				return `\x1b[1;38;2;123;220;143m${t}${RESET}`; // Verde menta neón brillante
 			case "amber":
-				return `\x1b[38;2;229;181;103m${t}${RESET}`; // Ámbar dorado de aviso
+				return `\x1b[1;38;2;245;158;11m${t}${RESET}`; // Ámbar dorado de aviso
 			case "text":
 			default:
 				return `\x1b[38;2;230;235;240m${t}${RESET}`;
@@ -187,6 +191,10 @@ function createThemeStyler(theme?: any, fallbackBorder = "\x1b[38;2;120;153;166m
 		idle: (t) => fg("idle", t),
 		live: (t) => fg("live", t),
 		amber: (t) => fg("amber", t),
+		cyan: (t) => `\x1b[38;2;56;189;248m${t}${RESET}`,
+		boldWhite: (t) => `\x1b[1;38;2;248;250;252m${t}${RESET}`,
+		easy: (t) => `\x1b[1;38;2;34;197;94m${t}${RESET}`,
+		slate: (t) => `\x1b[38;2;148;163;184m${t}${RESET}`,
 		paintGauge: (percentStr: string, cells = 6, isAmber = false) => {
 			const num = Number.parseFloat(percentStr.replace("%", "").trim()) || 0;
 			const filled = Math.min(cells, Math.max(0, Math.round((num / 100) * cells)));
@@ -195,6 +203,198 @@ function createThemeStyler(theme?: any, fallbackBorder = "\x1b[38;2;120;153;166m
 			return fg(tone, "▰".repeat(filled)) + fg("border", "▱".repeat(empty));
 		},
 	};
+}
+
+export interface QuotaPaceInfo {
+	state: "easy" | "moderate" | "fast" | "exhausted";
+	pillLabel: string;
+	pillColor: (t: string) => string;
+	ringColor: (t: string) => string;
+	remainingFormatted: string;
+	consumedPct: number;
+	remainingPct: number;
+	needlePos: "top" | "right" | "bottom" | "left";
+}
+
+export function parseConsumedNumber(consumedStr: string): number {
+	if (!consumedStr) return 0;
+	const clean = consumedStr.trim();
+	if (clean.includes("/")) {
+		const parts = clean.split("/");
+		const n = Number.parseFloat(parts[0]);
+		const d = Number.parseFloat(parts[1]);
+		if (!Number.isNaN(n) && !Number.isNaN(d) && d > 0) {
+			return Math.max(0, Math.min(100, Math.round((n / d) * 100)));
+		}
+	}
+	const n = Number.parseFloat(clean.replace("%", ""));
+	return Number.isNaN(n) ? 0 : Math.max(0, Math.min(100, Math.round(n)));
+}
+
+export function calculateQuotaPace(
+	consumedStr: string,
+	remainingSec: number | undefined,
+	totalMinutes: number,
+	s: ThemeStyler,
+): QuotaPaceInfo {
+	const consumedPct = parseConsumedNumber(consumedStr);
+	const remainingPct = Math.max(0, 100 - consumedPct);
+	const totalSec = totalMinutes * 60;
+	const isWeekly = totalMinutes > 300;
+
+	let timeElapsedPct = 0;
+	let remSec = remainingSec;
+
+	if (typeof remainingSec === "number" && remainingSec >= 0) {
+		const elapsed = Math.max(0, Math.min(totalSec, totalSec - remainingSec));
+		timeElapsedPct = (elapsed / totalSec) * 100;
+	} else {
+		remSec = totalSec;
+		timeElapsedPct = 0;
+	}
+
+	let remainingFormatted = "—";
+	if (typeof remSec === "number" && remSec >= 0) {
+		const mins = Math.max(0, Math.round(remSec / 60));
+		const days = Math.floor(mins / 1440);
+		const hours = Math.floor((mins % 1440) / 60);
+		const remMins = mins % 60;
+		if (isWeekly && days > 0) {
+			remainingFormatted = `${days}d ${hours}h`;
+		} else if (days > 0) {
+			remainingFormatted = `${days}d ${hours}h`;
+		} else if (hours > 0) {
+			remainingFormatted = `${hours}h ${remMins}m`;
+		} else {
+			remainingFormatted = `${remMins}m`;
+		}
+	}
+
+	const diff = consumedPct - timeElapsedPct;
+	let state: "easy" | "moderate" | "fast" | "exhausted" = "easy";
+	let pillLabel = "● Ritmo holgado";
+	let pillColor = s.easy;
+	let ringColor = s.easy;
+
+	if (consumedPct >= 100) {
+		state = "exhausted";
+		pillLabel = "🛑 Cuota agotada";
+		pillColor = s.error;
+		ringColor = s.error;
+	} else if (diff <= 5) {
+		state = "easy";
+		pillLabel = "● Ritmo holgado";
+		pillColor = s.easy;
+		ringColor = s.easy;
+	} else if (diff <= 20) {
+		state = "moderate";
+		pillLabel = "▲ Ritmo ajustado";
+		pillColor = s.amber;
+		ringColor = s.amber;
+	} else {
+		state = "fast";
+		pillLabel = "🛑 Vas muy rápido";
+		pillColor = s.error;
+		ringColor = s.error;
+	}
+
+	let needlePos: "top" | "right" | "bottom" | "left" = "right";
+	if (timeElapsedPct < 15) needlePos = "top";
+	else if (timeElapsedPct < 45) needlePos = "right";
+	else if (timeElapsedPct < 75) needlePos = "bottom";
+	else needlePos = "left";
+
+	return {
+		state,
+		pillLabel,
+		pillColor,
+		ringColor,
+		remainingFormatted,
+		consumedPct,
+		remainingPct,
+		needlePos,
+	};
+}
+
+function centerAnsi(text: string, width: number): string {
+	const vLen = visibleLen(text);
+	if (vLen >= width) return text;
+	const totalPad = width - vLen;
+	const leftPad = Math.floor(totalPad / 2);
+	const rightPad = totalPad - leftPad;
+	return " ".repeat(leftPad) + text + " ".repeat(rightPad);
+}
+
+function buildClockColumnLines(
+	title: string,
+	subtitle: string,
+	pace: QuotaPaceInfo,
+	colW: number,
+	s: ThemeStyler,
+): string[] {
+	const needleChar = s.boldWhite("●");
+	const cian = s.cyan;
+	const ring = pace.ringColor;
+
+	const l0 = centerAnsi(s.boldWhite(title), colW);
+	const l1 = centerAnsi(s.slate(subtitle), colW);
+
+	const topArc = pace.needlePos === "top"
+		? `${cian("╭─────")}${needleChar}${cian("─────╮")}`
+		: cian("╭───────────╮");
+	const l2 = centerAnsi(topArc, colW);
+
+	const leftTop = cian("╭╯");
+	const rightTop = cian("╰╮");
+	const innerTop = `${ring("◜")} ${s.muted("quedan ")} ${ring("◝")}`;
+	const l3 = centerAnsi(`${leftTop} ${innerTop} ${rightTop}`, colW);
+
+	const leftNeedle = pace.needlePos === "left" ? needleChar : " ";
+	const rightNeedle = pace.needlePos === "right" ? needleChar : " ";
+	const timeStr = centerAnsi(pace.remainingFormatted, 6);
+	const l4 = centerAnsi(`${cian("│")} ${leftNeedle}${ring("│")} ${s.boldWhite(timeStr)} ${ring("│")}  ${rightNeedle}${cian("│")}`, colW);
+
+	const leftBottom = cian("╰╮");
+	const rightBottom = cian("╭╯");
+	const useStr = centerAnsi(`${pace.consumedPct}% uso`, 7);
+	const innerBottom = `${ring("◟")} ${ring(useStr)} ${ring("◞")}`;
+	const l5 = centerAnsi(`${leftBottom} ${innerBottom} ${rightBottom}`, colW);
+
+	const bottomArc = pace.needlePos === "bottom"
+		? `${cian("╰─────")}${needleChar}${cian("─────╯")}`
+		: cian("╰───────────╯");
+	const l6 = centerAnsi(bottomArc, colW);
+
+	const pillContent = `${pace.pillColor("╭─ ")}${pace.pillColor(pace.pillLabel)}${pace.pillColor(" ─╮")}`;
+	const l7 = centerAnsi(pillContent, colW);
+
+	const remStr = `${pace.remainingPct}% restante`;
+	const l8 = centerAnsi(s.slate(remStr), colW);
+
+	return [l0, l1, l2, l3, l4, l5, l6, l7, l8];
+}
+
+export function renderDualConcentricClocks(
+	acc: { consumed5h?: string; consumedWeekly?: string; reset5hInSec?: number; resetWeeklyInSec?: number },
+	s: ThemeStyler,
+	innerW: number,
+	safeW: number,
+): string[] {
+	const col1W = Math.floor((innerW - 1) / 2);
+	const col2W = innerW - col1W - 1;
+
+	const pace5h = calculateQuotaPace(acc.consumed5h || "0%", acc.reset5hInSec, 300, s);
+	const paceWk = calculateQuotaPace(acc.consumedWeekly || "0%", acc.resetWeeklyInSec, 10080, s);
+
+	const lines5h = buildClockColumnLines("Ventana de 5 horas", "Límite de 5 horas", pace5h, col1W, s);
+	const linesWk = buildClockColumnLines("Semanal", "Límite semanal", paceWk, col2W, s);
+
+	const out: string[] = [];
+	for (let i = 0; i < lines5h.length; i++) {
+		const combined = `${s.border("│")}${lines5h[i]}${s.border("│")}${linesWk[i]}${s.border("│")}`;
+		out.push(fitToWidth(combined, safeW));
+	}
+	return out;
 }
 
 function extractBorderColor(lines: string[], theme?: any): string {
@@ -293,8 +493,8 @@ export function formatSidebarQuotaCardLines(
 			divider,
 			renderLine(s.accent("[TRABAJANDO AHORA]"), `${s.text(activeAccountLabel)} ${s.idle(`(${pair.active.minAvailable} ok)`)}`),
 			renderLine(s.muted("Correo"), s.text(pair.active.accountId)),
-			renderLine(s.muted(`Cuota 5h: ${pair.active.consumed5h}`), bar5h),
-			renderLine(s.muted(`Cuota Sem: ${pair.active.consumedWeekly}`), barWk),
+			divider,
+			...renderDualConcentricClocks(pair.active, s, innerW, safeW),
 			bottom,
 		];
 		return rawLines.map((line) => fitToWidth(line, safeW));
@@ -474,8 +674,8 @@ export function formatSidebarQuotaCardLines(
 		divider,
 		renderLine(s.accent("[TRABAJANDO AHORA]"), activeStateLabel),
 		renderLine(s.muted("Correo"), s.text(pair.active.accountId)),
-		renderLine(s.muted(`Consumido 5h: ${pair.active.consumed5h}`), bar5h),
-		renderLine(s.muted(`Consumido Sem: ${pair.active.consumedWeekly}`), barWk),
+		divider,
+		...renderDualConcentricClocks(pair.active, s, innerW, safeW),
 		divider,
 		renderLine(
 			s.accent("[SIGUIENTE EN FILA]"),

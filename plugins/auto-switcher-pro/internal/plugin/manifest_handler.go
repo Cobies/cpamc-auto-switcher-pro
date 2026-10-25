@@ -34,10 +34,12 @@ type ManifestAccountSummary struct {
 	Email       string  `json:"email"`
 	PoolID      string  `json:"pool_id,omitempty"`
 	BasePrefix  string  `json:"base_prefix,omitempty"`
-	Role        string  `json:"role"` // "leader", "reserve", "unassigned"
-	Window5hPct float64 `json:"window_5h_pct"`
-	WeeklyPct   float64 `json:"weekly_pct"`
-	IsCooling   bool    `json:"is_cooling"`
+	Role            string  `json:"role"` // "leader", "reserve", "unassigned"
+	Window5hPct     float64 `json:"window_5h_pct"`
+	WeeklyPct       float64 `json:"weekly_pct"`
+	Window5hResetIn int64   `json:"window_5h_reset_in"`
+	WeeklyResetIn   int64   `json:"weekly_reset_in"`
+	IsCooling       bool    `json:"is_cooling"`
 	FatiguePct  float64 `json:"fatigue_pct"`
 }
 
@@ -118,21 +120,27 @@ func handleManifestHTTP(req ManagementRequestPayload) ([]byte, error) {
 
 			w5h := 95.0
 			wWeekly := 95.0
+			var w5hResetIn int64
+			var wWeeklyResetIn int64
 			if !q.UpdatedAt.IsZero() {
 				w5h = q.Window5hPct
 				wWeekly = q.WeeklyPct
+				w5hResetIn = q.Window5hResetIn
+				wWeeklyResetIn = q.WeeklyResetIn
 			}
 
 			accountSummaries = append(accountSummaries, ManifestAccountSummary{
-				AccountKey:  cleanAuth,
-				Email:       email,
-				PoolID:      p.ID,
-				BasePrefix:  p.BasePrefix,
-				Role:        role,
-				Window5hPct: w5h,
-				WeeklyPct:   wWeekly,
-				IsCooling:   isCooling,
-				FatiguePct:  fatigue,
+				AccountKey:      cleanAuth,
+				Email:           email,
+				PoolID:          p.ID,
+				BasePrefix:      p.BasePrefix,
+				Role:            role,
+				Window5hPct:     w5h,
+				WeeklyPct:       wWeekly,
+				Window5hResetIn: w5hResetIn,
+				WeeklyResetIn:   wWeeklyResetIn,
+				IsCooling:       isCooling,
+				FatiguePct:      fatigue,
 			})
 		}
 	}

@@ -14,6 +14,8 @@ export interface SwitcherAccount {
 	consumed5h: string;
 	consumedWeekly: string;
 	minAvailable: string;
+	reset5hInSec?: number;
+	resetWeeklyInSec?: number;
 }
 
 export interface PoolRotationPair {
@@ -181,6 +183,8 @@ export async function querySwitcherAccounts(force = false): Promise<SwitcherAcco
 						const minPct = Math.round(Math.min(w5h, wWk));
 						const c5h = Math.max(0, Math.min(100, Math.round(100 - w5h)));
 						const cWk = Math.max(0, Math.min(100, Math.round(100 - wWk)));
+						const reset5h = typeof a.window_5h_reset_in === "number" ? a.window_5h_reset_in : undefined;
+						const resetWk = typeof a.weekly_reset_in === "number" ? a.weekly_reset_in : undefined;
 
 						return {
 							status: isLeader ? "[ACTIVE]" : "[RESERVE]",
@@ -191,6 +195,8 @@ export async function querySwitcherAccounts(force = false): Promise<SwitcherAcco
 							consumed5h: `${c5h}%`,
 							consumedWeekly: `${cWk}%`,
 							minAvailable: `${minPct}%`,
+							reset5hInSec: reset5h,
+							resetWeeklyInSec: resetWk,
 						};
 					});
 					if (list.length > 0) {
