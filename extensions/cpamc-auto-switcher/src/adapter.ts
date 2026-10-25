@@ -213,6 +213,7 @@ export interface QuotaPaceInfo {
 	remainingFormatted: string;
 	consumedPct: number;
 	remainingPct: number;
+	timeElapsedPct: number;
 	needlePos: "top" | "right" | "bottom" | "left";
 }
 
@@ -312,6 +313,7 @@ export function calculateQuotaPace(
 		remainingFormatted,
 		consumedPct,
 		remainingPct,
+		timeElapsedPct,
 		needlePos,
 	};
 }
@@ -325,53 +327,81 @@ function centerAnsi(text: string, width: number): string {
 	return " ".repeat(leftPad) + text + " ".repeat(rightPad);
 }
 
-function buildClockColumnLines(
+// Paleta de espectro de celdas idéntica a Context en la prompt bar (#4ADE80 -> #EF4444)
+const SPECTRUM_CELL_COLORS: readonly (readonly [number, number, number])[] = [
+	[74, 222, 128],  // 1: #4ADE80 Verde Esmeralda (0-12%)
+	[132, 204, 22],  // 2: #84CC16 Verde Lima (13-25%)
+	[163, 230, 53],  // 3: #A3E635 Lima Brillante (26-37%)
+	[234, 179, 8],   // 4: #EAB308 Amarillo Cálido (38-50%)
+	[245, 158, 11],  // 5: #F59E0B Ámbar / Oro (51-62%)
+	[249, 115, 22],  // 6: #F97316 Naranja Alerta (63-75%)
+	[239, 68, 68],   // 7: #EF4444 Rojo Alerta (76-87%)
+	[220, 38, 38],   // 8: #DC2626 Rojo Fuego Máximo (88-100%)
+];
+
+const EMPTY_CELL_COLOR: readonly [number, number, number] = [70, 85, 100]; // Gris metálico carril
+
+function renderSpectralGauge(pct: number, cells = 10): string {
+	const clamped = Math.max(0, Math.min(100, pct));
+	const filledCount = Math.round((clamped / 100) * cells);
+	let res = "";
+	for (let i = 0; i < cells; i++) {
+		if (i < filledCount) {
+			const colorIdx = Math.min(SPECTRUM_CELL_COLORS.length - 1, Math.floor((i / cells) * SPECTRUM_CELL_COLORS.length));
+			const [r, g, b] = SPECTRUM_CELL_COLORS[colorIdx];
+			res += `\x1b[38;2;${r};${g};${b}m▰\x1b[39m`;
+		} else {
+			const [r, g, b] = EMPTY_CELL_COLOR;
+			res += `\x1b[38;2;${r};${g};${b}m▱\x1b[39m`;
+		}
+	}
+	return res;
+}
+
+function renderTimeGauge(pct: number, cells = 10): string {
+	const clamped = Math.max(0, Math.min(100, pct));
+	const filledCount = Math.round((clamped / 100) * cells);
+	let res = "";
+	for (let i = 0; i < cells; i++) {
+		if (i < filledCount) {
+			res += `\x1b[38;2;56;189;248m▰\x1b[39m`; // Azul cielo / cian reloj
+		} else {
+			const [r, g, b] = EMPTY_CELL_COLOR;
+			res += `\x1b[38;2;${r};${g};${b}m▱\x1b[39m`;
+		}
+	}
+	return res;
+}
+
+function renderRaceSection(
 	title: string,
-	subtitle: string,
 	pace: QuotaPaceInfo,
-	colW: number,
+	innerW: number,
+	safeW: number,
 	s: ThemeStyler,
 ): string[] {
-	const needleChar = s.boldWhite("●");
-	const cian = s.cyan;
-	const ring = pace.ringColor;
+	// Línea 1: Título y tiempo restante (ej: ⚡ VENTANA 5 HORAS · Quedan 5h 0m)
+	const headerLeft = `${s.accent("⚡ " + title)} ${s.border("·")} ${s.boldWhite("Quedan " + pace.remainingFormatted)}`;
+	const spHeader = Math.max(1, innerW - visibleLen(headerLeft));
+	const l1 = fitToWidth(`${s.border("│")} ${headerLeft}${" ".repeat(spHeader)} ${s.border("│")}`, safeW);
 
-	const l0 = centerAnsi(s.boldWhite(title), colW);
-	const l1 = centerAnsi(s.slate(subtitle), colW);
+	// Línea 2: Barra de Tiempo vs Ritmo
+	const timeBar = renderTimeGauge(pace.timeElapsedPct, 10);
+	const timePctStr = `${Math.round(pace.timeElapsedPct)}%`.padStart(4, " ");
+	const leftTime = `  ${s.slate("Tiempo")} ${timeBar} ${s.cyan(timePctStr)}`;
+	const pill = pace.pillColor(pace.pillLabel);
+	const spTime = Math.max(1, innerW - visibleLen(leftTime) - visibleLen(pill));
+	const l2 = fitToWidth(`${s.border("│")} ${leftTime}${" ".repeat(spTime)}${pill} ${s.border("│")}`, safeW);
 
-	const topArc = pace.needlePos === "top"
-		? `${cian("╭─────")}${needleChar}${cian("─────╮")}`
-		: cian("╭───────────╮");
-	const l2 = centerAnsi(topArc, colW);
+	// Línea 3: Barra de Cuota vs % Restante
+	const quotaBar = renderSpectralGauge(pace.consumedPct, 10);
+	const quotaPctStr = `${pace.consumedPct}%`.padStart(4, " ");
+	const leftQuota = `  ${s.slate("Cuota ")} ${quotaBar} ${s.boldWhite(quotaPctStr)}`;
+	const rightRem = `${s.slate(pace.remainingPct + "% restante")}`;
+	const spQuota = Math.max(1, innerW - visibleLen(leftQuota) - visibleLen(rightRem));
+	const l3 = fitToWidth(`${s.border("│")} ${leftQuota}${" ".repeat(spQuota)}${rightRem} ${s.border("│")}`, safeW);
 
-	const leftTop = cian("╭╯");
-	const rightTop = cian("╰╮");
-	const innerTop = `${ring("◜")} ${s.muted("quedan ")} ${ring("◝")}`;
-	const l3 = centerAnsi(`${leftTop} ${innerTop} ${rightTop}`, colW);
-
-	const leftNeedle = pace.needlePos === "left" ? needleChar : " ";
-	const rightNeedle = pace.needlePos === "right" ? needleChar : " ";
-	const timeStr = centerAnsi(pace.remainingFormatted, 6);
-	const l4 = centerAnsi(`${cian("│")} ${leftNeedle}${ring("│")} ${s.boldWhite(timeStr)} ${ring("│")}  ${rightNeedle}${cian("│")}`, colW);
-
-	const leftBottom = cian("╰╮");
-	const rightBottom = cian("╭╯");
-	const useStr = centerAnsi(`${pace.consumedPct}% uso`, 7);
-	const innerBottom = `${ring("◟")} ${ring(useStr)} ${ring("◞")}`;
-	const l5 = centerAnsi(`${leftBottom} ${innerBottom} ${rightBottom}`, colW);
-
-	const bottomArc = pace.needlePos === "bottom"
-		? `${cian("╰─────")}${needleChar}${cian("─────╯")}`
-		: cian("╰───────────╯");
-	const l6 = centerAnsi(bottomArc, colW);
-
-	const pillContent = `${pace.pillColor("╭─ ")}${pace.pillColor(pace.pillLabel)}${pace.pillColor(" ─╮")}`;
-	const l7 = centerAnsi(pillContent, colW);
-
-	const remStr = `${pace.remainingPct}% restante`;
-	const l8 = centerAnsi(s.slate(remStr), colW);
-
-	return [l0, l1, l2, l3, l4, l5, l6, l7, l8];
+	return [l1, l2, l3];
 }
 
 export function renderDualConcentricClocks(
@@ -380,21 +410,14 @@ export function renderDualConcentricClocks(
 	innerW: number,
 	safeW: number,
 ): string[] {
-	const col1W = Math.floor((innerW - 1) / 2);
-	const col2W = innerW - col1W - 1;
-
 	const pace5h = calculateQuotaPace(acc.consumed5h || "0%", acc.reset5hInSec, 300, s);
 	const paceWk = calculateQuotaPace(acc.consumedWeekly || "0%", acc.resetWeeklyInSec, 10080, s);
 
-	const lines5h = buildClockColumnLines("Ventana de 5 horas", "Límite de 5 horas", pace5h, col1W, s);
-	const linesWk = buildClockColumnLines("Semanal", "Límite semanal", paceWk, col2W, s);
+	const lines5h = renderRaceSection("VENTANA 5 HORAS", pace5h, innerW, safeW, s);
+	const linesWk = renderRaceSection("SEMANAL", paceWk, innerW, safeW, s);
+	const divider = fitToWidth(s.border("├" + "─".repeat(Math.max(1, safeW - 2)) + "┤"), safeW);
 
-	const out: string[] = [];
-	for (let i = 0; i < lines5h.length; i++) {
-		const combined = `${s.border("│")}${lines5h[i]}${s.border("│")}${linesWk[i]}${s.border("│")}`;
-		out.push(fitToWidth(combined, safeW));
-	}
-	return out;
+	return [...lines5h, divider, ...linesWk];
 }
 
 function extractBorderColor(lines: string[], theme?: any): string {

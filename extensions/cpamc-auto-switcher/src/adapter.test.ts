@@ -134,10 +134,11 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		const text = lines.map((l: string) => stripAnsi(l)).join("\n");
 		assert.match(text, /\[TRABAJANDO AHORA\]/);
 		assert.match(text, /Correo\s+acc-1/);
-		assert.match(text, /Ventana de 5 horas/);
-		assert.match(text, /Semanal/);
-		assert.match(text, /quedan/);
-		assert.match(text, /10% uso/);
+		assert.match(text, /VENTANA 5 HORAS/);
+		assert.match(text, /SEMANAL/);
+		assert.match(text, /Quedan/);
+		assert.match(text, /Tiempo/);
+		assert.match(text, /Cuota/);
 		assert.match(text, /90% restante/);
 		assert.match(text, /Ritmo/);
 		assert.match(text, /\[SIGUIENTE EN FILA\]/);
