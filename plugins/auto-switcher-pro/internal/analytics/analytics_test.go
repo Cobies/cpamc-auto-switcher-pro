@@ -253,3 +253,55 @@ func TestSQLiteAnalyticsLifecycle(t *testing.T) {
 		}
 	}
 }
+
+func TestGuardIncidentsStorage(t *testing.T) {
+	tDir := t.TempDir()
+	dbP := filepath.Join(tDir, "test_incidents.db")
+	_, err := ResetDBForTest(dbP)
+	if err != nil {
+		t.Fatalf("ResetDBForTest failed: %v", err)
+	}
+
+	inc := GuardIncident{
+		ID:             "inc_cb_test_001",
+		Timestamp:      time.Now().UnixMilli(),
+		SessionID:      "sess_abc123",
+		PID:            12345,
+		PoolID:         "Pool-03-gemini",
+		IncidentType:   "CYCLE_DETECTED",
+		TriggerCommand: "objdump -d <TMP>",
+		CommandTrace:   []string{"cat <TMP>", "python3 <TMP>", "objdump -d <TMP>"},
+		TokensSaved:    65000,
+		ActionsBlocked: 3,
+		Status:         "mitigated",
+	}
+
+	if err := RecordGuardIncident(inc); err != nil {
+		t.Fatalf("RecordGuardIncident failed: %v", err)
+	}
+
+	retrieved, err := GetGuardIncident("inc_cb_test_001")
+	if err != nil {
+		t.Fatalf("GetGuardIncident failed: %v", err)
+	}
+	if retrieved.ID != inc.ID {
+		t.Errorf("expected ID %s, got %s", inc.ID, retrieved.ID)
+	}
+	if retrieved.IncidentType != "CYCLE_DETECTED" {
+		t.Errorf("expected incident type CYCLE_DETECTED, got %s", retrieved.IncidentType)
+	}
+	if len(retrieved.CommandTrace) != 3 {
+		t.Errorf("expected 3 commands in trace, got %d", len(retrieved.CommandTrace))
+	}
+	if retrieved.TokensSaved != 65000 {
+		t.Errorf("expected 65000 tokens saved, got %d", retrieved.TokensSaved)
+	}
+
+	list, err := QueryGuardIncidents(10)
+	if err != nil {
+		t.Fatalf("QueryGuardIncidents failed: %v", err)
+	}
+	if len(list) != 1 {
+		t.Errorf("expected 1 incident in list, got %d", len(list))
+	}
+}

@@ -1,10 +1,12 @@
 package plugin
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"auto-switcher-pro/internal/analytics"
 )
@@ -12,6 +14,7 @@ import (
 const (
 	auditLogRoutePath       = "/auto-switcher-pro/audit-log"
 	telemetryTraceRoutePath = "/auto-switcher-pro/telemetry/export-trace"
+	incidentsRoutePath      = "/auto-switcher-pro/incidents"
 )
 
 func isAuditLogPath(path string) bool {
@@ -20,6 +23,10 @@ func isAuditLogPath(path string) bool {
 
 func isTelemetryTracePath(path string) bool {
 	return strings.Contains(path, telemetryTraceRoutePath)
+}
+
+func isIncidentsPath(path string) bool {
+	return strings.Contains(path, incidentsRoutePath)
 }
 
 func handleTelemetryTraceHTTP(req ManagementRequestPayload) ([]byte, error) {
@@ -142,4 +149,81 @@ func handleAuditLogHTTP(req ManagementRequestPayload) ([]byte, error) {
 		"recent_rotations": rotations,
 		"total_events":     len(timeline),
 	})
+}
+
+func handleIncidentsHTTP(req ManagementRequestPayload) ([]byte, error) {
+	method := strings.ToUpper(strings.TrimSpace(req.Method))
+
+	switch method {
+	case http.MethodPost:
+		var inc analytics.GuardIncident
+		if len(req.Body) > 0 {
+			if err := json.Unmarshal(req.Body, &inc); err != nil {
+				return jsonManagementResponse(http.StatusBadRequest, map[string]string{
+					"error":   "bad_request",
+					"message": "invalid incident payload: " + err.Error(),
+				})
+			}
+		}
+		if inc.ID == "" {
+			inc.ID = fmt.Sprintf("cb_%d", time.Now().UnixMilli())
+		}
+		if err := analytics.RecordGuardIncident(inc); err != nil {
+			return jsonManagementResponse(http.StatusInternalServerError, map[string]string{
+				"error":   "db_error",
+				"message": err.Error(),
+			})
+		}
+		return jsonManagementResponse(http.StatusOK, map[string]any{
+			"ok":          true,
+			"incident_id": inc.ID,
+			"status":      "recorded",
+		})
+
+	case http.MethodGet, http.MethodHead:
+		// Check if querying single incident by id: ?id=... or /incidents/:id
+		incidentID := ""
+		if req.Query != nil {
+			if idVal, ok := req.Query["id"]; ok && len(idVal) > 0 {
+				incidentID = strings.TrimSpace(idVal[0])
+			}
+		}
+		if incidentID == "" && strings.Contains(req.Path, incidentsRoutePath+"/") {
+			parts := strings.Split(req.Path, incidentsRoutePath+"/")
+			if len(parts) > 1 {
+				incidentID = strings.TrimSpace(parts[1])
+			}
+		}
+
+		if incidentID != "" {
+			inc, err := analytics.GetGuardIncident(incidentID)
+			if err != nil {
+				return jsonManagementResponse(http.StatusNotFound, map[string]string{
+					"error":   "not_found",
+					"message": "incident not found: " + incidentID,
+				})
+			}
+			return jsonManagementResponse(http.StatusOK, map[string]any{
+				"ok":       true,
+				"incident": inc,
+			})
+		}
+
+		// List recent incidents
+		incidents, err := analytics.QueryGuardIncidents(50)
+		if err != nil {
+			incidents = []analytics.GuardIncident{}
+		}
+		return jsonManagementResponse(http.StatusOK, map[string]any{
+			"ok":        true,
+			"incidents": incidents,
+			"total":     len(incidents),
+		})
+
+	default:
+		return jsonManagementResponse(http.StatusMethodNotAllowed, map[string]string{
+			"error":   "method_not_allowed",
+			"message": "only GET and POST methods are supported",
+		})
+	}
 }

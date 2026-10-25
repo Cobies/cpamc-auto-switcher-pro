@@ -504,6 +504,11 @@ func HandleManagementHTTP(request []byte) ([]byte, error) {
 		return handleAuditLogHTTP(req)
 	}
 
+	// Guard incidents & circuit breaker forensics routes
+	if isIncidentsPath(req.Path) {
+		return handleIncidentsHTTP(req)
+	}
+
 	// Telemetry anonymous trace export for deterministic 429 replay
 	if isTelemetryTracePath(req.Path) {
 		return handleTelemetryTraceHTTP(req)

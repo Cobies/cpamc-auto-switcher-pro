@@ -2,6 +2,7 @@ package analytics
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -161,6 +162,22 @@ func InitDB() (*sql.DB, error) {
 			last_seen_ms INTEGER NOT NULL,
 			metadata_json TEXT DEFAULT '{}'
 		);
+
+		CREATE TABLE IF NOT EXISTS guard_incidents (
+			id TEXT PRIMARY KEY,
+			timestamp INTEGER NOT NULL,
+			session_id TEXT NOT NULL,
+			pid INTEGER DEFAULT 0,
+			pool_id TEXT DEFAULT '',
+			incident_type TEXT NOT NULL,
+			trigger_command TEXT DEFAULT '',
+			command_trace TEXT DEFAULT '[]',
+			tokens_saved INTEGER DEFAULT 0,
+			actions_blocked INTEGER DEFAULT 0,
+			status TEXT DEFAULT 'mitigated'
+		);
+		CREATE INDEX IF NOT EXISTS idx_guard_incidents_ts ON guard_incidents(timestamp);
+		CREATE INDEX IF NOT EXISTS idx_guard_incidents_session ON guard_incidents(session_id);
 		`
 		if _, err := db.Exec(schema); err != nil {
 			initErr = fmt.Errorf("failed to init schema: %w", err)
@@ -947,4 +964,91 @@ func Shutdown(timeout time.Duration) {
 		_ = dbInstance.Close()
 		dbInstance = nil
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Guard Incidents (Runaway Loops & Circuit Breaker Forensics)
+// ---------------------------------------------------------------------------
+
+// GuardIncident represents a runaway loop or circuit breaker interception event.
+type GuardIncident struct {
+	ID             string   `json:"id"`
+	Timestamp      int64    `json:"timestamp"`
+	SessionID      string   `json:"session_id"`
+	PID            int      `json:"pid"`
+	PoolID         string   `json:"pool_id"`
+	IncidentType   string   `json:"incident_type"`
+	TriggerCommand string   `json:"trigger_command"`
+	CommandTrace   []string `json:"command_trace"`
+	TokensSaved    int      `json:"tokens_saved"`
+	ActionsBlocked int      `json:"actions_blocked"`
+	Status         string   `json:"status"`
+}
+
+// RecordGuardIncident stores a guard incident in SQLite.
+func RecordGuardIncident(inc GuardIncident) error {
+	db, err := InitDB()
+	if err != nil {
+		return err
+	}
+	traceJSON, _ := json.Marshal(inc.CommandTrace)
+	if inc.Timestamp == 0 {
+		inc.Timestamp = time.Now().UnixMilli()
+	}
+	if inc.Status == "" {
+		inc.Status = "mitigated"
+	}
+	query := `INSERT OR REPLACE INTO guard_incidents 
+		(id, timestamp, session_id, pid, pool_id, incident_type, trigger_command, command_trace, tokens_saved, actions_blocked, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	_, err = db.Exec(query, inc.ID, inc.Timestamp, inc.SessionID, inc.PID, inc.PoolID, inc.IncidentType, inc.TriggerCommand, string(traceJSON), inc.TokensSaved, inc.ActionsBlocked, inc.Status)
+	return err
+}
+
+// GetGuardIncident retrieves a single incident by ID.
+func GetGuardIncident(id string) (*GuardIncident, error) {
+	db, err := InitDB()
+	if err != nil {
+		return nil, err
+	}
+	query := `SELECT id, timestamp, session_id, pid, pool_id, incident_type, trigger_command, command_trace, tokens_saved, actions_blocked, status 
+		FROM guard_incidents WHERE id = ? LIMIT 1`
+	row := db.QueryRow(query, id)
+	var inc GuardIncident
+	var traceStr string
+	err = row.Scan(&inc.ID, &inc.Timestamp, &inc.SessionID, &inc.PID, &inc.PoolID, &inc.IncidentType, &inc.TriggerCommand, &traceStr, &inc.TokensSaved, &inc.ActionsBlocked, &inc.Status)
+	if err != nil {
+		return nil, err
+	}
+	_ = json.Unmarshal([]byte(traceStr), &inc.CommandTrace)
+	return &inc, nil
+}
+
+// QueryGuardIncidents returns the most recent guard incidents.
+func QueryGuardIncidents(limit int) ([]GuardIncident, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	db, err := InitDB()
+	if err != nil {
+		return nil, err
+	}
+	query := `SELECT id, timestamp, session_id, pid, pool_id, incident_type, trigger_command, command_trace, tokens_saved, actions_blocked, status 
+		FROM guard_incidents ORDER BY timestamp DESC LIMIT ?`
+	rows, err := db.Query(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []GuardIncident
+	for rows.Next() {
+		var inc GuardIncident
+		var traceStr string
+		if err := rows.Scan(&inc.ID, &inc.Timestamp, &inc.SessionID, &inc.PID, &inc.PoolID, &inc.IncidentType, &inc.TriggerCommand, &traceStr, &inc.TokensSaved, &inc.ActionsBlocked, &inc.Status); err == nil {
+			_ = json.Unmarshal([]byte(traceStr), &inc.CommandTrace)
+			result = append(result, inc)
+		}
+	}
+	return result, nil
 }

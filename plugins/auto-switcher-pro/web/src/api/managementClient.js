@@ -3226,6 +3226,28 @@ export async function fetchAuditLog(options = {}) {
 }
 
 /**
+ * Consulta la lista de incidentes de disyuntor y bucles de agentes mitigados desde SQLite.
+ */
+export async function fetchGuardIncidents(options = {}) {
+  const res = await apiFetch('/v0/management/auto-switcher-pro/incidents', {
+    ...options,
+    method: 'GET',
+  });
+  return res.json();
+}
+
+/**
+ * Consulta un incidente específico por ID con su autopsia forense y traza de comandos.
+ */
+export async function fetchGuardIncident(id, options = {}) {
+  const res = await apiFetch(`/v0/management/auto-switcher-pro/incidents?id=${encodeURIComponent(id)}`, {
+    ...options,
+    method: 'GET',
+  });
+  return res.json();
+}
+
+/**
  * Consulta la matriz de orquestación de agentes (Gentle-AI & jok3r-pi).
  */
 export async function fetchAgentMatrix(options = {}) {

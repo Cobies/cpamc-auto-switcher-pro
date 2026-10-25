@@ -109,7 +109,7 @@ export default function App() {
     if (hash.includes('tab-agent-matrix') || hash.includes('agent-matrix') || hash.includes('matriz')) {
       return 'agent-matrix';
     }
-    if (hash.includes('tab-audit-log') || hash.includes('audit-log') || hash.includes('bitacora') || hash.includes('caja-negra')) {
+    if (hash.includes('tab-audit-log') || hash.includes('audit-log') || hash.includes('bitacora') || hash.includes('caja-negra') || hash.includes('incident-')) {
       return 'audit-log';
     }
     if (hash.includes('tab-home') || hash.includes('tab=home') || hash === '#home') {

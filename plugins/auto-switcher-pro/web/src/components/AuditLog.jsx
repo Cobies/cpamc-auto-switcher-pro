@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { fetchAuditLog } from '../api/managementClient';
+import { fetchAuditLog, fetchGuardIncidents } from '../api/managementClient';
+import IncidentModal from './IncidentModal';
 import './AuditLog.css';
 
 function formatTimestamp(ts) {
@@ -11,16 +12,36 @@ function formatTimestamp(ts) {
 
 export default function AuditLog() {
   const [data, setData] = useState({ audit_events: [], flight_recorder: [] });
+  const [guardIncidents, setGuardIncidents] = useState([]);
+  const [selectedIncidentId, setSelectedIncidentId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [filterType, setFilterType] = useState('ALL'); // ALL, PREVENTIVE, FAILOVER, GHOST_WARMUP, MANUAL
   const [lastRefreshed, setLastRefreshed] = useState(null);
 
+  useEffect(() => {
+    const handleHash = () => {
+      const hash = window.location.hash || '';
+      if (hash.includes('#incident-')) {
+        const id = hash.split('#incident-')[1]?.split('?')[0];
+        if (id) {
+          setSelectedIncidentId(id);
+        }
+      }
+    };
+    handleHash();
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
+
   const loadData = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const res = await fetchAuditLog();
+      const [res, incRes] = await Promise.all([
+        fetchAuditLog(),
+        fetchGuardIncidents().catch(() => ({ ok: false })),
+      ]);
       if (res && res.ok) {
         setData({
           audit_events: Array.isArray(res.audit_events) ? res.audit_events : [],
@@ -29,6 +50,9 @@ export default function AuditLog() {
         setLastRefreshed(new Date());
       } else {
         setError(res?.message || 'Error al consultar la bitácora de auditoría');
+      }
+      if (incRes && incRes.ok && Array.isArray(incRes.incidents)) {
+        setGuardIncidents(incRes.incidents);
       }
     } catch (err) {
       setError(err?.message || 'No se pudo conectar con el endpoint de auditoría');
@@ -317,7 +341,70 @@ export default function AuditLog() {
             </div>
           )}
         </section>
+
+        {/* Section 3: Disyuntores Anti-Bucle & Incidentes de Agentes (SQLite) */}
+        <section className="audit-card-section">
+          <div className="audit-section-header">
+            <h3 className="audit-section-title">
+              <span>🛡️</span>
+              <span>Disyuntores Anti-Bucle — Sesiones Protegidas ({guardIncidents.length})</span>
+            </h3>
+          </div>
+
+          {guardIncidents.length === 0 ? (
+            <div className="audit-empty-state">
+              ✅ Ningún bucle desbocado registrado. Todos los turnos han operado dentro del presupuesto normal.
+            </div>
+          ) : (
+            <div className="flight-cards-grid">
+              {guardIncidents.map((inc) => (
+                <div key={inc.id} className="flight-incident-card" style={{ borderColor: 'rgba(239, 68, 68, 0.4)' }}>
+                  <div className="flight-card-head">
+                    <span className="flight-card-error-kind" style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171' }}>
+                      {inc.incident_type}
+                    </span>
+                    <button
+                      type="button"
+                      className="btn-incident-link"
+                      onClick={() => setSelectedIncidentId(inc.id)}
+                      style={{
+                        background: 'rgba(56, 189, 248, 0.15)',
+                        border: '1px solid rgba(56, 189, 248, 0.3)',
+                        color: '#38bdf8',
+                        borderRadius: '4px',
+                        padding: '3px 8px',
+                        fontSize: '0.75rem',
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                      }}
+                    >
+                      Ver Autopsia ↗
+                    </button>
+                  </div>
+                  <div className="flight-card-msg">
+                    ID: {inc.id} — {inc.trigger_command ? `Trigger: ${inc.trigger_command}` : 'Límite de pasos alcanzado'}
+                  </div>
+                  <div className="flight-card-meta">
+                    <span style={{ color: '#34d399', fontWeight: 600 }}>~{(inc.tokens_saved || 45000).toLocaleString()} tokens protegidos</span>
+                    <span>{formatTimestamp(inc.timestamp)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
       </div>
+
+      <IncidentModal
+        isOpen={Boolean(selectedIncidentId)}
+        incidentId={selectedIncidentId}
+        onClose={() => {
+          setSelectedIncidentId(null);
+          if (window.location.hash.includes('#incident-')) {
+            window.location.hash = '#audit-log';
+          }
+        }}
+      />
     </div>
   );
 }
