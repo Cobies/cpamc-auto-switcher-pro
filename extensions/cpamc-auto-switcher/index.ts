@@ -418,6 +418,21 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 			if (ctx?.hasUI) {
 				ctx.ui.notify?.(`🛑 ${check.reason.split(":")[0] || "Acción frenada por Auto Switcher Pro"}`, "warning");
 			}
+			const tele = runawayGuard.getTelemetry();
+			if (tele.circuitBreakerTripped && tele.lastIncident) {
+				// Enviar incidente a la base de datos SQLite de Auto Switcher Pro en segundo plano
+				const payload = {
+					...tele.lastIncident,
+					session_id: (ctx as any)?.sessionId || (ctx as any)?.sessionManager?.sessionId,
+					pool_id: ctx?.model?.id,
+				};
+				void fetch(`${resolveCpamcBaseUrl()}/v0/management/auto-switcher-pro/incidents`, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify(payload),
+					signal: AbortSignal.timeout(3000),
+				}).catch(() => {});
+			}
 			void adapter?.update(true, ctx);
 			return check;
 		}

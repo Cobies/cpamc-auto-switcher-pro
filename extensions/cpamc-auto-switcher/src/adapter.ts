@@ -12,9 +12,10 @@ const NEXT_COLOR = "\x1b[1;38;2;222;116;155m"; // Rosa coral suave negrita
 const MUTED = "\x1b[38;2;120;153;166m";
 
 const ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]/g;
+const OSC8_REGEX = /\x1b\]8;;[^\x1b]*\x1b\\/g;
 
 export function stripAnsi(str: string): string {
-	return str.replace(ANSI_REGEX, "");
+	return str.replace(ANSI_REGEX, "").replace(OSC8_REGEX, "");
 }
 
 export function truncateWithAnsi(str: string, maxW: number): string {
@@ -103,7 +104,7 @@ export function formatFooterRotationBlock(pair: PoolRotationPair | null, isBusy 
 }
 
 function visibleLen(str: string): number {
-	const clean = str.replace(/\x1b\[[0-9;]*m/g, "");
+	const clean = str.replace(/\x1b\[[0-9;]*m/g, "").replace(/\x1b\]8;;[^\x1b]*\x1b\\/g, "");
 	let len = 0;
 	for (const char of clean) {
 		const code = char.codePointAt(0) || 0;
@@ -325,25 +326,32 @@ export function formatSidebarQuotaCardLines(
 			? `${s.live("● " + activeAccountLabel)} ${s.live(`(${pair.active.minAvailable} ok)`)}`
 			: `${s.idle("○ " + activeAccountLabel)} ${s.idle(`(${pair.active.minAvailable} ok)`)}`;
 
-	// Bloque reactivo "CUIDANDO EL CHAT" (6 funciones unificadas de resiliencia y anti-bucle)
+	// Bloque reactivo "CUIDANDO EL CHAT" (funciones unificadas de resiliencia y disyuntor anti-bucle)
 	const telemetry = guardTelemetry || runawayGuard.getTelemetry();
+	const isTripped = Boolean(telemetry.circuitBreakerTripped);
 	const hasActiveInterception =
+		isTripped ||
 		telemetry.blockedIntrospections > 0 ||
 		telemetry.blockedBashEvasions > 0 ||
 		telemetry.blockedSubagentPolls > 0 ||
+		(telemetry.blockedProhibitedCommands || 0) > 0 ||
 		telemetry.bashExplorationCount >= MAX_BASH_EXPLORATION_PER_TURN;
 
-	const chatStatusHeader = (isAmber || hasActiveInterception)
-		? `${s.amber("[CUIDANDO EL CHAT]")}`
-		: `${s.accent("[CUIDANDO EL CHAT]")}`;
+	const chatStatusHeader = isTripped
+		? `${s.error("[CUIDANDO EL CHAT]")}`
+		: (isAmber || hasActiveInterception)
+			? `${s.amber("[CUIDANDO EL CHAT]")}`
+			: `${s.accent("[CUIDANDO EL CHAT]")}`;
 
-	const chatStatusTag = hasActiveInterception
-		? s.amber("⚡ Bucle Interceptado")
-		: isAmber
-			? s.amber("⚡ Poda activa")
-			: isBusy
-				? s.live("● Escribiendo")
-				: s.idle("○ Blindaje Activo");
+	const chatStatusTag = isTripped
+		? s.error("🛑 DISPARADO")
+		: hasActiveInterception
+			? s.amber("⚡ Bucle Interceptado")
+			: isAmber
+				? s.amber("⚡ Poda activa")
+				: isBusy
+					? s.live("● Escribiendo")
+					: s.idle("○ Blindaje Activo");
 
 	// 1. Rescate Microcortes
 	const rescateVal = isAmber ? s.amber("⚡ Rescate en curso (1/2)") : s.idle("○ En guardia (0/2)");
@@ -377,13 +385,63 @@ export function formatSidebarQuotaCardLines(
 		pollVal = s.idle("○ 0/2 llamadas");
 	}
 
-	const approachVal = hasActiveInterception
-		? s.amber("Frenando bucles")
-		: isAmber
-			? s.amber("Podando texto muy largo")
-			: isBusy
-				? s.live("Escribiendo en vivo")
-				: s.text("Misma cuenta fija");
+	const approachVal = isTripped
+		? s.error("🛑 Bucle Interceptado")
+		: hasActiveInterception
+			? s.amber("Frenando bucles")
+			: isAmber
+				? s.amber("Podando texto muy largo")
+				: isBusy
+					? s.live("Escribiendo en vivo")
+					: s.text("Misma cuenta fija");
+
+	let chatBlockLines: string[] = [];
+	if (isTripped) {
+		const incId = telemetry.incidentId || "active";
+		const linkUrl = `http://127.0.0.1:8317/management.html#incident-${incId}`;
+		const eventCount =
+			telemetry.lastIncident?.actions_blocked ||
+			(telemetry.circuitBreakerReason === "STEP_BUDGET_EXCEEDED"
+				? 15
+				: telemetry.circuitBreakerReason === "CYCLE_DETECTED"
+					? 3
+					: 1);
+		const linkLabel = `[Ver detalles (${eventCount}) ↗]`;
+		const linkText = `\x1b]8;;${linkUrl}\x1b\\${linkLabel}\x1b]8;;\x1b\\`;
+		const savedK = Math.max(1, Math.round((telemetry.tokensSavedEstimate || 45000) / 1000));
+		const reasonLabel =
+			telemetry.circuitBreakerReason === "CYCLE_DETECTED"
+				? "Ciclo repetitivo (x3)"
+				: telemetry.circuitBreakerReason === "PROHIBITED_COMMAND"
+					? "Comando host prohibido"
+					: "Pasos agotados (15/15)";
+
+		chatBlockLines = [
+			renderLine(chatStatusHeader, chatStatusTag),
+			renderLine(s.muted("Disyuntor Anti-Bucle"), s.error("🛑 Disparado")),
+			renderLine(s.muted("Causa"), s.error(reasonLabel)),
+			renderLine(s.muted("Tokens protegidos"), s.live(`~${savedK}k tokens`)),
+			renderLine(s.muted("Diagnóstico"), s.accent(linkText)),
+			divider,
+			renderLine(s.error("[ACCIÓN REQUERIDA]"), s.text("Dar orden directa")),
+		];
+	} else {
+		chatBlockLines = [
+			renderLine(chatStatusHeader, chatStatusTag),
+			renderLine(
+				s.muted("Presupuesto de Turno"),
+				(telemetry.totalToolCount || 0) >= 12
+					? s.amber(`▲ ${telemetry.totalToolCount || 0}/15 pasos`)
+					: s.idle(`○ ${telemetry.totalToolCount || 0}/15 pasos`),
+			),
+			renderLine(s.muted("Rescate Microcortes"), rescateVal),
+			renderLine(s.muted("Parálisis / Falso Stop"), paralisisVal),
+			renderLine(s.muted("Poda de Contexto"), podaVal),
+			renderLine(s.muted("Evasión Bash (Terminal)"), bashVal),
+			renderLine(s.muted("Introspección Sesiones"), introVal),
+			renderLine(s.muted("Polling de Subagentes"), pollVal),
+		];
+	}
 
 	const rawLines = [
 		top,
@@ -396,13 +454,7 @@ export function formatSidebarQuotaCardLines(
 		renderLine(s.muted(`Cuota 5h: ${pair.active.consumed5h}`), bar5h),
 		renderLine(s.muted(`Cuota Sem: ${pair.active.consumedWeekly}`), barWk),
 		divider,
-		renderLine(chatStatusHeader, chatStatusTag),
-		renderLine(s.muted("Rescate Microcortes"), rescateVal),
-		renderLine(s.muted("Parálisis / Falso Stop"), paralisisVal),
-		renderLine(s.muted("Poda de Contexto"), podaVal),
-		renderLine(s.muted("Evasión Bash (Terminal)"), bashVal),
-		renderLine(s.muted("Introspección Sesiones"), introVal),
-		renderLine(s.muted("Polling de Subagentes"), pollVal),
+		...chatBlockLines,
 		divider,
 		renderLine(
 			s.accent("[LA QUE SIGUE]"),

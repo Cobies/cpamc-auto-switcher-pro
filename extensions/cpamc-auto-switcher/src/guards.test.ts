@@ -28,7 +28,14 @@ export async function resolve(specifier, context, nextResolve) {
 
 register("data:text/javascript," + encodeURIComponent(loaderCode));
 
-const { AutoSwitcherRunawayGuard, MAX_BASH_EXPLORATION_PER_TURN, MAX_SUBAGENT_POLL_PER_TURN } = await import("./guards.js");
+const {
+	AutoSwitcherRunawayGuard,
+	MAX_BASH_EXPLORATION_PER_TURN,
+	MAX_SUBAGENT_POLL_PER_TURN,
+	MAX_TOTAL_TOOLS_PER_TURN,
+	MAX_CYCLE_REPETITIONS,
+	normalizeCommand,
+} = await import("./guards.js");
 
 describe("AutoSwitcherRunawayGuard - Anti-Bucle y Protección de Contexto", () => {
 	it("1. Bloquea introspección en .pi/agent/sessions o temporales", () => {
@@ -118,5 +125,109 @@ describe("AutoSwitcherRunawayGuard - Anti-Bucle y Protección de Contexto", () =
 		assert.equal(guard.getTelemetry().subagentPollCount, 1);
 		// El acumulado se mantiene para la UI
 		assert.equal(guard.getTelemetry().blockedSubagentPolls, 1);
+	});
+
+	it("4. Bloquea comandos de diagnóstico binario y operaciones docker no autorizadas", () => {
+		const guard = new AutoSwitcherRunawayGuard();
+
+		// objdump
+		const res1 = guard.checkTool({
+			toolName: "bash",
+			input: { command: "objdump -d /tmp/cli-proxy-api-bin" },
+		});
+		assert.ok(res1?.block);
+		assert.match(res1.reason, /desensambladores o comandos docker/i);
+
+		// readelf
+		const res2 = guard.checkTool({
+			toolName: "bash",
+			input: { command: "readelf -s /bin/ls" },
+		});
+		assert.ok(res2?.block);
+
+		// docker cp / docker exec
+		const res3 = guard.checkTool({
+			toolName: "bash",
+			input: { command: "docker cp cli-proxy-api:/app/bin /tmp/bin" },
+		});
+		assert.ok(res3?.block);
+
+		const tele = guard.getTelemetry();
+		assert.equal(tele.circuitBreakerTripped, true);
+		assert.equal(tele.circuitBreakerReason, "PROHIBITED_COMMAND");
+	});
+
+	it("5. Normaliza comandos extrayendo hexadecimales, rutas efímeras y números", () => {
+		const raw1 = "objdump -d --start-address=0x16dc380 --stop-address=0x16dc580 /tmp/cli-proxy-api-bin";
+		const norm1 = normalizeCommand(raw1);
+		assert.equal(norm1, "objdump -d --start-address=<HEX> --stop-address=<HEX> <TMP>");
+
+		const raw2 = "cat << 'EOF' > /tmp/read_struct_123.go\npackage main\nEOF";
+		const norm2 = normalizeCommand(raw2);
+		assert.equal(norm2, "cat << 'EOF' > <TMP> package main EOF");
+	});
+
+	it("6. Detecta y corta bucles cíclicos al repetirse 3 comandos equivalentes", () => {
+		const guard = new AutoSwitcherRunawayGuard();
+
+		// Ejecución 1 y 2 con diferentes direcciones de memoria
+		guard.checkTool({
+			toolName: "bash",
+			input: { command: "python3 -c 'print(0x1234)' > /tmp/res1.txt" },
+		});
+		guard.checkTool({
+			toolName: "bash",
+			input: { command: "python3 -c 'print(0x5678)' > /tmp/res2.txt" },
+		});
+
+		// Ejecución 3 (mismo patrón normalizado) -> Circuit breaker disparado
+		const blocked = guard.checkTool({
+			toolName: "bash",
+			input: { command: "python3 -c 'print(0x9abc)' > /tmp/res3.txt" },
+		});
+
+		assert.ok(blocked?.block);
+		assert.match(blocked.reason, /Bucle de ejecución repetitivo detectado/i);
+
+		const tele = guard.getTelemetry();
+		assert.equal(tele.circuitBreakerTripped, true);
+		assert.equal(tele.circuitBreakerReason, "CYCLE_DETECTED");
+		assert.ok(tele.incidentId?.startsWith("cb_"));
+	});
+
+	it("7. Permite ciclos de compilación o pruebas si hay mutación de archivos (TDD)", () => {
+		const guard = new AutoSwitcherRunawayGuard();
+
+		// Intento 1 y 2 de prueba
+		guard.checkTool({ toolName: "bash", input: { command: "go test -v ./..." } });
+		guard.checkTool({ toolName: "bash", input: { command: "go test -v ./..." } });
+
+		// Modificación de archivo (progreso real)
+		guard.checkTool({ toolName: "edit", input: { path: "main.go" } });
+
+		// Intento 3 de prueba no debe bloquear porque la ventana de ciclo se reinició con la mutación
+		const res = guard.checkTool({ toolName: "bash", input: { command: "go test -v ./..." } });
+		assert.equal(res, undefined, "no debe bloquear tras mutación de archivo en TDD");
+	});
+
+	it("8. Dispara Circuit Breaker al alcanzar MAX_TOTAL_TOOLS_PER_TURN = 15", () => {
+		const guard = new AutoSwitcherRunawayGuard();
+
+		// Ejecutar 14 herramientas variadas
+		for (let i = 0; i < 14; i++) {
+			const res = guard.checkTool({ toolName: "read", input: { path: `file_${i}.txt` } });
+			assert.equal(res, undefined);
+		}
+
+		// Herramienta 15 -> Bloqueo por presupuesto total
+		const blocked = guard.checkTool({ toolName: "read", input: { path: "file_15.txt" } });
+		assert.ok(blocked?.block);
+		assert.match(blocked.reason, /límite máximo de 15 acciones/i);
+
+		const tele = guard.getTelemetry();
+		assert.equal(tele.totalToolCount, 15);
+		assert.equal(tele.circuitBreakerTripped, true);
+		assert.equal(tele.circuitBreakerReason, "STEP_BUDGET_EXCEEDED");
+		assert.ok(tele.tokensSavedEstimate > 0);
 	});
 });

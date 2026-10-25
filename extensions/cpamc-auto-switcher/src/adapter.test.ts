@@ -166,6 +166,34 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		assert.match(text, /🛑 Bloqueado \(1\)/);
 	});
 
+	it("renders sidebar card in tripped circuit breaker state with hyperlink and tokens saved", () => {
+		const trippedTelemetry = {
+			bashExplorationCount: 0,
+			subagentPollCount: 0,
+			totalToolCount: 15,
+			circuitBreakerTripped: true,
+			circuitBreakerReason: "CYCLE_DETECTED" as const,
+			incidentId: "cb_test123",
+			tokensSavedEstimate: 85000,
+			blockedIntrospections: 0,
+			blockedBashEvasions: 0,
+			blockedSubagentPolls: 0,
+			blockedProhibitedCommands: 0,
+		};
+		const lines = formatSidebarQuotaCardLines(mockPoolPair, 48, undefined, undefined, false, trippedTelemetry);
+		const text = lines.map((l: string) => stripAnsi(l)).join("\n");
+		assert.match(text, /🛑 DISPARADO/);
+		assert.match(text, /Ciclo repetitivo \(x3\)/);
+		assert.match(text, /Tokens protegidos\s+~85k tokens/);
+		assert.match(text, /Diagnóstico\s+\[Ver detalles \(3\) ↗\]/);
+		assert.match(text, /\[ACCIÓN REQUERIDA\]/);
+		assert.match(text, /Dar orden directa/);
+
+		// Verificar que el formato OSC 8 esté presente en las líneas sin stripAnsi
+		const rawText = lines.join("\n");
+		assert.match(rawText, /\x1b\]8;;http:\/\/127\.0\.0\.1:8317\/management\.html#incident-cb_test123\x1b\\/);
+	});
+
 	it("handles malformed pair with missing active account safely without throwing", () => {
 		const malformedPair: any = {
 			poolKey: "Pool-01-gemini",
