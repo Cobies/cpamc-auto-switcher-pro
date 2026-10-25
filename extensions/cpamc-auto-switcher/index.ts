@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { initDynamicProvider, resolveCpamcBaseUrl } from "./src/provider.js";
+import { initDynamicProvider, resolveCpamcBaseUrl, resolveManagementKey } from "./src/provider.js";
 import { initFailoverHook, scheduleAutoSwitcher } from "./src/failover.js";
 import { registerModelPicker } from "./src/picker.js";
 import { registerAgentMatrixCommand } from "./src/matrix-command.js";
@@ -426,9 +426,14 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 					session_id: (ctx as any)?.sessionId || (ctx as any)?.sessionManager?.sessionId,
 					pool_id: ctx?.model?.id,
 				};
+				const mgmtKey = resolveManagementKey();
+				const headers: Record<string, string> = { "Content-Type": "application/json" };
+				if (mgmtKey) {
+					headers["Authorization"] = `Bearer ${mgmtKey}`;
+				}
 				void fetch(`${resolveCpamcBaseUrl()}/v0/management/auto-switcher-pro/incidents`, {
 					method: "POST",
-					headers: { "Content-Type": "application/json" },
+					headers,
 					body: JSON.stringify(payload),
 					signal: AbortSignal.timeout(3000),
 				}).catch(() => {});

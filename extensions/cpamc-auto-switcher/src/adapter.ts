@@ -407,7 +407,7 @@ export function formatSidebarQuotaCardLines(
 	let chatBlockLines: string[] = [];
 	if (isTripped) {
 		const incId = telemetry.incidentId || "active";
-		const linkUrl = `http://127.0.0.1:8317/management.html#incident-${incId}`;
+		const linkUrl = `http://127.0.0.1:8317/management.html#/plugin-pages/auto-switcher-pro-linux-amd64/2#incident-${incId}`;
 		const eventCount =
 			telemetry.lastIncident?.actions_blocked ||
 			(telemetry.circuitBreakerReason === "STEP_BUDGET_EXCEEDED"

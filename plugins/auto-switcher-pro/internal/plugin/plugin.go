@@ -243,6 +243,16 @@ func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 					"Path":        versionRoutePath,
 					"Description": "Audita la versión instalada del plugin y sincronización con GitHub Releases",
 				},
+				{
+					"Method":      http.MethodGet,
+					"Path":        incidentsRoutePath,
+					"Description": "Consulta el historial de incidentes de disyuntor anti-bucle y autopsias forenses",
+				},
+				{
+					"Method":      http.MethodPost,
+					"Path":        incidentsRoutePath,
+					"Description": "Registra un incidente de disyuntor anti-bucle mitigado desde las extensiones",
+				},
 			},
 			"resources": []map[string]any{
 				{

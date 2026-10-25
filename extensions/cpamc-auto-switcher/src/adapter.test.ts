@@ -190,7 +190,7 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 
 		// Verificar que el formato OSC 8 esté presente en las líneas sin stripAnsi
 		const rawText = lines.join("\n");
-		assert.match(rawText, /\x1b\]8;;http:\/\/127\.0\.0\.1:8317\/management\.html#incident-cb_test123\x1b\\/);
+		assert.match(rawText, /\x1b\]8;;http:\/\/127\.0\.0\.1:8317\/management\.html#\/plugin-pages\/auto-switcher-pro-linux-amd64\/2#incident-cb_test123\x1b\\/);
 	});
 
 	it("handles malformed pair with missing active account safely without throwing", () => {
