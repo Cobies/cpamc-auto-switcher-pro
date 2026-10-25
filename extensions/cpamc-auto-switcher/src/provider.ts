@@ -149,6 +149,7 @@ let cachedFilterData: {
     activeBareProviders: Set<string>;
     bareExclusions: Set<string>;
     registeredPoolBases: Set<string>;
+    confirmedActivePools: Set<string>;
 } | null = null;
 let lastKnownEpoch: string | null = null;
 
@@ -280,7 +281,15 @@ export function buildPoolLabelMap(prefixes: Iterable<string>, registeredPoolBase
                 labels.set(p, `LIBRE ${p}`);
             }
         });
-        entry.reserves.forEach((p) => labels.set(p, `${poolNum}·RESERVA ${p}`));
+        // Reservas de pools registrados exponen su rol; las de bases SIN pool registrado
+        // (cuentas standalone OmniAuth Pro, topología zero-collision) son rutas nativas LIBRE.
+        entry.reserves.forEach((p) => {
+            if (isRegisteredPool) {
+                labels.set(p, `${poolNum}·RESERVA ${p}`);
+            } else {
+                labels.set(p, `LIBRE ${p}`);
+            }
+        });
     });
     return labels;
 }
@@ -861,9 +870,16 @@ export function isCleanIncludedModel(id: string, filterData: {
 
     const prefix = trimmed.slice(0, slashIndex);
 
-    // 1. Filtrar reservas numéricas (_1, _2...) para exponer SOLO rutas líderes dinámicas
+    // 1. Filtrar reservas numéricas (_1, _2...) SOLO cuando la base es un pool registrado
+    //    (se exponen vía fachada virtual Pool-XX). Las cuentas standalone de OmniAuth Pro con
+    //    topología zero-collision (base_N sin pool registrado, ej. nim_1) son rutas nativas
+    //    legítimas de CPAMC y SÍ pasan a /model con su etiqueta [LIBRE <prefijo>].
     if (/_(\d+)$/.test(prefix)) {
-        return false;
+        const base = prefix.slice(0, prefix.lastIndexOf("_")).toLowerCase();
+        const registeredBases = filterData?.registeredPoolBases;
+        if (!registeredBases || registeredBases.has(base)) {
+            return false;
+        }
     }
 
     // 1.5. REGLA ARQUITECTÓNICA SAGRADA (Máscara Virtual Pura y Coexistencia Granular por Cuenta):

@@ -186,3 +186,47 @@ describe("Dynamic Provider Filtering & Granular Coexistence", () => {
         }
     });
 });
+
+describe("Standalone OmniAuth Pro zero-collision prefixes (Fase 3 homologación)", () => {
+    const standaloneFilterData = {
+        validPrefixes: new Set(["nim_1", "nim_2"]),
+        prefixExclusions: new Map([["nim_1", new Set<string>()], ["nim_2", new Set<string>()]]),
+        familyActiveLeaderPrefix: new Map<string, string>(),
+        prefixToFamily: new Map<string, string>(),
+        activePoolFamilies: new Set<string>(),
+        poolAssignedPrefixes: new Set<string>(),
+        activeBareProviders: new Set(["antigravity"]),
+        bareExclusions: new Set<string>(),
+        registeredPoolBases: new Set<string>(),
+    };
+
+    it("exposes standalone account routes (nim_1/*, nim_2/*) that are not pool reserves", () => {
+        assert.equal(isCleanIncludedModel("nim_1/meta/llama-3.1-405b-instruct", standaloneFilterData), true);
+        assert.equal(isCleanIncludedModel("nim_2/z-ai/glm-5.3-flash", standaloneFilterData), true);
+    });
+
+    it("keeps hiding numeric reserves of registered pools (fachadas Pool-XX intactas)", () => {
+        const registeredPools = {
+            ...standaloneFilterData,
+            validPrefixes: new Set(["agy", "agy2", "nim_1"]),
+            prefixExclusions: new Map([["agy", new Set<string>()], ["agy2", new Set<string>()], ["nim_1", new Set<string>()]]),
+            poolAssignedPrefixes: new Set(["agy", "agy2"]),
+            registeredPoolBases: new Set(["agy", "agy2", "nim"]),
+        };
+        assert.equal(isCleanIncludedModel("agy_1/gemini-3.8-flash-high", registeredPools), false);
+        assert.equal(isCleanIncludedModel("nim_1/meta/llama-3.1-405b-instruct", registeredPools), false);
+    });
+
+    it("labels standalone accounts as LIBRE <prefijo> instead of phantom pool reservations", () => {
+        const labels = buildPoolLabelMap(["nim_1", "nim_2"], standaloneFilterData.registeredPoolBases);
+        assert.equal(labels.get("nim_1"), "LIBRE nim_1");
+        assert.equal(labels.get("nim_2"), "LIBRE nim_2");
+    });
+
+    it("labels registered pool reserves as P#·RESERVA (sin colisión con standalone)", () => {
+        const labels = buildPoolLabelMap(["agy", "agy_1", "nim_1"], new Set(["agy", "agy2"]));
+        assert.equal(labels.get("agy"), "P1·LÍDER agy");
+        assert.equal(labels.get("agy_1"), "P1·RESERVA agy_1");
+        assert.equal(labels.get("nim_1"), "LIBRE nim_1");
+    });
+});
