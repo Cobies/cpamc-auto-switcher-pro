@@ -34,7 +34,7 @@ var (
 
 const (
 	defaultPollInterval = 5 * time.Minute
-	cloudCodeQuotaURL   = "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary"
+	cloudCodeQuotaURL   = "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary"
 	antigravityAgent    = "antigravity/hub/2.23.0 darwin/arm64"
 )
 
@@ -242,6 +242,7 @@ func (p *AutonomousQuotaPoller) ingestQuotaPayload(payload []byte, memberFile, e
 				Label             string   `json:"label"`
 				Window            string   `json:"window"`
 				RemainingFraction *float64 `json:"remainingFraction"`
+				ResetTime         string   `json:"resetTime"`
 			} `json:"buckets"`
 		} `json:"groups"`
 	}
@@ -256,6 +257,10 @@ func (p *AutonomousQuotaPoller) ingestQuotaPayload(payload []byte, memberFile, e
 
 	var worst5h *float64
 	var worstWeekly *float64
+	var reset5hSec int64
+	var resetWeeklySec int64
+
+	now := time.Now()
 
 	for _, g := range parsed.Groups {
 		grpName := strings.ToLower(g.DisplayName)
@@ -277,13 +282,30 @@ func (p *AutonomousQuotaPoller) ingestQuotaPayload(payload []byte, memberFile, e
 			remPct := *b.RemainingFraction * 100.0
 			bName := strings.ToLower(b.DisplayName + " " + b.Label + " " + b.Window)
 
+			var remSec int64
+			if b.ResetTime != "" {
+				if parsedTime, err := time.Parse(time.RFC3339Nano, b.ResetTime); err == nil {
+					diff := parsedTime.Sub(now).Seconds()
+					if diff > 0 {
+						remSec = int64(diff)
+					}
+				} else if parsedTime, err := time.Parse(time.RFC3339, b.ResetTime); err == nil {
+					diff := parsedTime.Sub(now).Seconds()
+					if diff > 0 {
+						remSec = int64(diff)
+					}
+				}
+			}
+
 			if strings.Contains(bName, "5") || strings.Contains(bName, "five") {
 				if worst5h == nil || remPct < *worst5h {
 					worst5h = &remPct
+					reset5hSec = remSec
 				}
 			} else if strings.Contains(bName, "week") {
 				if worstWeekly == nil || remPct < *worstWeekly {
 					worstWeekly = &remPct
+					resetWeeklySec = remSec
 				}
 			}
 		}
@@ -305,11 +327,13 @@ func (p *AutonomousQuotaPoller) ingestQuotaPayload(payload []byte, memberFile, e
 		}
 
 		predEngine.RecordLiveQuota(AccountQuotaTelemetry{
-			AccountKey:  accountKey,
-			Family:      fam,
-			Window5hPct: w5h,
-			WeeklyPct:   weekly,
-			UpdatedAt:   time.Now(),
+			AccountKey:      accountKey,
+			Family:          fam,
+			Window5hPct:     w5h,
+			WeeklyPct:       weekly,
+			Window5hResetIn: reset5hSec,
+			WeeklyResetIn:   resetWeeklySec,
+			UpdatedAt:       now,
 		})
 	}
 }
