@@ -1,8 +1,11 @@
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
+
 export const MAX_BASH_EXPLORATION_PER_TURN = 5;
 export const MAX_SUBAGENT_POLL_PER_TURN = 2;
 export const MAX_TOTAL_TOOLS_PER_TURN = 15;
 export const MAX_CYCLE_REPETITIONS = 3;
 export const CYCLE_WINDOW_SIZE = 6;
+export const SHM_INCIDENT_PATH = "/dev/shm/cpamc_last_incident.json";
 
 export interface IncidentRecord {
 	id: string;
@@ -78,6 +81,50 @@ export class AutoSwitcherRunawayGuard {
 	private lastReason?: string;
 	private lastTimestamp?: number;
 
+	private persistIncidentToShm(): void {
+		if (!this.currentIncident) return;
+		try {
+			const payload = {
+				incident: this.currentIncident,
+				tripReason: this.tripReason,
+				tokensSaved: this.tokensSaved,
+				lastReason: this.lastReason,
+			};
+			writeFileSync(SHM_INCIDENT_PATH, JSON.stringify(payload), "utf-8");
+		} catch {}
+	}
+
+	loadIncidentFromShm(): boolean {
+		try {
+			if (existsSync(SHM_INCIDENT_PATH)) {
+				const content = readFileSync(SHM_INCIDENT_PATH, "utf-8");
+				const data = JSON.parse(content);
+				if (data && data.incident && data.incident.id) {
+					this.currentIncident = data.incident;
+					this.isTripped = true;
+					this.tripReason = data.tripReason || "CYCLE_DETECTED";
+					this.tokensSaved = data.tokensSaved || 30000;
+					this.lastReason = data.lastReason || "Incidente persistido en memoria";
+					return true;
+				}
+			}
+		} catch {}
+		return false;
+	}
+
+	dismissIncident(): void {
+		this.isTripped = false;
+		this.tripReason = undefined;
+		this.currentIncident = undefined;
+		this.tokensSaved = 0;
+		this.lastReason = undefined;
+		try {
+			if (existsSync(SHM_INCIDENT_PATH)) {
+				unlinkSync(SHM_INCIDENT_PATH);
+			}
+		} catch {}
+	}
+
 	private generateIncidentId(): string {
 		const rand = Math.random().toString(36).substring(2, 7);
 		return `cb_${Date.now().toString(36)}_${rand}`;
@@ -108,6 +155,7 @@ export class AutoSwitcherRunawayGuard {
 			};
 			this.lastReason = `Límite global de ${MAX_TOTAL_TOOLS_PER_TURN} acciones alcanzado`;
 			this.lastTimestamp = Date.now();
+			this.persistIncidentToShm();
 			return {
 				block: true,
 				reason: `CIRCUIT BREAKER [Auto Switcher Pro]: Has alcanzado el límite máximo de ${MAX_TOTAL_TOOLS_PER_TURN} acciones consecutivas en este turno. Detén la exploración de inmediato, sintetiza tus hallazgos actuales y devuelve la palabra al usuario con tus conclusiones.`,
@@ -146,6 +194,7 @@ export class AutoSwitcherRunawayGuard {
 				};
 				this.lastReason = "Comando host de diagnóstico prohibido";
 				this.lastTimestamp = Date.now();
+				this.persistIncidentToShm();
 				return {
 					block: true,
 					reason: "Bloqueado por Auto Switcher Pro: No está permitido ejecutar desensambladores o comandos docker de bajo nivel (objdump, readelf, gdb, strace, docker cp/exec) en el entorno de desarrollo. Concéntrate en el código fuente del proyecto o consulta al usuario.",
@@ -188,6 +237,7 @@ export class AutoSwitcherRunawayGuard {
 				};
 				this.lastReason = `Bucle cíclico detectado (${occurrences} repeticiones)`;
 				this.lastTimestamp = Date.now();
+				this.persistIncidentToShm();
 				return {
 					block: true,
 					reason: `CIRCUIT BREAKER [Auto Switcher Pro]: Bucle de ejecución repetitivo detectado (comando equivalente ejecutado ${occurrences} veces). Detén la exploración y solicita orientación al usuario.`,
@@ -252,6 +302,9 @@ export class AutoSwitcherRunawayGuard {
 	}
 
 	getTelemetry(): RunawayGuardTelemetry {
+		if (!this.isTripped) {
+			this.loadIncidentFromShm();
+		}
 		return {
 			bashExplorationCount: this.bashCount,
 			subagentPollCount: this.pollCount,

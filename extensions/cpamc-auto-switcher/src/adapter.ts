@@ -431,6 +431,7 @@ export function formatSidebarQuotaCardLines(
 			renderLine(s.muted("Causa"), s.error(reasonLabel)),
 			renderLine(s.muted("Tokens protegidos"), s.live(`~${savedK}k tokens`)),
 			renderLine(s.muted("Diagnóstico"), s.accent(linkText)),
+			renderLine(s.muted("O escribe"), s.accent("/incident")),
 			divider,
 			renderLine(s.error("[ACCIÓN REQUERIDA]"), s.text("Dar orden directa")),
 		];

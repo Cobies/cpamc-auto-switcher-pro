@@ -185,6 +185,7 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		assert.match(text, /Ciclo repetitivo \(x3\)/);
 		assert.match(text, /Tokens protegidos\s+~85k tokens/);
 		assert.match(text, /Diagnóstico\s+\[Ver detalles \(3\) ↗\]/);
+		assert.match(text, /O escribe\s+\/incident/);
 		assert.match(text, /\[ACCIÓN REQUERIDA\]/);
 		assert.match(text, /Dar orden directa/);
 

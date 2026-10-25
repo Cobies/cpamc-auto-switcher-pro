@@ -229,5 +229,37 @@ describe("AutoSwitcherRunawayGuard - Anti-Bucle y Protección de Contexto", () =
 		assert.equal(tele.circuitBreakerTripped, true);
 		assert.equal(tele.circuitBreakerReason, "STEP_BUDGET_EXCEEDED");
 		assert.ok(tele.tokensSavedEstimate > 0);
+
+		// Limpieza del archivo persistido en SHM
+		guard.dismissIncident();
+		const teleCleared = guard.getTelemetry();
+		assert.equal(teleCleared.circuitBreakerTripped, false);
+		assert.equal(teleCleared.incidentId, undefined);
+	});
+
+	it("9. Persiste el incidente en /dev/shm y permite recuperarlo o descartarlo", () => {
+		const guard1 = new AutoSwitcherRunawayGuard();
+		guard1.dismissIncident();
+
+		// Forzar disparo por comando prohibido
+		const blocked = guard1.checkTool({ toolName: "bash", input: { command: "objdump -d binary" } });
+		assert.ok(blocked?.block);
+
+		const tele1 = guard1.getTelemetry();
+		assert.equal(tele1.circuitBreakerTripped, true);
+		assert.ok(tele1.incidentId);
+
+		// Crear una instancia nueva simulando reinicio de pane / sesión
+		const guard2 = new AutoSwitcherRunawayGuard();
+		const tele2 = guard2.getTelemetry();
+		assert.equal(tele2.circuitBreakerTripped, true);
+		assert.equal(tele2.incidentId, tele1.incidentId);
+		assert.equal(tele2.circuitBreakerReason, "PROHIBITED_COMMAND");
+
+		// Descartar deliberadamente
+		guard2.dismissIncident();
+		const tele3 = guard2.getTelemetry();
+		assert.equal(tele3.circuitBreakerTripped, false);
+		assert.equal(tele3.incidentId, undefined);
 	});
 });

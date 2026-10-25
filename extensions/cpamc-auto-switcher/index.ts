@@ -516,4 +516,46 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 		runawayGuard.resetSession();
 		adapter?.setContext(null);
 	});
+
+	// Comando interactivo /incident y /autopsia como fallback de terminal
+	const handleIncidentCommand = async (args: string | undefined, ctx: ExtensionContext) => {
+		const subcmd = (args || "").trim().toLowerCase();
+		if (subcmd === "dismiss" || subcmd === "clear" || subcmd === "descartar") {
+			runawayGuard.dismissIncident();
+			await adapter?.update(false, ctx);
+			if (ctx?.hasUI) {
+				ctx.ui.notify?.("✅ Incidente descartado. Disyuntor rearmado.", "info");
+			}
+			return;
+		}
+
+		const tele = runawayGuard.getTelemetry();
+		if (!tele.circuitBreakerTripped && !tele.incidentId) {
+			if (ctx?.hasUI) {
+				ctx.ui.notify?.("ℹ️ No hay incidentes activos de disyuntor en este momento.", "info");
+			}
+			return;
+		}
+
+		const incId = tele.incidentId || "active";
+		const directUrl = `http://127.0.0.1:8317/management.html#/plugin-pages/auto-switcher-pro-linux-amd64/2#incident-${incId}`;
+
+		// Intentar abrir en navegador automáticamente si el entorno lo soporta
+		exec(`xdg-open "${directUrl}" 2>/dev/null || open "${directUrl}" 2>/dev/null || true`);
+
+		if (ctx?.hasUI) {
+			ctx.ui.notify?.(`🔍 Abriendo autopsia de incidente (${incId})...\nURL: ${directUrl}`, "info");
+		}
+	};
+
+	if (typeof (pi as any).registerCommand === "function") {
+		(pi as any).registerCommand("incident", {
+			description: "Abre o inspecciona la autopsia del último incidente de bucle (o usa '/incident dismiss' para descartar)",
+			handler: handleIncidentCommand,
+		});
+		(pi as any).registerCommand("autopsia", {
+			description: "Alias de /incident para inspeccionar autopsia forense en CPAMC Console",
+			handler: handleIncidentCommand,
+		});
+	}
 }
