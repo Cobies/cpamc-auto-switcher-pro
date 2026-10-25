@@ -308,9 +308,9 @@ export function formatSidebarQuotaCardLines(
 		stateTag = s.live("[● Escribiendo]");
 	}
 
-	const maxFamilyW = Math.max(3, safeW - 32);
+	const maxFamilyW = Math.max(3, safeW - 28);
 	const familyDisplay = truncateWithAnsi(pair.familyName, maxFamilyW);
-	const titlePrefix = `${s.border("╭─ ")}${s.accent("⚡ CUENTAS CPAMC: ")}${s.text(familyDisplay)} ${s.border("─ ")}${stateTag} ${s.border("─")}`;
+	const titlePrefix = `${s.border("╭─ ")}${s.accent("⚡ POOL: ")}${s.text(familyDisplay)} ${s.border("─ ")}${stateTag} ${s.border("─")}`;
 	const prefixLen = visibleLen(titlePrefix);
 	const titleRules = Math.max(1, safeW - prefixLen - 1);
 	const top = fitToWidth(`${titlePrefix}${s.border("─".repeat(titleRules) + "╮")}`, safeW);
@@ -395,6 +395,15 @@ export function formatSidebarQuotaCardLines(
 					? s.live("Escribiendo en vivo")
 					: s.text("Misma cuenta fija");
 
+	// Micro-barra de progreso reactiva para presupuesto de turno (15 pasos)
+	const toolCount = telemetry.totalToolCount || 0;
+	const budgetGauge = s.paintGauge(`${Math.round((toolCount / 15) * 100)}%`, 5, toolCount >= 10);
+	const budgetVal = toolCount >= 14
+		? `${s.error(budgetGauge)} ${s.error(`${toolCount}/15!`)}`
+		: toolCount >= 10
+			? `${s.amber(budgetGauge)} ${s.amber(`${toolCount}/15`)}`
+			: `${s.idle(budgetGauge)} ${s.idle(`${toolCount}/15`)}`;
+
 	let chatBlockLines: string[] = [];
 	if (isTripped) {
 		const incId = telemetry.incidentId || "active";
@@ -425,44 +434,57 @@ export function formatSidebarQuotaCardLines(
 			divider,
 			renderLine(s.error("[ACCIÓN REQUERIDA]"), s.text("Dar orden directa")),
 		];
-	} else {
+	} else if (hasActiveInterception) {
+		// Modo Alerta / Intercepción Activa: Se expanden las métricas afectadas
 		chatBlockLines = [
 			renderLine(chatStatusHeader, chatStatusTag),
-			renderLine(
-				s.muted("Presupuesto de Turno"),
-				(telemetry.totalToolCount || 0) >= 12
-					? s.amber(`▲ ${telemetry.totalToolCount || 0}/15 pasos`)
-					: s.idle(`○ ${telemetry.totalToolCount || 0}/15 pasos`),
-			),
-			renderLine(s.muted("Rescate Microcortes"), rescateVal),
-			renderLine(s.muted("Parálisis / Falso Stop"), paralisisVal),
-			renderLine(s.muted("Poda de Contexto"), podaVal),
+			renderLine(s.muted("Presupuesto Turno"), budgetVal),
 			renderLine(s.muted("Evasión Bash (Terminal)"), bashVal),
 			renderLine(s.muted("Introspección Sesiones"), introVal),
 			renderLine(s.muted("Polling de Subagentes"), pollVal),
+			renderLine(s.muted("Rescate Microcortes"), rescateVal),
+		];
+	} else {
+		// Modo Normal Consolidado (2 columnas por línea para ahorrar 6 líneas verticales)
+		const colW = Math.floor((innerW - 1) / 2);
+		const renderDoubleLine = (l1: string, v1: string, l2: string, v2: string) => {
+			const cell1 = `${l1} ${v1}`;
+			const cell2 = `${l2} ${v2}`;
+			const sp1 = Math.max(0, colW - visibleLen(cell1));
+			const sp2 = Math.max(0, innerW - colW - 1 - visibleLen(cell2));
+			const content = `${cell1}${" ".repeat(sp1)}${s.border("│")}${cell2}${" ".repeat(sp2)}`;
+			return fitToWidth(`${s.border("│")} ${content} ${s.border("│")}`, safeW);
+		};
+
+		chatBlockLines = [
+			renderLine(chatStatusHeader, chatStatusTag),
+			renderLine(s.muted("Presupuesto Turno"), budgetVal),
+			renderDoubleLine(s.muted("Microcortes:"), s.idle("0/2"), s.muted("Subagentes:"), s.idle("0/2")),
+			renderDoubleLine(s.muted("Introspecc:"), s.idle("Ok"), s.muted("Poda:"), s.idle("+32k tk")),
+			renderDoubleLine(s.muted("Anti-Bucle:"), s.idle("Ok"), s.muted("Terminal:"), s.idle("0/5")),
 		];
 	}
 
 	const rawLines = [
 		top,
-		renderLine(s.muted("Grupo"), `${pair.familyIcon}${s.text(pair.familyName)}`),
+		renderLine(s.muted("Modelo"), s.text(pair.poolKey)),
 		renderLine(s.muted("Cuentas listas"), s.text(String(pair.totalAccounts))),
 		renderLine(s.muted("Enfoque"), approachVal),
 		divider,
 		renderLine(s.accent("[TRABAJANDO AHORA]"), activeStateLabel),
 		renderLine(s.muted("Correo"), s.text(pair.active.accountId)),
-		renderLine(s.muted(`Cuota 5h: ${pair.active.consumed5h}`), bar5h),
-		renderLine(s.muted(`Cuota Sem: ${pair.active.consumedWeekly}`), barWk),
-		divider,
-		...chatBlockLines,
+		renderLine(s.muted(`Consumido 5h: ${pair.active.consumed5h}`), bar5h),
+		renderLine(s.muted(`Consumido Sem: ${pair.active.consumedWeekly}`), barWk),
 		divider,
 		renderLine(
-			s.accent("[LA QUE SIGUE]"),
+			s.accent("[SIGUIENTE EN FILA]"),
 			pair.next
 				? (pair.next.minAvailable ? `${s.idle("○ " + nextAccountLabel)} ${s.muted(`(${pair.next.minAvailable})`)}` : s.text(nextAccountLabel))
 				: s.muted("Ninguna (Sola)"),
 		),
 		...(pair.next ? [renderLine(s.muted("Correo"), s.text(pair.next.accountId))] : []),
+		divider,
+		...chatBlockLines,
 		bottom,
 	];
 

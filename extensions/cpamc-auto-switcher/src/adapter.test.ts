@@ -127,18 +127,17 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		const text = lines.map((l: string) => stripAnsi(l)).join("\n");
 		assert.match(text, /\[TRABAJANDO AHORA\]/);
 		assert.match(text, /Correo\s+acc-1/);
-		assert.match(text, /Cuota 5h:\s+10\/100/);
-		assert.match(text, /Cuota Sem:\s+50\/500/);
+		assert.match(text, /Consumido 5h:\s+10\/100/);
+		assert.match(text, /Consumido Sem:\s+50\/500/);
+		assert.match(text, /\[SIGUIENTE EN FILA\]/);
+		assert.match(text, /Correo\s+acc-2/);
 		assert.match(text, /\[CUIDANDO EL CHAT\]/);
 		assert.match(text, /○ Blindaje Activo/);
-		assert.match(text, /Rescate Microcortes\s+○ En guardia \(0\/2\)/);
-		assert.match(text, /Parálisis \/ Falso Stop\s+○ Vigilando/);
-		assert.match(text, /Poda de Contexto\s+\+32k tk optimizados/);
-		assert.match(text, /Evasión Bash \(Terminal\)\s+○ 0\/5 búsquedas/);
-		assert.match(text, /Introspección Sesiones\s+○ Protegido/);
-		assert.match(text, /Polling de Subagentes\s+○ 0\/2 llamadas/);
-		assert.match(text, /\[LA QUE SIGUE\]/);
-		assert.match(text, /Correo\s+acc-2/);
+		assert.match(text, /Presupuesto Turno/);
+		assert.match(text, /Microcortes:\s+0\/2/);
+		assert.match(text, /Subagentes:\s+0\/2/);
+		assert.match(text, /Introspecc:\s+Ok/);
+		assert.match(text, /Poda:\s+\+32k tk/);
 	});
 
 	it("renders sidebar card in active execution state with LIVE indicator", () => {
