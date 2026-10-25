@@ -389,21 +389,21 @@ function renderRaceBox(
 	const titleRuleLen = Math.max(1, boxW - visibleLen(leftTitle) - visibleLen(rightRem));
 	const boxTop = `${leftTitle}${s.border("─".repeat(titleRuleLen))}${rightRem}`;
 
-	// Barras de 10 celdas para mantener alineación impecable
-	const gaugeCells = 10;
+	// Barras de 11 celdas para aprovechar el espacio ganado
+	const gaugeCells = 11;
 
-	// Línea 2: │ ⏱ Tpo [▱▱▱▱▱▱▱▱▱▱]  0%    ▲ Ritmo ajustado │
+	// Línea 2: │ ⏱  [▱▱▱▱▱▱▱▱▱▱▱]  0%    ▲ Ritmo ajustado │ (solo icono de reloj ⏱)
 	const timeBar = renderTimeGauge(pace.timeElapsedPct, gaugeCells);
 	const timePctStr = `${Math.round(pace.timeElapsedPct)}%`.padStart(3, " ");
-	const leftTime = `${s.border("│")} ${s.cyan("⏱ Tpo")} ${timeBar} ${s.cyan(timePctStr)}`;
+	const leftTime = `${s.border("│")} ${s.cyan("⏱ ")} ${timeBar} ${s.cyan(timePctStr)}`;
 	const rightPill = `${pace.pillColor(pace.pillLabel)} ${s.border("│")}`;
 	const spTime = Math.max(1, boxW - visibleLen(leftTime) - visibleLen(rightPill));
 	const boxLine1 = `${leftTime}${" ".repeat(spTime)}${rightPill}`;
 
-	// Línea 3: │   Uso [▰▰▱▱▱▱▱▱▱▱] 15%        85% libre    │
+	// Línea 3: │ Uso [▰▰▱▱▱▱▱▱▱▱▱] 15%        85% libre    │ (etiqueta "Uso")
 	const quotaBar = renderSpectralGauge(pace.consumedPct, gaugeCells);
 	const quotaPctStr = `${pace.consumedPct}%`.padStart(3, " ");
-	const leftQuota = `${s.border("│")}   ${s.slate("Uso")} ${quotaBar} ${s.boldWhite(quotaPctStr)}`;
+	const leftQuota = `${s.border("│")} ${s.slate("Uso")} ${quotaBar} ${s.boldWhite(quotaPctStr)}`;
 	const rightFree = `${s.slate(pace.remainingPct + "% libre")} ${s.border("│")}`;
 	const spQuota = Math.max(1, boxW - visibleLen(leftQuota) - visibleLen(rightFree));
 	const boxLine2 = `${leftQuota}${" ".repeat(spQuota)}${rightFree}`;

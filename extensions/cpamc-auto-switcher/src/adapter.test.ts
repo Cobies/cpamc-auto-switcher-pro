@@ -138,7 +138,7 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		assert.match(text, /5 HORAS/);
 		assert.match(text, /SEMANAL/);
 		assert.match(text, /Quedan 5h 0m/);
-		assert.match(text, /Tpo/);
+		assert.match(text, /⏱\s+/);
 		assert.match(text, /Uso/);
 		assert.match(text, /90% libre/);
 		assert.match(text, /Ritmo/);
