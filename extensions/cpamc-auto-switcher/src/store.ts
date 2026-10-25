@@ -39,8 +39,8 @@ export interface ContextCompressionState {
 
 let cachedLifecycle: LifecycleSummary | null = null;
 let contextState: ContextCompressionState = {
-	compressionsSession: 2,
-	currentTokens: 84_000,
+	compressionsSession: 0,
+	currentTokens: 0,
 	contextWindow: 200_000,
 	lossEvents: 0,
 };

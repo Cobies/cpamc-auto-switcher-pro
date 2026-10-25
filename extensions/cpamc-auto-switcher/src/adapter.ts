@@ -785,7 +785,7 @@ export function formatSidebarQuotaCardLines(
 		// Bloque CONTEXTO & COMPRESIÓN
 		const compTitle = `${s.amber("📦 CONTEXTO & COMPRESIÓN")}`;
 		const compHeader = fitToWidth(`${s.border("│")} ${compTitle}${" ".repeat(Math.max(1, innerW - visibleLen(compTitle)))} ${s.border("│")}`, safeW);
-		const curTokK = Math.round(ctxState.currentTokens / 1000);
+		const curTokK = ctxState.currentTokens > 0 ? Math.round(ctxState.currentTokens / 1000) : 0;
 		const maxTokK = Math.round(ctxState.contextWindow / 1000);
 		const compRow1 = renderLine(s.muted("Compresiones sesión:"), s.text(`${ctxState.compressionsSession} compactaciones`));
 		const compRow2 = renderLine(s.muted("Longitud actual:"), s.text(`${curTokK}k / ${maxTokK}k tokens`));
