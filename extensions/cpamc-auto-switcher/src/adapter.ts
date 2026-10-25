@@ -704,10 +704,14 @@ export function formatSidebarQuotaCardLines(
 		];
 	}
 
-		// Línea de cabecera en 2 líneas (con Enfoque acortado para no desbordar las 44 cols)
-		const compactApproach = approachVal.replace("Misma cuenta fija", "Cuenta fija");
+		// Línea de cabecera en 2 líneas (con Enfoque acortado defensivamente para no desbordar las 44 cols)
 		const line2Left = `${s.muted("Cuentas:")} ${s.text(String(pair.totalAccounts))} ${s.slate("· listas")}`;
-		const line2Right = `${s.muted("Enfoque:")} ${s.text(compactApproach)}`;
+		const compactApproach = approachVal
+			.replace("Misma cuenta fija", "Cuenta fija")
+			.replace("🛑 Bucle Interceptado", "🛑 Bucle");
+		const maxApproachW = Math.max(8, innerW - visibleLen(line2Left) - 10);
+		const approachDisplay = truncateWithAnsi(compactApproach, maxApproachW);
+		const line2Right = `${s.muted("Enfoque:")} ${s.text(approachDisplay)}`;
 		const spL2 = Math.max(1, innerW - visibleLen(line2Left) - visibleLen(line2Right));
 		const line2 = fitToWidth(`${s.border("│")} ${line2Left}${" ".repeat(spL2)}${line2Right} ${s.border("│")}`, safeW);
 
