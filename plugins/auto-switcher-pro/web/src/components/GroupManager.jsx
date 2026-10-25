@@ -413,12 +413,40 @@ export default function GroupManager({
     });
   }, [nodes, registryMemberFileNames]);
 
-  // Familias de modelos totales (Estáticas + Proveedores Dinámicos de OmniAuth Pro presentes en los nodos)
+  // Helper para verificar si un proveedor/familia tiene cuentas activas en nodes
+  const checkFamilyHasAccounts = useCallback((famProvider, hintPrefix) => {
+    return Array.isArray(nodes) && nodes.some((n) => {
+      const prov = (n.data?.provider || n.data?.accountType || '').toLowerCase();
+      const p = (n.data?.prefix || '').toLowerCase();
+      const fileName = (n.data?.fileName || n.name || n.id || '').toLowerCase();
+      if (famProvider === 'antigravity') {
+        return prov === 'antigravity' || fileName.startsWith('antigravity');
+      }
+      if (famProvider === 'claude') {
+        return prov === 'claude' || fileName.startsWith('claude') || fileName.startsWith('clau-') || p.startsWith('clau');
+      }
+      return (
+        prov === famProvider ||
+        prov.includes(famProvider) ||
+        (hintPrefix && p.startsWith(hintPrefix)) ||
+        (hintPrefix && fileName.startsWith(`${hintPrefix}-`))
+      );
+    });
+  }, [nodes]);
+
+  // Familias de modelos totales (Dinámicas según cuentas logueadas en CPAMC nativo + Proveedores de OmniAuth Pro)
   const allModelFamilies = useMemo(() => {
-    const families = { ...MODEL_FAMILIES };
+    const families = {};
     if (!Array.isArray(nodes) || nodes.length === 0) return families;
 
-    // Detectar qué proveedores de OmniAuth Pro existen en los nodos cargados
+    // 1. Familias principales (Gemini, Claude, Codex) SOLO si tienen cuentas logueadas en CPAMC nativo
+    for (const [key, fam] of Object.entries(MODEL_FAMILIES)) {
+      if (checkFamilyHasAccounts(fam.provider, fam.hintPrefix)) {
+        families[key] = { ...fam };
+      }
+    }
+
+    // 2. Detectar qué proveedores de OmniAuth Pro existen en los nodos cargados
     const detectedProviders = new Set();
     nodes.forEach((n) => {
       const p = (n.data?.provider || n.data?.accountType || '').toLowerCase().trim();
@@ -437,7 +465,7 @@ export default function GroupManager({
       }
     });
 
-    // Agregar al final de la barra preservando Gemini, Claude y Codex primero
+    // Agregar al final de la barra preservando Gemini, Claude y Codex primero si están presentes
     detectedProviders.forEach((provKey) => {
       const meta = OMNIAUTH_PROVIDER_META[provKey];
       if (meta && !families[provKey]) {
@@ -456,7 +484,14 @@ export default function GroupManager({
     });
 
     return families;
-  }, [nodes]);
+  }, [nodes, checkFamilyHasAccounts]);
+
+  // Si la familia seleccionada ya no existe en las familias activas, resetear selección
+  useEffect(() => {
+    if (family && !allModelFamilies[family]) {
+      setFamily(null);
+    }
+  }, [family, allModelFamilies]);
 
   // Resolución de familia efectiva (gestiona la jerarquía de sub-tipos de Gemini)
   const effectiveFamily = useMemo(() => {
@@ -746,7 +781,7 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
     const famProvider = effectiveFamily.provider;
 
     if (famProvider !== 'antigravity') {
-      const candidates = nodes
+      return nodes
         .filter((n) => {
           const prov = (n.data?.provider || n.data?.accountType || '').toLowerCase();
           const fileName = n.data?.fileName || n.name || n.id || '';
@@ -761,43 +796,6 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
           return !pref || pref.startsWith('unlinked_');
         })
         .map((node) => ({ node, virtual: false }));
-
-      // Si la familia es Claude pero no hay cuentas directas de Anthropic (famProvider !== 'antigravity'),
-      // permitir a las cuentas de Google Antigravity servir bajo el modelo dual 2N si están disponibles
-      if (candidates.length === 0 && effectiveFamily.key === 'claude' && freeCardsInTargetRole.length > 0) {
-        return freeCardsInTargetRole.map((card) => {
-          let backingNode = null;
-          if (card.virtualFileName) {
-            backingNode = nodes.find(
-              (n) => n.data?.fileName === card.virtualFileName || n.id === card.virtualFileName
-            );
-          }
-          if (!backingNode && card.masterFileName) {
-            backingNode = nodes.find(
-              (n) => n.data?.fileName === card.masterFileName || n.id === card.masterFileName
-            );
-          }
-
-          const node = backingNode || {
-            id: card.virtualFileName || card.masterFileName,
-            data: {
-              fileName: card.virtualFileName || card.masterFileName,
-              email: card.maskedEmail,
-              prefix: card.assignedPrefix,
-              provider: 'antigravity',
-            },
-          };
-
-          const needsVirtualize = isVirtualSource(node);
-          return { node, card, virtual: needsVirtualize };
-        }).filter(({ node }) => {
-          const fileName = node.data?.fileName || node.name || node.id || '';
-          const sameRoleMembers = registryMembersByRole.get(targetFamilyRole);
-          return !(sameRoleMembers && sameRoleMembers.has(fileName));
-        });
-      }
-
-      return candidates;
     }
 
     return freeCardsInTargetRole.map((card) => {
@@ -1965,9 +1963,19 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
               </div>
             ) : (
               <div className="group-card">
-                <h3 className="group-card-title">
+                <h3 className="group-card-title" data-testid="group-card-title">
                   <span>⚡</span>
                   <span>Estructuración de Grupo & Pool</span>
+                  <span className="group-card-title-sep">:</span>
+                  <span className="group-card-title-subtitle">
+                    <span className="group-card-title-item">Google Gemini</span>
+                    <span className="group-card-title-slash">/</span>
+                    <span className="group-card-title-item">Anthropic Claude</span>
+                    <span className="group-card-title-slash">/</span>
+                    <span className="group-card-title-item">OpenAI Codex</span>
+                    <span className="group-card-title-slash">/</span>
+                    <span className="group-card-title-item">Otros</span>
+                  </span>
                 </h3>
 
                 {/* Paso 1: Familia de modelos */}
@@ -1975,38 +1983,16 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
                   <label className="group-label">① Familia de modelos (define qué cuota se vigila):</label>
                   <div className="group-family-segmented" role="group">
                     {Object.entries(allModelFamilies).map(([key, fam]) => {
-                      const famProvider = fam.provider;
-                      const hasAccounts = Array.isArray(nodes) && nodes.some((n) => {
-                        const prov = (n.data?.provider || n.data?.accountType || '').toLowerCase();
-                        const p = (n.data?.prefix || '').toLowerCase();
-                        const fileName = (n.data?.fileName || n.name || n.id || '').toLowerCase();
-                        if (famProvider === 'antigravity') {
-                          return prov === 'antigravity' || fileName.startsWith('antigravity');
-                        }
-                        if (famProvider === 'claude') {
-                          return prov === 'claude' || fileName.startsWith('claude') || fileName.startsWith('clau-') || p.startsWith('clau');
-                        }
-                        return (
-                          prov === famProvider ||
-                          prov.includes(famProvider) ||
-                          p.startsWith(fam.hintPrefix) ||
-                          fileName.startsWith(`${fam.hintPrefix}-`)
-                        );
-                      });
-
                       return (
                         <button
                           key={key}
                           type="button"
-                          className={`group-family-chip ${family === key ? 'active' : ''} ${!hasAccounts ? 'family-empty' : ''}`}
+                          className={`group-family-chip ${family === key ? 'active' : ''}`}
                           onClick={() => handleSelectFamily(key)}
                           data-testid={`family-${key}`}
-                          style={!hasAccounts ? { opacity: 0.75 } : {}}
                         >
                           <span className="group-family-icon">{fam.icon}</span>
-                          <span className="group-family-label">
-                            {fam.label} {!hasAccounts && <span style={{ fontSize: 10, color: '#f59e0b', fontWeight: 600 }}>(0)</span>}
-                          </span>
+                          <span className="group-family-label">{fam.label}</span>
                           <span className="group-family-hint">
                             {key === 'gemini' ? 'Gemini: agy* · Claude: agy_son*, agy_opus*, agy_clau*' : `prefijo ${fam.hintPrefix}*`}
                           </span>

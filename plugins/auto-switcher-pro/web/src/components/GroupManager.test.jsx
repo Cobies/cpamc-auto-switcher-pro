@@ -947,15 +947,27 @@ describe('GroupManager - PoolRegistry como fuente única de verdad', () => {
     { id: 'm4', data: { fileName: 'antigravity-wilsonlavio9@gmail.com.json', email: 'wil...io9@gmail.com', prefix: '', provider: 'antigravity' } },
   ];
 
+  const clauMastersWithoutPrefix = [
+    { id: 'cm1', data: { fileName: 'claude-account-1.json', email: 'clau1@test.com', prefix: '', provider: 'claude' } },
+    { id: 'cm2', data: { fileName: 'claude-account-2.json', email: 'clau2@test.com', prefix: '', provider: 'claude' } },
+    { id: 'cm3', data: { fileName: 'claude-account-3.json', email: 'clau3@test.com', prefix: '', provider: 'claude' } },
+    { id: 'cm4', data: { fileName: 'claude-account-4.json', email: 'clau4@test.com', prefix: '', provider: 'claude' } },
+  ];
+
+  const clauMastersWithAssignedGemini = [
+    ...clauMastersWithoutPrefix,
+    { id: 'gm1', data: { fileName: 'antigravity-test.json', email: 'gemini@test.com', prefix: 'agy', provider: 'antigravity' } },
+  ];
+
   const registryClauPool = [
     {
       family: 'claude',
       base_prefix: 'clau',
-      leader_auth: 'antigravity-infosoytec@gmail.com.json',
+      leader_auth: 'claude-account-1.json',
       reserves: [
-        'antigravity-maribelluzbonitaaquinocastro@gmail.com.json',
-        'antigravity-wilsonlavio11@gmail.com.json',
-        'antigravity-wilsonlavio9@gmail.com.json',
+        'claude-account-2.json',
+        'claude-account-3.json',
+        'claude-account-4.json',
       ],
       policy: { disable_isolation: false, exclude_55: false },
     },
@@ -968,7 +980,7 @@ describe('GroupManager - PoolRegistry como fuente única de verdad', () => {
       count: 1,
     });
 
-    render(<GroupManager nodes={mastersWithoutPrefix} />);
+    render(<GroupManager nodes={clauMastersWithoutPrefix} />);
 
     fireEvent.click(screen.getByTestId('tab-disolver-pools'));
 
@@ -986,7 +998,7 @@ describe('GroupManager - PoolRegistry como fuente única de verdad', () => {
       count: 1,
     });
 
-    render(<GroupManager nodes={mastersWithoutPrefix} />);
+    render(<GroupManager nodes={clauMastersWithAssignedGemini} />);
 
     // Las 4 cuentas son miembros del pool clau registrado → cero candidatos libres
     await waitFor(() => {
@@ -1071,14 +1083,14 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
     });
     // Catálogo base: 3 targets de familias (2 gemini del pool existente + 1 claude nuevo) + 1 foreign antigravity junk
     vi.spyOn(managementClient, 'listModels').mockResolvedValue({
-      models: ['agy/gemini-3-flash', 'agy/gemini-3.8-flash-high', 'clau/claude-sonnet-4-6', 'agy/gemini-junk-model-1'],
+      models: ['agy/gemini-3-flash', 'agy/gemini-3.8-flash-high', 'agy_clau/claude-sonnet-4-6', 'agy/gemini-junk-model-1'],
     });
     const savePoolSpy = vi.spyOn(managementClient, 'savePool').mockResolvedValue({
-      ok: true, pool: { base_prefix: 'clau' }, message: 'Pool clau saved',
+      ok: true, pool: { base_prefix: 'agy_clau' }, message: 'Pool agy_clau saved',
     });
     const patchPrefixesSpy = vi.spyOn(managementClient, 'saveAuthFilePrefixes').mockResolvedValue({ successful: [], failed: [] });
     const patchExclusionsSpy = vi.spyOn(managementClient, 'patchAuthFileExclusions').mockResolvedValue({ ok: true });
-    const virtualizeSpy = vi.spyOn(managementClient, 'virtualizeAccount').mockResolvedValue({ name: 'x.json', prefix: 'clau' });
+    const virtualizeSpy = vi.spyOn(managementClient, 'virtualizeAccount').mockResolvedValue({ name: 'x.json', prefix: 'agy_clau' });
 
     render(<GroupManager nodes={geminiPooledNodes} />);
 
@@ -1086,8 +1098,9 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
       expect(screen.getByText(/Disolver \/ ➕ Sumar \/ Adoptar Reservas \(1\)/)).toBeTruthy();
     });
 
-    // Familia Claude: los masters del pool Gemini DEBEN aparecer como candidatos (2N)
-    fireEvent.click(screen.getByTestId('family-claude'));
+    // Subfamilia Claude de Antigravity (2N): los masters del pool Gemini DEBEN aparecer como candidatos
+    fireEvent.click(screen.getByTestId('family-gemini'));
+    fireEvent.click(screen.getByTestId('subfamily-gemini-claude'));
     await waitFor(() => {
       const opts = Array.from(screen.getByTestId('select-active-account').options).filter((o) => o.value !== '');
       expect(opts.length).toBe(4);
@@ -1095,13 +1108,13 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
 
     fireEvent.change(screen.getByTestId('select-active-account'), { target: { value: 'm1' } });
     fireEvent.click(screen.getByTestId('reserve-item-m2'));
-    fireEvent.change(screen.getByTestId('input-group-base-prefix'), { target: { value: 'clau' } });
+    fireEvent.change(screen.getByTestId('input-group-base-prefix'), { target: { value: 'agy_clau' } });
     fireEvent.click(screen.getByTestId('btn-save-group'));
 
     await waitFor(() => expect(savePoolSpy).toHaveBeenCalledTimes(1));
     const payload = savePoolSpy.mock.calls[0][0];
-    expect(payload.family).toBe('claude');
-    expect(payload.base_prefix).toBe('clau');
+    expect(payload.family).toBe('gemini_claude');
+    expect(payload.base_prefix).toBe('agy_clau');
     expect(payload.leader_auth).toBe('antigravity-infosoytec@gmail.com.json');
     expect(payload.reserves).toContain('antigravity-maribelluzbonitaaquinocastro@gmail.com.json');
 
@@ -1426,6 +1439,16 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
     it('dynamically appends OmniAuth Pro family chips after Codex when accounts exist', () => {
       const nodesWithDeepSeek = [
         {
+          id: 'antigravity-1.json',
+          name: 'antigravity-1.json',
+          data: {
+            fileName: 'antigravity-1.json',
+            prefix: '',
+            provider: 'antigravity',
+            email: 'gemini@example.com',
+          },
+        },
+        {
           id: 'deepseek-acc1.json',
           name: 'deepseek-acc1.json',
           data: {
@@ -1449,10 +1472,11 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
 
       render(<GroupManager nodes={nodesWithDeepSeek} />);
 
-      // Baseline core families must exist in correct order
+      // Core families: Gemini exists because antigravity accounts are logged in
       expect(screen.getByTestId('family-gemini')).toBeTruthy();
-      expect(screen.getByTestId('family-claude')).toBeTruthy();
-      expect(screen.getByTestId('family-codex')).toBeTruthy();
+      // Families with 0 accounts (Claude and Codex) are dynamically hidden
+      expect(screen.queryByTestId('family-claude')).toBeNull();
+      expect(screen.queryByTestId('family-codex')).toBeNull();
 
       // DeepSeek dynamic family chip must appear appended
       const deepseekChip = screen.getByTestId('family-deepseek');
@@ -1581,7 +1605,7 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
       expect(firstOptionText).toContain('⭐ (Recomendado)');
     });
 
-    it('disables specialist selector and does NOT show models or cross-contaminate when family has no logged-in accounts', () => {
+    it('does not render family chip when family has no logged-in accounts (e.g. OpenAI Codex)', () => {
       // Setup nodes with ONLY Gemini and NaN accounts (NO OpenAI Codex accounts)
       const nodesWithoutCodex = [
         {
@@ -1608,26 +1632,11 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
 
       render(<GroupManager nodes={nodesWithoutCodex} />);
 
-      // Click on OpenAI Codex family (which has 0 accounts logged in)
-      const codexChip = screen.getByTestId('family-codex');
-      fireEvent.click(codexChip);
-
-      // Verify specialist selector is disabled and shows empty option
-      const specialistSelect = screen.getByTestId('select-specialist-model');
-      expect(specialistSelect.disabled).toBe(true);
-      expect(specialistSelect.value).toBe('');
-
-      // Verify it does NOT steal gpt-6-luna or gpt-5.6-luna from NaN or hardcoded lists
-      const specialistOptions = Array.from(specialistSelect.querySelectorAll('option')).map((o) => o.value);
-      expect(specialistOptions).not.toContain('gpt-6-luna');
-      expect(specialistOptions).not.toContain('gpt-5.6-luna');
-      expect(specialistOptions).not.toContain('gpt-4o');
-
-      // Verify warning message is rendered
-      expect(screen.getByText(/No hay cuentas vinculadas ni modelos disponibles en CPAMC/i)).toBeTruthy();
+      // OpenAI Codex has 0 accounts logged in -> chip is dynamically hidden
+      expect(screen.queryByTestId('family-codex')).toBeNull();
     });
 
-    it('disables specialist selector for Anthropic Claude when ONLY Antigravity accounts are logged in (zero official clau* accounts)', () => {
+    it('does not render Anthropic Claude chip when ONLY Antigravity accounts are logged in (zero official clau* accounts)', () => {
       // Setup nodes with ONLY Antigravity accounts (no direct Anthropic Claude accounts)
       const nodesWithOnlyAntigravity = [
         {
@@ -1654,21 +1663,26 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
 
       render(<GroupManager nodes={nodesWithOnlyAntigravity} />);
 
-      // Click on Anthropic Claude family (which has 0 direct clau* accounts logged in)
-      const claudeChip = screen.getByTestId('family-claude');
-      fireEvent.click(claudeChip);
+      // Anthropic Claude has 0 direct clau* accounts logged in -> chip is dynamically hidden
+      expect(screen.queryByTestId('family-claude')).toBeNull();
+    });
 
-      // Verify specialist selector is disabled and shows empty state
-      const specialistSelect = screen.getByTestId('select-specialist-model');
-      expect(specialistSelect.disabled).toBe(true);
-      expect(specialistSelect.value).toBe('');
+    it('renders the header title with canonical providers Google Gemini / Anthropic Claude / OpenAI Codex / Otros', () => {
+      const nodesWithGemini = [
+        {
+          id: 'antigravity-test.json',
+          data: { fileName: 'antigravity-test.json', prefix: '', provider: 'antigravity', email: 'test@example.com' },
+        },
+      ];
 
-      // Verify it does NOT populate hardcoded Claude models when no physical clau* accounts exist
-      const specialistOptions = Array.from(specialistSelect.querySelectorAll('option')).map((o) => o.value);
-      expect(specialistOptions).toEqual(['']);
+      render(<GroupManager nodes={nodesWithGemini} />);
 
-      // Verify honest alert notice is displayed
-      expect(screen.getByText(/No hay cuentas vinculadas ni modelos disponibles en CPAMC para Anthropic Claude/i)).toBeTruthy();
+      const titleEl = screen.getByTestId('group-card-title');
+      expect(titleEl.textContent).toContain('Estructuración de Grupo & Pool');
+      expect(titleEl.textContent).toContain('Google Gemini');
+      expect(titleEl.textContent).toContain('Anthropic Claude');
+      expect(titleEl.textContent).toContain('OpenAI Codex');
+      expect(titleEl.textContent).toContain('Otros');
     });
   });
 });
