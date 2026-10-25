@@ -132,17 +132,17 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 	it("renders sidebar card with colloquial unified labels and CUIDANDO EL CHAT block", () => {
 		const lines = formatSidebarQuotaCardLines(mockPoolPair, 48);
 		const text = lines.map((l: string) => stripAnsi(l)).join("\n");
-		assert.match(text, /\[TRABAJANDO AHORA\]/);
-		assert.match(text, /Correo\s+acc-1/);
-		assert.match(text, /VENTANA 5 HORAS/);
+		assert.match(text, /Modelo\s+Pool-01-gemini/);
+		assert.match(text, /Cuentas:\s+2\s+· listas/);
+		assert.match(text, /⚡ acc-1/);
+		assert.match(text, /5 HORAS/);
 		assert.match(text, /SEMANAL/);
-		assert.match(text, /Quedan/);
-		assert.match(text, /Tiempo/);
-		assert.match(text, /Cuota/);
-		assert.match(text, /90% restante/);
+		assert.match(text, /Quedan 5h 0m/);
+		assert.match(text, /T /);
+		assert.match(text, /C /);
+		assert.match(text, /90% libre/);
 		assert.match(text, /Ritmo/);
-		assert.match(text, /\[SIGUIENTE EN FILA\]/);
-		assert.match(text, /Correo\s+acc-2/);
+		assert.match(text, /\[SIGUIENTE\]\s+acc-2/);
 		assert.match(text, /\[CUIDANDO EL CHAT\]/);
 		assert.match(text, /○ Blindaje Activo/);
 		assert.match(text, /Presupuesto Turno/);

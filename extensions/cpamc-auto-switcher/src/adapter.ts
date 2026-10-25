@@ -373,35 +373,57 @@ function renderTimeGauge(pct: number, cells = 10): string {
 	return res;
 }
 
-function renderRaceSection(
+function renderRaceBox(
 	title: string,
 	pace: QuotaPaceInfo,
 	innerW: number,
 	safeW: number,
 	s: ThemeStyler,
 ): string[] {
-	// Línea 1: Título y tiempo restante (ej: ⚡ VENTANA 5 HORAS · Quedan 5h 0m)
-	const headerLeft = `${s.accent("⚡ " + title)} ${s.border("·")} ${s.boldWhite("Quedan " + pace.remainingFormatted)}`;
-	const spHeader = Math.max(1, innerW - visibleLen(headerLeft));
-	const l1 = fitToWidth(`${s.border("│")} ${headerLeft}${" ".repeat(spHeader)} ${s.border("│")}`, safeW);
+	// Ancho interior de la mini-caja = innerW - 2 (por ejemplo, para innerW=44, boxW=42)
+	const boxW = Math.max(20, innerW - 2);
 
-	// Línea 2: Barra de Tiempo vs Ritmo
-	const timeBar = renderTimeGauge(pace.timeElapsedPct, 10);
-	const timePctStr = `${Math.round(pace.timeElapsedPct)}%`.padStart(4, " ");
-	const leftTime = `  ${s.slate("Tiempo")} ${timeBar} ${s.cyan(timePctStr)}`;
-	const pill = pace.pillColor(pace.pillLabel);
-	const spTime = Math.max(1, innerW - visibleLen(leftTime) - visibleLen(pill));
-	const l2 = fitToWidth(`${s.border("│")} ${leftTime}${" ".repeat(spTime)}${pill} ${s.border("│")}`, safeW);
+	// Línea 1: ╭─ 5 HORAS ────────────── Quedan 5h 0m ────╮
+	const leftTitle = `${s.border("╭─ ")}${s.accent(title)} ${s.border("─")}`;
+	const rightRem = ` ${s.boldWhite("Quedan " + pace.remainingFormatted)} ${s.border("────╮")}`;
+	const titleRuleLen = Math.max(1, boxW - visibleLen(leftTitle) - visibleLen(rightRem));
+	const boxTop = `${leftTitle}${s.border("─".repeat(titleRuleLen))}${rightRem}`;
 
-	// Línea 3: Barra de Cuota vs % Restante
-	const quotaBar = renderSpectralGauge(pace.consumedPct, 10);
-	const quotaPctStr = `${pace.consumedPct}%`.padStart(4, " ");
-	const leftQuota = `  ${s.slate("Cuota ")} ${quotaBar} ${s.boldWhite(quotaPctStr)}`;
-	const rightRem = `${s.slate(pace.remainingPct + "% restante")}`;
-	const spQuota = Math.max(1, innerW - visibleLen(leftQuota) - visibleLen(rightRem));
-	const l3 = fitToWidth(`${s.border("│")} ${leftQuota}${" ".repeat(spQuota)}${rightRem} ${s.border("│")}`, safeW);
+	// Barras de 12 celdas para el interior de la mini-caja
+	const gaugeCells = 12;
 
-	return [l1, l2, l3];
+	// Línea 2: │ T [▱▱▱▱▱▱▱▱▱▱▱▱]  0%   ▲ Ritmo ajustado │
+	const timeBar = renderTimeGauge(pace.timeElapsedPct, gaugeCells);
+	const timePctStr = `${Math.round(pace.timeElapsedPct)}%`.padStart(3, " ");
+	const leftTime = `${s.border("│")} ${s.cyan("T")} ${timeBar} ${s.cyan(timePctStr)}`;
+	const rightPill = `${pace.pillColor(pace.pillLabel)} ${s.border("│")}`;
+	const spTime = Math.max(1, boxW - visibleLen(leftTime) - visibleLen(rightPill));
+	const boxLine1 = `${leftTime}${" ".repeat(spTime)}${rightPill}`;
+
+	// Línea 3: │ C [▰▰▱▱▱▱▱▱▱▱▱▱] 15%   85% libre        │
+	const quotaBar = renderSpectralGauge(pace.consumedPct, gaugeCells);
+	const quotaPctStr = `${pace.consumedPct}%`.padStart(3, " ");
+	const leftQuota = `${s.border("│")} ${s.slate("C")} ${quotaBar} ${s.boldWhite(quotaPctStr)}`;
+	const rightFree = `${s.slate(pace.remainingPct + "% libre")} ${s.border("│")}`;
+	const spQuota = Math.max(1, boxW - visibleLen(leftQuota) - visibleLen(rightFree));
+	const boxLine2 = `${leftQuota}${" ".repeat(spQuota)}${rightFree}`;
+
+	// Línea 4: ╰──────────────────────────────────────────╯
+	const boxBot = `${s.border("╰" + "─".repeat(boxW - 2) + "╯")}`;
+
+	// Envolver cada línea dentro del contenedor exterior con 1 espacio a cada lado
+	const wrapInContainer = (content: string) => {
+		const padLeft = Math.floor((innerW - visibleLen(content)) / 2);
+		const padRight = Math.max(0, innerW - visibleLen(content) - padLeft);
+		return fitToWidth(`${s.border("│")}${" ".repeat(padLeft)}${content}${" ".repeat(padRight)}${s.border("│")}`, safeW);
+	};
+
+	return [
+		wrapInContainer(boxTop),
+		wrapInContainer(boxLine1),
+		wrapInContainer(boxLine2),
+		wrapInContainer(boxBot),
+	];
 }
 
 export function renderDualConcentricClocks(
@@ -413,11 +435,10 @@ export function renderDualConcentricClocks(
 	const pace5h = calculateQuotaPace(acc.consumed5h || "0%", acc.reset5hInSec, 300, s);
 	const paceWk = calculateQuotaPace(acc.consumedWeekly || "0%", acc.resetWeeklyInSec, 10080, s);
 
-	const lines5h = renderRaceSection("VENTANA 5 HORAS", pace5h, innerW, safeW, s);
-	const linesWk = renderRaceSection("SEMANAL", paceWk, innerW, safeW, s);
-	const divider = fitToWidth(s.border("├" + "─".repeat(Math.max(1, safeW - 2)) + "┤"), safeW);
+	const lines5h = renderRaceBox("5 HORAS", pace5h, innerW, safeW, s);
+	const linesWk = renderRaceBox("SEMANAL", paceWk, innerW, safeW, s);
 
-	return [...lines5h, divider, ...linesWk];
+	return [...lines5h, ...linesWk];
 }
 
 function extractBorderColor(lines: string[], theme?: any): string {
@@ -689,28 +710,47 @@ export function formatSidebarQuotaCardLines(
 		];
 	}
 
-	const rawLines = [
-		top,
-		renderLine(s.muted("Modelo"), s.text(pair.poolKey)),
-		renderLine(s.muted("Cuentas listas"), s.text(String(pair.totalAccounts))),
-		renderLine(s.muted("Enfoque"), approachVal),
-		divider,
-		renderLine(s.accent("[TRABAJANDO AHORA]"), activeStateLabel),
-		renderLine(s.muted("Correo"), s.text(pair.active.accountId)),
-		divider,
-		...renderDualConcentricClocks(pair.active, s, innerW, safeW),
-		divider,
-		renderLine(
-			s.accent("[SIGUIENTE EN FILA]"),
-			pair.next
-				? (pair.next.minAvailable ? `${s.idle("○ " + nextAccountLabel)} ${s.muted(`(${pair.next.minAvailable})`)}` : s.text(nextAccountLabel))
-				: s.muted("Ninguna (Sola)"),
-		),
-		...(pair.next ? [renderLine(s.muted("Correo"), s.text(pair.next.accountId))] : []),
-		divider,
-		...chatBlockLines,
-		bottom,
-	];
+		// Línea de cabecera en 2 líneas
+		const line2Left = `${s.muted("Cuentas:")} ${s.text(String(pair.totalAccounts))} ${s.slate("· listas")}`;
+		const line2Right = `${s.muted("Enfoque:")} ${s.text(approachVal)}`;
+		const spL2 = Math.max(1, innerW - visibleLen(line2Left) - visibleLen(line2Right));
+		const line2 = fitToWidth(`${s.border("│")} ${line2Left}${" ".repeat(spL2)}${line2Right} ${s.border("│")}`, safeW);
+
+		// Línea de cuenta activa en 1 sola línea: ⚡ correo  [estado]
+		const activeEmail = pair.active.accountId;
+		const leftActive = `${s.accent("⚡ ")}${s.text(activeEmail)}`;
+		const spActive = Math.max(1, innerW - visibleLen(leftActive) - visibleLen(activeStateLabel));
+		const activeLine = fitToWidth(`${s.border("│")} ${leftActive}${" ".repeat(spActive)}${activeStateLabel} ${s.border("│")}`, safeW);
+
+		// Línea de siguiente cuenta en 1 sola línea: [SIGUIENTE] correo  [estado]
+		let nextLine: string;
+		if (pair.next) {
+			const nextEmail = pair.next.accountId;
+			const nextStateLabel = pair.next.minAvailable
+				? `${s.idle("○ " + nextAccountLabel)} ${s.muted(`(${pair.next.minAvailable})`)}`
+				: s.text(nextAccountLabel);
+			const leftNext = `${s.accent("[SIGUIENTE]")} ${s.text(nextEmail)}`;
+			const spNext = Math.max(1, innerW - visibleLen(leftNext) - visibleLen(nextStateLabel));
+			nextLine = fitToWidth(`${s.border("│")} ${leftNext}${" ".repeat(spNext)}${nextStateLabel} ${s.border("│")}`, safeW);
+		} else {
+			const leftNext = `${s.accent("[SIGUIENTE]")}`;
+			const rightNone = s.muted("Ninguna (Sola)");
+			const spNext = Math.max(1, innerW - visibleLen(leftNext) - visibleLen(rightNone));
+			nextLine = fitToWidth(`${s.border("│")} ${leftNext}${" ".repeat(spNext)}${rightNone} ${s.border("│")}`, safeW);
+		}
+
+		const rawLines = [
+			top,
+			renderLine(s.muted("Modelo"), s.text(pair.poolKey)),
+			line2,
+			divider,
+			activeLine,
+			...renderDualConcentricClocks(pair.active, s, innerW, safeW),
+			nextLine,
+			divider,
+			...chatBlockLines,
+			bottom,
+		];
 
 	return rawLines.map((line) => fitToWidth(line, safeW));
 }
