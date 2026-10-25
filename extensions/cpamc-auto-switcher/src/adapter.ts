@@ -380,7 +380,7 @@ function renderRaceBox(
 	safeW: number,
 	s: ThemeStyler,
 ): string[] {
-	// Ancho interior de la mini-caja = innerW - 2 (por ejemplo, para innerW=44, boxW=42)
+	// Ancho interior de la mini-caja = innerW - 2 (42 caracteres de ancho exacto)
 	const boxW = Math.max(20, innerW - 2);
 
 	// Línea 1: ╭─ 5 HORAS ────────────── Quedan 5h 0m ────╮
@@ -389,21 +389,21 @@ function renderRaceBox(
 	const titleRuleLen = Math.max(1, boxW - visibleLen(leftTitle) - visibleLen(rightRem));
 	const boxTop = `${leftTitle}${s.border("─".repeat(titleRuleLen))}${rightRem}`;
 
-	// Barras de 12 celdas para el interior de la mini-caja
-	const gaugeCells = 12;
+	// Barras de 10 celdas para mantener alineación impecable
+	const gaugeCells = 10;
 
-	// Línea 2: │ T [▱▱▱▱▱▱▱▱▱▱▱▱]  0%   ▲ Ritmo ajustado │
+	// Línea 2: │ ⏱ Tpo [▱▱▱▱▱▱▱▱▱▱]  0%    ▲ Ritmo ajustado │
 	const timeBar = renderTimeGauge(pace.timeElapsedPct, gaugeCells);
 	const timePctStr = `${Math.round(pace.timeElapsedPct)}%`.padStart(3, " ");
-	const leftTime = `${s.border("│")} ${s.cyan("T")} ${timeBar} ${s.cyan(timePctStr)}`;
+	const leftTime = `${s.border("│")} ${s.cyan("⏱ Tpo")} ${timeBar} ${s.cyan(timePctStr)}`;
 	const rightPill = `${pace.pillColor(pace.pillLabel)} ${s.border("│")}`;
 	const spTime = Math.max(1, boxW - visibleLen(leftTime) - visibleLen(rightPill));
 	const boxLine1 = `${leftTime}${" ".repeat(spTime)}${rightPill}`;
 
-	// Línea 3: │ C [▰▰▱▱▱▱▱▱▱▱▱▱] 15%   85% libre        │
+	// Línea 3: │   Uso [▰▰▱▱▱▱▱▱▱▱] 15%        85% libre    │
 	const quotaBar = renderSpectralGauge(pace.consumedPct, gaugeCells);
 	const quotaPctStr = `${pace.consumedPct}%`.padStart(3, " ");
-	const leftQuota = `${s.border("│")} ${s.slate("C")} ${quotaBar} ${s.boldWhite(quotaPctStr)}`;
+	const leftQuota = `${s.border("│")}   ${s.slate("Uso")} ${quotaBar} ${s.boldWhite(quotaPctStr)}`;
 	const rightFree = `${s.slate(pace.remainingPct + "% libre")} ${s.border("│")}`;
 	const spQuota = Math.max(1, boxW - visibleLen(leftQuota) - visibleLen(rightFree));
 	const boxLine2 = `${leftQuota}${" ".repeat(spQuota)}${rightFree}`;
@@ -411,10 +411,12 @@ function renderRaceBox(
 	// Línea 4: ╰──────────────────────────────────────────╯
 	const boxBot = `${s.border("╰" + "─".repeat(boxW - 2) + "╯")}`;
 
-	// Envolver cada línea dentro del contenedor exterior con 1 espacio a cada lado
+	// Envolver cada línea dentro del contenedor de 48 columnas (innerW = safeW - 4 = 44)
+	// boxW = 42 -> 1 espacio a la izquierda, 1 espacio a la derecha -> total 44 de innerW
 	const wrapInContainer = (content: string) => {
-		const padLeft = Math.floor((innerW - visibleLen(content)) / 2);
-		const padRight = Math.max(0, innerW - visibleLen(content) - padLeft);
+		const totalPad = Math.max(0, innerW - visibleLen(content));
+		const padLeft = Math.floor(totalPad / 2);
+		const padRight = totalPad - padLeft;
 		return fitToWidth(`${s.border("│")}${" ".repeat(padLeft)}${content}${" ".repeat(padRight)}${s.border("│")}`, safeW);
 	};
 
@@ -716,20 +718,22 @@ export function formatSidebarQuotaCardLines(
 		const spL2 = Math.max(1, innerW - visibleLen(line2Left) - visibleLen(line2Right));
 		const line2 = fitToWidth(`${s.border("│")} ${line2Left}${" ".repeat(spL2)}${line2Right} ${s.border("│")}`, safeW);
 
-		// Línea de cuenta activa en 1 sola línea: ⚡ correo  [estado]
-		const activeEmail = pair.active.accountId;
-		const leftActive = `${s.accent("⚡ ")}${s.text(activeEmail)}`;
+		// Línea de cuenta activa en 1 sola línea: ⚡ correo  [estado] (con truncado defensivo para no desbordar)
+		const maxActiveEmailW = Math.max(10, innerW - visibleLen(activeStateLabel) - 4);
+		const activeEmailTrunc = truncateWithAnsi(pair.active.accountId, maxActiveEmailW);
+		const leftActive = `${s.accent("⚡ ")}${s.text(activeEmailTrunc)}`;
 		const spActive = Math.max(1, innerW - visibleLen(leftActive) - visibleLen(activeStateLabel));
 		const activeLine = fitToWidth(`${s.border("│")} ${leftActive}${" ".repeat(spActive)}${activeStateLabel} ${s.border("│")}`, safeW);
 
 		// Línea de siguiente cuenta en 1 sola línea: [SIGUIENTE] correo  [estado]
 		let nextLine: string;
 		if (pair.next) {
-			const nextEmail = pair.next.accountId;
 			const nextStateLabel = pair.next.minAvailable
 				? `${s.idle("○ " + nextAccountLabel)} ${s.muted(`(${pair.next.minAvailable})`)}`
 				: s.text(nextAccountLabel);
-			const leftNext = `${s.accent("[SIGUIENTE]")} ${s.text(nextEmail)}`;
+			const maxNextEmailW = Math.max(10, innerW - visibleLen(nextStateLabel) - 14);
+			const nextEmailTrunc = truncateWithAnsi(pair.next.accountId, maxNextEmailW);
+			const leftNext = `${s.accent("[SIGUIENTE]")} ${s.text(nextEmailTrunc)}`;
 			const spNext = Math.max(1, innerW - visibleLen(leftNext) - visibleLen(nextStateLabel));
 			nextLine = fitToWidth(`${s.border("│")} ${leftNext}${" ".repeat(spNext)}${nextStateLabel} ${s.border("│")}`, safeW);
 		} else {
