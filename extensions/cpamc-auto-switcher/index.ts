@@ -11,6 +11,7 @@ import { registerAgentMatrixCommand } from "./src/matrix-command.js";
 import { CpamcTuiAdapter } from "./src/adapter.js";
 import { querySwitcherAccounts, checkProactivePoolRebalance, applyOptimisticQuotaDecrement, getRotationPairForModelSync } from "./src/store.js";
 import { saveProjectModel, getProjectModel, clearProjectModel } from "./src/project-model-store.js";
+import { runawayGuard } from "./src/guards.js";
 
 const execAsync = promisify(exec);
 const CURRENT_VERSION = "1.0.0";
@@ -405,8 +406,22 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 
 	pi.on("turn_start", async (_event: any, ctx: ExtensionContext) => {
 		try {
+			runawayGuard.resetTurn();
 			await adapter?.update(true, ctx);
 		} catch {}
+	});
+
+	// Blindaje contra bucles de terminal, auto-introspección y polling a subagentes
+	pi.on("tool_call", async (event: any, ctx: ExtensionContext) => {
+		const check = runawayGuard.checkTool(event);
+		if (check?.block) {
+			if (ctx?.hasUI) {
+				ctx.ui.notify?.(`🛑 ${check.reason.split(":")[0] || "Acción frenada por Auto Switcher Pro"}`, "warning");
+			}
+			void adapter?.update(true, ctx);
+			return check;
+		}
+		return undefined;
 	});
 
 	pi.on("turn_end", async (_event: any, ctx: ExtensionContext) => {
@@ -443,6 +458,7 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 	// Limpieza en transiciones de sesión de Pi
 	pi.on("session_before_switch", async (event: any, ctx?: ExtensionContext) => {
 		clearTimer();
+		runawayGuard.resetSession();
 		// Capturar y registrar el modelo activo antes de que la sesión sea sustituida (/new o switch)
 		try {
 			if (event?.reason === "new" && ctx?.cwd && ctx?.model?.id && ctx?.model?.provider) {
@@ -454,6 +470,7 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_before_fork", async () => {
 		clearTimer();
+		runawayGuard.resetSession();
 		adapter?.setContext(null);
 	});
 
@@ -476,6 +493,7 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_shutdown", async () => {
 		clearTimer();
+		runawayGuard.resetSession();
 		adapter?.setContext(null);
 	});
 }

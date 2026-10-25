@@ -1,5 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getRotationPairForModel, getRotationPairForModelSync, type PoolRotationPair } from "./store.js";
+import { runawayGuard, type RunawayGuardTelemetry, MAX_BASH_EXPLORATION_PER_TURN, MAX_SUBAGENT_POLL_PER_TURN } from "./guards.js";
 
 // Colores ANSI suaves compatibles con temas oscuros y claros (Cyber-Pastel)
 const RESET = "\x1b[0m";
@@ -222,6 +223,7 @@ export function formatSidebarQuotaCardLines(
 	borderColor = "\x1b[38;2;120;153;166m",
 	theme?: any,
 	isBusy = false,
+	guardTelemetry?: RunawayGuardTelemetry,
 ): string[] {
 	if (width < 20) {
 		// Modo ultra-compacto si el ancho disponible es extremadamente pequeño
@@ -323,28 +325,65 @@ export function formatSidebarQuotaCardLines(
 			? `${s.live("● " + activeAccountLabel)} ${s.live(`(${pair.active.minAvailable} ok)`)}`
 			: `${s.idle("○ " + activeAccountLabel)} ${s.idle(`(${pair.active.minAvailable} ok)`)}`;
 
-	// Bloque reactivo "CUIDANDO EL CHAT"
-	const chatStatusHeader = isAmber
+	// Bloque reactivo "CUIDANDO EL CHAT" (6 funciones unificadas de resiliencia y anti-bucle)
+	const telemetry = guardTelemetry || runawayGuard.getTelemetry();
+	const hasActiveInterception =
+		telemetry.blockedIntrospections > 0 ||
+		telemetry.blockedBashEvasions > 0 ||
+		telemetry.blockedSubagentPolls > 0 ||
+		telemetry.bashExplorationCount >= MAX_BASH_EXPLORATION_PER_TURN;
+
+	const chatStatusHeader = (isAmber || hasActiveInterception)
 		? `${s.amber("[CUIDANDO EL CHAT]")}`
 		: `${s.accent("[CUIDANDO EL CHAT]")}`;
 
-	const chatStatusTag = isAmber
-		? s.amber("⚡ Poda activa")
-		: isBusy
-			? s.live("● Escribiendo")
-			: s.idle("○ Todo limpio");
+	const chatStatusTag = hasActiveInterception
+		? s.amber("⚡ Bucle Interceptado")
+		: isAmber
+			? s.amber("⚡ Poda activa")
+			: isBusy
+				? s.live("● Escribiendo")
+				: s.idle("○ Blindaje Activo");
 
-	const chatLine1Label = isAmber ? s.muted("Qué pasó") : s.muted("Espacio usado");
-	const chatLine1Val = isAmber ? s.amber("El comando tiró mucho texto") : s.text("14k de 150k del tope");
+	// 1. Rescate Microcortes
+	const rescateVal = isAmber ? s.amber("⚡ Rescate en curso (1/2)") : s.idle("○ En guardia (0/2)");
+	// 2. Parálisis / Falso Stop
+	const paralisisVal = s.idle("○ Vigilando");
+	// 3. Poda de Contexto
+	const podaVal = isAmber ? s.amber("⚡ Poda activa (-800c)") : s.idle("+32k tk optimizados");
 
-	const chatLine2Label = isAmber ? s.muted("Solución") : s.muted("Basura recortada");
-	const chatLine2Val = isAmber ? s.amber("Se achicó para no saturar") : s.idle("+32k tk optimizados");
+	// 4. Evasión Bash (Terminal)
+	let bashVal: string;
+	if (telemetry.blockedBashEvasions > 0 || telemetry.bashExplorationCount > MAX_BASH_EXPLORATION_PER_TURN) {
+		bashVal = `${s.error("🛑 " + telemetry.bashExplorationCount + "/" + MAX_BASH_EXPLORATION_PER_TURN + " Bloqueado")}`;
+	} else if (telemetry.bashExplorationCount > 0) {
+		bashVal = `${s.amber("▲ " + telemetry.bashExplorationCount + "/" + MAX_BASH_EXPLORATION_PER_TURN + " búsquedas")}`;
+	} else {
+		bashVal = s.idle("○ 0/5 búsquedas");
+	}
 
-	const approachVal = isAmber
-		? s.amber("Podando texto muy largo")
-		: isBusy
-			? s.live("Escribiendo en vivo")
-			: s.text("Misma cuenta fija");
+	// 5. Introspección Sesiones (.pi/agent/sessions)
+	const introVal = telemetry.blockedIntrospections > 0
+		? `${s.error("🛑 Bloqueado (" + telemetry.blockedIntrospections + ")")}`
+		: s.idle("○ Protegido");
+
+	// 6. Polling de Subagentes
+	let pollVal: string;
+	if (telemetry.blockedSubagentPolls > 0 || telemetry.subagentPollCount > MAX_SUBAGENT_POLL_PER_TURN) {
+		pollVal = `${s.error("🛑 Polling bloqueado")}`;
+	} else if (telemetry.subagentPollCount > 0) {
+		pollVal = `${s.amber("▲ " + telemetry.subagentPollCount + "/" + MAX_SUBAGENT_POLL_PER_TURN + " llamadas")}`;
+	} else {
+		pollVal = s.idle("○ 0/2 llamadas");
+	}
+
+	const approachVal = hasActiveInterception
+		? s.amber("Frenando bucles")
+		: isAmber
+			? s.amber("Podando texto muy largo")
+			: isBusy
+				? s.live("Escribiendo en vivo")
+				: s.text("Misma cuenta fija");
 
 	const rawLines = [
 		top,
@@ -358,8 +397,12 @@ export function formatSidebarQuotaCardLines(
 		renderLine(s.muted(`Cuota Sem: ${pair.active.consumedWeekly}`), barWk),
 		divider,
 		renderLine(chatStatusHeader, chatStatusTag),
-		renderLine(chatLine1Label, chatLine1Val),
-		renderLine(chatLine2Label, chatLine2Val),
+		renderLine(s.muted("Rescate Microcortes"), rescateVal),
+		renderLine(s.muted("Parálisis / Falso Stop"), paralisisVal),
+		renderLine(s.muted("Poda de Contexto"), podaVal),
+		renderLine(s.muted("Evasión Bash (Terminal)"), bashVal),
+		renderLine(s.muted("Introspección Sesiones"), introVal),
+		renderLine(s.muted("Polling de Subagentes"), pollVal),
 		divider,
 		renderLine(
 			s.accent("[LA QUE SIGUE]"),
@@ -500,7 +543,8 @@ export class CpamcTuiAdapter {
 				try {
 					const m = this.safeGetModel();
 					const p = m ? (getRotationPairForModelSync(m.id, m.provider) || this.currentPair) : this.currentPair;
-					return `${m?.id || "none"}-${p?.poolKey || "none"}-${p?.active?.prefix || "none"}-${p?.active?.minAvailable || "none"}-${this.isBusy}`;
+					const g = runawayGuard.getTelemetry();
+					return `${m?.id || "none"}-${p?.poolKey || "none"}-${p?.active?.prefix || "none"}-${p?.active?.minAvailable || "none"}-${this.isBusy}-${g.bashExplorationCount}-${g.subagentPollCount}-${g.blockedIntrospections}-${g.blockedBashEvasions}`;
 				} catch {
 					return "none";
 				}
@@ -570,8 +614,9 @@ export class CpamcTuiAdapter {
 						? (getRotationPairForModelSync(model.id, model.provider) || this.currentPair)
 						: this.currentPair;
 
+					const g = runawayGuard.getTelemetry();
 					const cpamcDigest = pair
-						? `${pair.poolKey || ""}-${pair.active?.prefix || ""}-${pair.active?.minAvailable || ""}-${pair.active?.consumed5h || ""}-${pair.active?.consumedWeekly || ""}`
+						? `${pair.poolKey || ""}-${pair.active?.prefix || ""}-${pair.active?.minAvailable || ""}-${pair.active?.consumed5h || ""}-${pair.active?.consumedWeekly || ""}-${g.bashExplorationCount}-${g.subagentPollCount}-${g.blockedIntrospections}-${g.blockedBashEvasions}`
 						: "none";
 
 					return `${baseDigest}::m::${modelKey}::c::${cpamcDigest}`;

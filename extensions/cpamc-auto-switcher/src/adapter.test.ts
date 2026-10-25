@@ -130,7 +130,13 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		assert.match(text, /Cuota 5h:\s+10\/100/);
 		assert.match(text, /Cuota Sem:\s+50\/500/);
 		assert.match(text, /\[CUIDANDO EL CHAT\]/);
-		assert.match(text, /○ Todo limpio/);
+		assert.match(text, /○ Blindaje Activo/);
+		assert.match(text, /Rescate Microcortes\s+○ En guardia \(0\/2\)/);
+		assert.match(text, /Parálisis \/ Falso Stop\s+○ Vigilando/);
+		assert.match(text, /Poda de Contexto\s+\+32k tk optimizados/);
+		assert.match(text, /Evasión Bash \(Terminal\)\s+○ 0\/5 búsquedas/);
+		assert.match(text, /Introspección Sesiones\s+○ Protegido/);
+		assert.match(text, /Polling de Subagentes\s+○ 0\/2 llamadas/);
 		assert.match(text, /\[LA QUE SIGUE\]/);
 		assert.match(text, /Correo\s+acc-2/);
 	});
@@ -140,6 +146,24 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		const text = lines.map((l: string) => stripAnsi(l)).join("\n");
 		assert.match(text, /\[● Escribiendo\]/);
 		assert.match(text, /\[CUIDANDO EL CHAT\]/);
+		assert.match(text, /● Escribiendo/);
+	});
+
+	it("renders sidebar card in intercepted runaway loop state", () => {
+		const alertTelemetry = {
+			bashExplorationCount: 5,
+			subagentPollCount: 1,
+			blockedIntrospections: 1,
+			blockedBashEvasions: 1,
+			blockedSubagentPolls: 0,
+			lastBlockedReason: "Evasión por bash bloqueada",
+		};
+		const lines = formatSidebarQuotaCardLines(mockPoolPair, 48, undefined, undefined, false, alertTelemetry);
+		const text = lines.map((l: string) => stripAnsi(l)).join("\n");
+		assert.match(text, /Frenando bucles/);
+		assert.match(text, /⚡ Bucle Interceptado/);
+		assert.match(text, /🛑 5\/5 Bloqueado/);
+		assert.match(text, /🛑 Bloqueado \(1\)/);
 	});
 
 	it("handles malformed pair with missing active account safely without throwing", () => {
