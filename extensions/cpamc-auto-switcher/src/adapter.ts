@@ -36,13 +36,15 @@ export function truncateWithAnsi(str: string, maxW: number): string {
 			const cp = str.codePointAt(i) || 0;
 			const charLen = String.fromCodePoint(cp).length;
 			const charVis =
-				(cp >= 0x1f300 && cp <= 0x1faff) ||
-				(cp >= 0x2600 && cp <= 0x27bf) ||
-				(cp >= 0x2b50 && cp <= 0x2b55)
-					? 2
-					: cp >= 0xfe00 && cp <= 0xfe0f
-						? 0
-						: 1;
+				cp >= 0xfe00 && cp <= 0xfe0f
+					? 0
+					: cp >= 0x1f6e0 && cp <= 0x1f6ec
+						? 1
+						: (cp >= 0x1f300 && cp <= 0x1faff) ||
+								(cp >= 0x2600 && cp <= 0x27bf) ||
+								(cp >= 0x2b50 && cp <= 0x2b55)
+							? 2
+							: 1;
 
 			if (vis + charVis > maxW) break;
 			res += str.slice(i, i + charLen);
@@ -108,14 +110,17 @@ function visibleLen(str: string): number {
 	let len = 0;
 	for (const char of clean) {
 		const code = char.codePointAt(0) || 0;
-		if (
+		if (code >= 0xfe00 && code <= 0xfe0f) {
+			// variation selector, 0 width
+		} else if (code >= 0x1f6e0 && code <= 0x1f6ec) {
+			// Símbolos de transporte/herramientas con presentación texto por defecto (ej: 🛡 U+1F6E1, 🛠 U+1F6E0)
+			len += 1;
+		} else if (
 			(code >= 0x1f300 && code <= 0x1faff) ||
 			(code >= 0x2600 && code <= 0x27bf) ||
 			(code >= 0x2b50 && code <= 0x2b55)
 		) {
 			len += 2;
-		} else if (code >= 0xfe00 && code <= 0xfe0f) {
-			// variation selector, 0 width
 		} else {
 			len += 1;
 		}
