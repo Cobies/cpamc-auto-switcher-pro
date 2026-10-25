@@ -627,6 +627,7 @@ const ProfileGraph = forwardRef(function ProfileGraph(
   const [selectedActiveNodeId, setSelectedActiveNodeId] = useState('');
   const [selectedReserveNodeIds, setSelectedReserveNodeIds] = useState([]);
   const [groupModalError, setGroupModalError] = useState('');
+  const [graphAdoptSelections, setGraphAdoptSelections] = useState({});
 
   // Modal / Drawer de Gestión de Prefijos y Cuentas
   const [isPendingModalOpen, setIsPendingModalOpen] = useState(false);
@@ -851,6 +852,32 @@ const ProfileGraph = forwardRef(function ProfileGraph(
     dispatch({ type: 'LOAD_GRAPH', nodes: nextNodes, edges: nextEdges });
 
     // 3. Reacomodar el lienzo
+    dispatch({ type: 'AUTO_ARRANGE' });
+
+    if (typeof onGraphChange === 'function') {
+      onGraphChange();
+    }
+  }, [nodes, edges, onGraphChange]);
+
+  // Sumar / Adoptar una cuenta libre como nueva reserva de un pool directamente en el lienzo
+  const handleAdoptFreeNodeIntoPool = useCallback((rootNodeId, targetNodeId) => {
+    if (!rootNodeId || !targetNodeId) return;
+    const rootNode = nodes.find((n) => n.id === rootNodeId);
+    const freeNode = nodes.find((n) => n.id === targetNodeId);
+    if (!rootNode || !freeNode) return;
+
+    const nextState = graphReducer(
+      { nodes, edges, graphFeedback: null, lastRemoval: null },
+      {
+        type: 'CONNECT',
+        connection: {
+          source: rootNodeId,
+          target: targetNodeId,
+        },
+      }
+    );
+
+    dispatch({ type: 'LOAD_GRAPH', nodes: nextState.nodes, edges: nextState.edges });
     dispatch({ type: 'AUTO_ARRANGE' });
 
     if (typeof onGraphChange === 'function') {
@@ -1165,7 +1192,7 @@ const ProfileGraph = forwardRef(function ProfileGraph(
                 onClick={() => setActiveGroupTab('dissolve')}
                 data-testid="modal-tab-dissolve"
               >
-                💥 Disolver / Desagrupar Pools
+                💥 Disolver / ➕ Sumar / Adoptar Reservas ({nodes.filter((n) => n.data?.isRoot || edges.some((e) => e.source === n.id)).length})
               </button>
             </div>
 
@@ -1295,50 +1322,262 @@ const ProfileGraph = forwardRef(function ProfileGraph(
             )}
 
             {activeGroupTab === 'dissolve' && (
-              <div className="group-modal-body" style={{ gap: '12px' }}>
+              <div className="group-modal-body" style={{ gap: '14px' }}>
                 <p className="group-modal-desc" style={{ padding: 0 }}>
-                  Selecciona cualquier pool para desarmarlo por completo. Todas sus cuentas volverán a estar libres y sin grupo.
+                  Gestiona la membresía de cada pool, libera cuentas o suma nuevas reservas con herencia directa del modelo especialista.
                 </p>
-                <div className="group-modal-reserves-list" style={{ maxHeight: '240px' }}>
+                <div className="group-modal-reserves-list" style={{ maxHeight: '340px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   {nodes
                     .filter((n) => n.data?.isRoot || edges.some((e) => e.source === n.id))
                     .map((rootNode) => {
                       const poolPrefix = rootNode.data?.prefix || rootNode.data?.label || rootNode.id;
-                      const childCount = edges.filter((e) => e.source === rootNode.id).length;
+                      const childEdges = edges.filter((e) => e.source === rootNode.id);
+                      const childCount = childEdges.length;
+
+                      // Derivar modelo especialista predeterminado de la familia
+                      const isClaudeSonnet = poolPrefix.startsWith('agy_son') || poolPrefix.startsWith('clau');
+                      const isClaudeOpus = poolPrefix.startsWith('agy_opus');
+                      const isCodex = poolPrefix.startsWith('codex');
+                      const defaultSpecialist = isClaudeSonnet
+                        ? 'claude-sonnet-4-6'
+                        : isClaudeOpus
+                        ? 'claude-opus-4-6-thinking'
+                        : isCodex
+                        ? 'gpt-4o'
+                        : 'gemini-3.8-flash-high';
+
                       return (
                         <div
                           key={rootNode.id}
+                          className="group-pool-card"
                           style={{
+                            padding: '12px 14px',
+                            background: 'rgba(15, 23, 42, 0.75)',
+                            border: '1px solid rgba(56, 189, 248, 0.25)',
+                            borderRadius: '10px',
                             display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            padding: '8px 10px',
-                            background: 'rgba(15, 23, 42, 0.6)',
-                            borderRadius: '6px',
-                            border: '1px solid rgba(51, 65, 85, 0.4)',
+                            flexDirection: 'column',
+                            gap: '10px',
                           }}
+                          data-testid={`modal-pool-card-${rootNode.id}`}
                         >
-                          <div>
-                            <span style={{ fontWeight: 700, color: '#f3e8ff', fontFamily: 'monospace' }}>
-                              {poolPrefix}
-                            </span>
-                            <span style={{ fontSize: '11px', color: '#94a3b8', marginLeft: '8px' }}>
-                              ({childCount} reserva{childCount === 1 ? '' : 's'})
+                          {/* Header de la tarjeta del pool */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6, borderBottom: '1px solid rgba(51, 65, 85, 0.4)', paddingBottom: 8 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ fontSize: 11, fontWeight: 800, color: '#38bdf8', background: 'rgba(56, 189, 248, 0.12)', padding: '2px 8px', borderRadius: 4, border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+                                📦 {poolPrefix}
+                              </span>
+                              <span style={{ fontSize: 11, color: '#94a3b8' }}>
+                                ({childCount + 1} cuentas activas)
+                              </span>
+                            </div>
+                            <span
+                              style={{
+                                fontSize: 10.5,
+                                background: 'rgba(14, 165, 233, 0.12)',
+                                color: '#38bdf8',
+                                padding: '2px 8px',
+                                borderRadius: 4,
+                                border: '1px solid rgba(56, 189, 248, 0.25)',
+                                fontFamily: 'monospace',
+                                fontWeight: 600,
+                              }}
+                            >
+                              ⚙️ Especialista: {defaultSpecialist}
                             </span>
                           </div>
-                          <button
-                            type="button"
-                            className="btn btn-disconnect-node"
-                            onClick={() => {
-                              handleDissolvePool(rootNode.id);
-                              // Permanecer en el modal y cambiar automáticamente a la pestaña de armar
-                              setActiveGroupTab('create');
-                            }}
-                            data-testid={`btn-dissolve-pool-${rootNode.id}`}
-                            style={{ padding: '4px 10px', fontSize: '11px' }}
-                          >
-                            💥 Desarmar Pool
-                          </button>
+
+                          {/* Lista de miembros del pool */}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {/* Titular Líder */}
+                            <div
+                              style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                fontSize: 11.5,
+                                padding: '4px 8px',
+                                background: 'rgba(2, 6, 23, 0.55)',
+                                borderRadius: 6,
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden' }}>
+                                <span style={{ color: '#fbbf24' }}>1️⃣ 👑</span>
+                                <span style={{ color: '#fef08a', fontWeight: 600, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                                  {rootNode.data?.email || rootNode.data?.fileName || rootNode.id}
+                                </span>
+                              </div>
+                              <span style={{ fontSize: 9.5, color: '#fbbf24', fontWeight: 700, fontFamily: 'monospace' }}>
+                                [{poolPrefix}]
+                              </span>
+                            </div>
+
+                            {/* Reservas */}
+                            {childEdges.map((edge, rIdx) => {
+                              const resNode = nodes.find((n) => n.id === edge.target);
+                              const resPref = resNode?.data?.prefix || `${poolPrefix}_${rIdx + 1}`;
+                              return (
+                                <div
+                                  key={edge.id}
+                                  style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    fontSize: 11.5,
+                                    padding: '4px 8px',
+                                    background: 'rgba(2, 6, 23, 0.55)',
+                                    borderRadius: 6,
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden' }}>
+                                    <span style={{ color: '#7dd3fc' }}>{rIdx + 2}️⃣ 🛡️</span>
+                                    <span style={{ color: '#bae6fd', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                                      {resNode?.data?.email || resNode?.data?.fileName || edge.target}
+                                    </span>
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <span style={{ fontSize: 9.5, color: '#7dd3fc', fontFamily: 'monospace' }}>
+                                      [{resPref}]
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDisconnectNode(edge.target)}
+                                      title="Desconectar reserva del pool"
+                                      data-testid={`btn-disconnect-reserve-${edge.target}`}
+                                      style={{
+                                        background: 'rgba(239, 68, 68, 0.12)',
+                                        border: '1px solid rgba(239, 68, 68, 0.3)',
+                                        color: '#fca5a5',
+                                        borderRadius: 4,
+                                        padding: '1px 5px',
+                                        fontSize: 9.5,
+                                        cursor: 'pointer',
+                                      }}
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+
+                            {/* Módulo de Adopción Directa UX/UI */}
+                            {freeNodes.length > 0 && (
+                              <div
+                                data-testid={`modal-adopt-section-${rootNode.id}`}
+                                style={{
+                                  background: 'linear-gradient(180deg, rgba(2, 6, 23, 0.75) 0%, rgba(15, 23, 42, 0.85) 100%)',
+                                  border: '1px solid rgba(56, 189, 248, 0.35)',
+                                  borderRadius: 8,
+                                  padding: '10px 12px',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  gap: 8,
+                                  marginTop: 4,
+                                }}
+                              >
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <span style={{ fontSize: 11, color: '#f0f9ff', fontWeight: 800 }}>
+                                    ➕ SUMAR NUEVA RESERVA AL POOL
+                                  </span>
+                                  <span style={{ fontSize: 9.5, color: '#38bdf8', fontWeight: 700 }}>
+                                    1 POOL = 1 MODELO
+                                  </span>
+                                </div>
+
+                                <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 8 }}>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                    <span style={{ fontSize: 9.5, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase' }}>
+                                      🔑 Cuenta Libre
+                                    </span>
+                                    <select
+                                      className="group-modal-select"
+                                      style={{ fontSize: 11, padding: '5px 8px', background: '#090d16', color: '#f8fafc', borderColor: 'rgba(56, 189, 248, 0.3)' }}
+                                      value={graphAdoptSelections[rootNode.id] || freeNodes[0]?.id || ''}
+                                      onChange={(e) =>
+                                        setGraphAdoptSelections((prev) => ({
+                                          ...prev,
+                                          [rootNode.id]: e.target.value,
+                                        }))
+                                      }
+                                      data-testid={`select-modal-adopt-${rootNode.id}`}
+                                    >
+                                      {freeNodes.map((fn) => (
+                                        <option key={fn.id} value={fn.id}>
+                                          🔑 {fn.data?.email || fn.data?.fileName || fn.id}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                    <span style={{ fontSize: 9.5, color: '#38bdf8', fontWeight: 700, textTransform: 'uppercase' }}>
+                                      🎯 Modelo Heredado
+                                    </span>
+                                    <div
+                                      style={{
+                                        padding: '5px 8px',
+                                        background: 'rgba(14, 165, 233, 0.08)',
+                                        border: '1px solid rgba(56, 189, 248, 0.25)',
+                                        borderRadius: 6,
+                                        fontSize: 10.5,
+                                        color: '#e0f2fe',
+                                        fontFamily: 'monospace',
+                                        fontWeight: 600,
+                                        whiteSpace: 'nowrap',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                      }}
+                                      title={`Hereda automáticamente ${defaultSpecialist}`}
+                                    >
+                                      🔒 {defaultSpecialist} ⭐
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 2 }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const targetNodeId = graphAdoptSelections[rootNode.id] || freeNodes[0]?.id;
+                                      if (targetNodeId) {
+                                        handleAdoptFreeNodeIntoPool(rootNode.id, targetNodeId);
+                                      }
+                                    }}
+                                    data-testid={`btn-modal-adopt-${rootNode.id}`}
+                                    style={{
+                                      background: 'linear-gradient(135deg, #0284c7 0%, #2563eb 100%)',
+                                      color: '#fff',
+                                      border: 'none',
+                                      borderRadius: 5,
+                                      padding: '5px 12px',
+                                      fontSize: 11,
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    ➕ Sumar Reserva
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Botón Disolver Pool */}
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid rgba(51, 65, 85, 0.3)', paddingTop: 8 }}>
+                            <button
+                              type="button"
+                              className="btn btn-disconnect-node"
+                              onClick={() => {
+                                handleDissolvePool(rootNode.id);
+                                setActiveGroupTab('create');
+                              }}
+                              data-testid={`btn-dissolve-pool-${rootNode.id}`}
+                              style={{ padding: '4px 10px', fontSize: '11px', background: 'rgba(239, 68, 68, 0.1)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)' }}
+                            >
+                              💥 Disolver Pool (Liberar Cuentas)
+                            </button>
+                          </div>
                         </div>
                       );
                     })}

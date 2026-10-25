@@ -293,9 +293,6 @@ export default function GroupManager({
   // Se resincroniza en cada reload de nodos (tras crear/disolver un pool).
   const [registeredPools, setRegisteredPools] = useState([]);
   const [catalogModels, setCatalogModels] = useState([]);
-  const [adoptTargetPool, setAdoptTargetPool] = useState('');
-  const [adoptAccountNodeId, setAdoptAccountNodeId] = useState('');
-  const [adoptSpecialistModel, setAdoptSpecialistModel] = useState('');
   const [cardAdoptSelections, setCardAdoptSelections] = useState({});
   const [selectedAuthModels, setSelectedAuthModels] = useState([]);
   const feedbackTimeoutRef = useRef(null);
@@ -1936,21 +1933,12 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
         </button>
         <button
           type="button"
-          className={`group-manager-tab ${activeTab === 'adopt' ? 'active' : ''}`}
-          onClick={() => setActiveTab('adopt')}
-          data-testid="tab-adoptar-reserva"
-        >
-          <span>➕</span>
-          <span>Adoptar / Sumar Reservas ({freeNodes.length})</span>
-        </button>
-        <button
-          type="button"
           className={`group-manager-tab ${activeTab === 'dissolve' ? 'active' : ''}`}
           onClick={() => setActiveTab('dissolve')}
           data-testid="tab-disolver-pools"
         >
           <span>💥</span>
-          <span>Disolver / Desagrupar Pools ({existingPools.length})</span>
+          <span>Disolver / ➕ Sumar / Adoptar Reservas ({existingPools.length})</span>
         </button>
       </div>
 
@@ -2468,210 +2456,7 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
         </div>
       )}
 
-      {/* Pestaña: Adoptar / Sumar Reservas a Pools Existentes */}
-      {activeTab === 'adopt' && (
-        <div className="group-manager-content" data-testid="adopt-reserves-view">
-          <div className="group-builder-col" style={{ maxWidth: 840, margin: '0 auto', width: '100%' }}>
-            <div className="group-card">
-              <h3 className="group-card-title">
-                <span>➕</span>
-                <span>Adoptar Cuenta Libre como Reserva de un Pool</span>
-              </h3>
-              <p style={{ color: '#94a3b8', fontSize: 13, lineHeight: 1.5, margin: '0 0 16px 0' }}>
-                Si agregaste una cuenta nueva en <strong>Auth Files Management</strong> nativo de CPAMC, puedes incorporarla directamente a cualquiera de tus pools activos sin tener que desarmar ni disolver tus grupos existentes.
-              </p>
-
-              {freeNodes.length === 0 ? (
-                <div className="group-empty-alert" style={{ margin: '16px 0' }} data-testid="no-free-accounts-adopt-alert">
-                  <span className="group-alert-icon">✨</span>
-                  <h4 className="group-alert-title">No hay cuentas libres pendientes</h4>
-                  <p className="group-alert-desc">
-                    Todas las cuentas de OAuth registradas ya están asignadas a un pool activo. Si agregas una cuenta nueva en CPAMC o liberas una reserva, aparecerá aquí automáticamente.
-                  </p>
-                </div>
-              ) : existingPools.length === 0 ? (
-                <div className="group-empty-alert" style={{ margin: '16px 0' }}>
-                  <span className="group-alert-icon">⚠️</span>
-                  <h4 className="group-alert-title">No hay pools activos creados</h4>
-                  <p className="group-alert-desc">
-                    Para adoptar reservas, primero debes estructurar al menos un pool en la pestaña <strong>"⚡ Armar Nuevo Pool"</strong>.
-                  </p>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-                  {/* Selector 1: Cuenta Libre */}
-                  <div className="group-field">
-                    <label className="group-label">
-                      <span>🔑</span>
-                      <span>① Selecciona la Cuenta Libre a incorporar:</span>
-                    </label>
-                    <select
-                      className="group-select"
-                      value={adoptAccountNodeId || freeNodes[0]?.id || ''}
-                      onChange={(e) => setAdoptAccountNodeId(e.target.value)}
-                      data-testid="select-adopt-account"
-                      style={{ fontSize: 13, padding: '10px 14px' }}
-                    >
-                      {freeNodes.map((fn) => {
-                        const email = fn.data?.email || fn.data?.fileName || fn.id;
-                        const prov = (fn.data?.provider || fn.data?.accountType || 'ANTIGRAVITY').toUpperCase();
-                        return (
-                          <option key={fn.id} value={fn.id}>
-                            🔑 {email} ({prov})
-                          </option>
-                        );
-                      })}
-                    </select>
-                    <p className="group-field-hint">
-                      Cuentas autenticadas físicamente en CPAMC que no tienen ningún grupo o prefijo asignado.
-                    </p>
-                  </div>
-
-                  {/* Selector 2: Pool Destino */}
-                  <div className="group-field">
-                    <label className="group-label">
-                      <span>📦</span>
-                      <span>② Selecciona el Pool Destino que la adoptará:</span>
-                    </label>
-                    <select
-                      className="group-select"
-                      value={adoptTargetPool || existingPools[0]?.basePrefix || ''}
-                      onChange={(e) => {
-                        const newPoolBase = e.target.value;
-                        setAdoptTargetPool(newPoolBase);
-                        const pDef = registeredPools.find((p) => p.base_prefix === newPoolBase);
-                        const defMod = Array.isArray(pDef?.policy?.target_models) && pDef.policy.target_models[0]
-                          ? pDef.policy.target_models[0]
-                          : '';
-                        setAdoptSpecialistModel(defMod);
-                      }}
-                      data-testid="select-adopt-target-pool"
-                      style={{ fontSize: 13, padding: '10px 14px' }}
-                    >
-                      {existingPools.map((p, idx) => {
-                        const leaderEmail = p.root?.data?.email || p.root?.data?.fileName || 'Líder';
-                        const count = (p.root ? 1 : 0) + p.reserves.length;
-                        const label = p.displayName || `Pool ${idx + 1}`;
-                        return (
-                          <option key={p.id || p.basePrefix} value={p.basePrefix}>
-                            📦 {label} [{p.basePrefix}] (ID: {p.id || p.basePrefix}) — Líder: {leaderEmail} ({count} cuentas)
-                          </option>
-                        );
-                      })}
-                    </select>
-                    <p className="group-field-hint">
-                      La cuenta se sumará como Reserva adicional (ej. <code>{adoptTargetPool || existingPools[0]?.basePrefix}_N</code>) y responderá cuando el líder o reservas previas agoten su cuota.
-                    </p>
-                  </div>
-
-                  {/* Selector 3: Modelo Especialista que Adoptará la Cuenta */}
-                  {(() => {
-                    const currentTargetBase = adoptTargetPool || existingPools[0]?.basePrefix || '';
-                    const poolDef = registeredPools.find((p) => p.base_prefix === currentTargetBase);
-                    const poolFamily = poolDef?.family || (currentTargetBase.startsWith('clau') || currentTargetBase.startsWith('agy_son') || currentTargetBase.startsWith('agy_clau') ? 'gemini_sonnet' : currentTargetBase.startsWith('agy_opus') ? 'gemini_opus' : 'gemini_pure');
-
-                    let candidateModels = [];
-                    if (poolFamily.includes('sonnet')) {
-                      candidateModels = ['claude-sonnet-4-6', 'claude-sonnet-5-5-high'];
-                    } else if (poolFamily.includes('opus')) {
-                      candidateModels = ['claude-opus-4-6-thinking', 'claude-opus-5-5-high'];
-                    } else if (poolFamily.includes('claude')) {
-                      candidateModels = ['claude-sonnet-4-6', 'claude-3-7-sonnet', 'claude-3-5-haiku', 'claude-opus-4-6-thinking'];
-                    } else if (poolFamily.includes('codex')) {
-                      candidateModels = ['gpt-4o', 'gpt-4o-mini', 'o1-preview', 'o3-mini'];
-                    } else {
-                      candidateModels = [
-                        'gemini-3.8-flash-high',
-                        'gemini-3.7-flash-high',
-                        'gemini-3.6-flash-high',
-                        'gemini-3.5-flash-lite',
-                        'gemini-3.1-pro-low',
-                        'gemini-3.1-flash-lite',
-                        'gemini-3.1-flash-image',
-                        'gemini-3-flash',
-                        'gemini-pro-agent',
-                      ];
-                    }
-
-                    const poolCurrentModel =
-                      (Array.isArray(poolDef?.policy?.target_models) && poolDef.policy.target_models[0]) ||
-                      candidateModels[0];
-
-                    const effectiveSelectedModel = adoptSpecialistModel && candidateModels.includes(adoptSpecialistModel)
-                      ? adoptSpecialistModel
-                      : poolCurrentModel;
-
-                    return (
-                      <div className="bento-specialist-box" data-testid="adopt-specialist-box" style={{ marginTop: 4 }}>
-                        <div className="bento-specialist-head">
-                          <span className="bento-specialist-title">🎯 ③ Modelo Especialista que Adoptará la Cuenta</span>
-                          <span className="bento-specialist-badge">1 Pool = 1 Modelo</span>
-                        </div>
-                        <select
-                          className="group-select bento-specialist-select"
-                          value={effectiveSelectedModel}
-                          onChange={(e) => setAdoptSpecialistModel(e.target.value)}
-                          data-testid="select-adopt-specialist-model"
-                        >
-                          {candidateModels.map((mod) => (
-                            <option key={mod} value={mod}>
-                              {mod === poolCurrentModel
-                                ? `${mod} ⭐ (Por defecto del Pool [${currentTargetBase}])`
-                                : mod}
-                            </option>
-                          ))}
-                        </select>
-                        <p className="bento-specialist-hint">
-                          🔒 Por defecto hereda el modelo especialista del pool (<code>{poolCurrentModel}</code>) para garantizar aislamiento de cuota 100% uniforme en toda la cascada.
-                        </p>
-                      </div>
-                    );
-                  })()}
-
-                  {/* Botón de Acción Principal */}
-                  <div style={{ marginTop: 8 }}>
-                    <button
-                      type="button"
-                      disabled={isSubmitting}
-                      onClick={() => {
-                        const targetId = adoptAccountNodeId || freeNodes[0]?.id;
-                        const found = freeNodes.find((fn) => fn.id === targetId) || freeNodes[0];
-                        const targetPool = adoptTargetPool || existingPools[0]?.basePrefix;
-                        const pDef = registeredPools.find((p) => p.base_prefix === targetPool);
-                        const defaultMod = (Array.isArray(pDef?.policy?.target_models) && pDef.policy.target_models[0]) || 'gemini-3.8-flash-high';
-                        const chosenModel = adoptSpecialistModel || defaultMod;
-                        if (found && targetPool) {
-                          handleAdoptAccountIntoPool(targetPool, found, chosenModel);
-                        }
-                      }}
-                      data-testid="btn-quick-adopt"
-                      style={{
-                        padding: '12px 24px',
-                        background: 'linear-gradient(135deg, #0284c7 0%, #2563eb 100%)',
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: 8,
-                        fontSize: 13,
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        boxShadow: '0 4px 14px rgba(2, 132, 199, 0.35)',
-                      }}
-                    >
-                      <span>➕</span>
-                      <span>{isSubmitting ? 'Incorporando cuenta...' : 'Adoptar como Nueva Reserva'}</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Pestaña: Disolver / Desagrupar Pools */}
+      {/* Pestaña: Disolver / ➕ Sumar / Adoptar Reservas */}
       {activeTab === 'dissolve' && (
         <div className="group-pools-grid" data-testid="dissolve-pools-grid">
           {existingPools.length === 0 ? (
@@ -2697,9 +2482,26 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
                       /model: {poolCleanName}
                     </span>
                   </div>
-                  <span style={{ fontSize: 11, background: 'rgba(168, 85, 247, 0.2)', color: '#d8b4fe', padding: '2px 8px', borderRadius: 4 }}>
-                    {(pool.root ? 1 : 0) + pool.reserves.length} cuentas
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        background: 'rgba(14, 165, 233, 0.12)',
+                        color: '#38bdf8',
+                        padding: '2px 8px',
+                        borderRadius: 4,
+                        border: '1px solid rgba(56, 189, 248, 0.25)',
+                        fontFamily: 'monospace',
+                        fontWeight: 600,
+                      }}
+                      title="Modelo Especialista Predeterminado del Pool"
+                    >
+                      ⚙️ {pool.targetModel || 'gemini-3.8-flash-high'}
+                    </span>
+                    <span style={{ fontSize: 11, background: 'rgba(168, 85, 247, 0.2)', color: '#d8b4fe', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>
+                      {(pool.root ? 1 : 0) + pool.reserves.length} cuentas
+                    </span>
+                  </div>
                 </div>
 
                 <div className="group-pool-members">
@@ -2827,73 +2629,146 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
                     </div>
                   );
                   })}
-                </div>
 
-                {/* Sección de Adopción Directa dentro de la tarjeta del Pool */}
-                {freeNodes.length > 0 && (
-                  <div
-                    data-testid={`card-adopt-section-${pool.basePrefix}`}
-                    style={{
-                      marginTop: 10,
-                      padding: '8px 10px',
-                      background: 'rgba(56, 189, 248, 0.08)',
-                      border: '1px dashed rgba(56, 189, 248, 0.35)',
-                      borderRadius: 6,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 6,
-                    }}
-                  >
-                    <span style={{ fontSize: 11, color: '#38bdf8', fontWeight: 700 }}>
-                      ➕ Adoptar cuenta libre en [{pool.basePrefix}]:
-                    </span>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <select
-                        className="group-select"
-                        style={{ flex: 1, padding: '4px 8px', fontSize: 11 }}
-                        value={cardAdoptSelections[pool.basePrefix] || freeNodes[0]?.id || ''}
-                        onChange={(e) =>
-                          setCardAdoptSelections((prev) => ({
-                            ...prev,
-                            [pool.basePrefix]: e.target.value,
-                          }))
-                        }
-                        data-testid={`select-card-adopt-${pool.basePrefix}`}
-                      >
-                        {freeNodes.map((fn) => (
-                          <option key={fn.id} value={fn.id}>
-                            {fn.data?.email || fn.data?.fileName || fn.id}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        disabled={isSubmitting}
-                        onClick={() => {
-                          const selId = cardAdoptSelections[pool.basePrefix] || freeNodes[0]?.id;
-                          const targetNode = freeNodes.find((fn) => fn.id === selId) || freeNodes[0];
-                          if (targetNode) {
-                            handleAdoptAccountIntoPool(pool.basePrefix, targetNode);
-                          }
-                        }}
-                        data-testid={`btn-card-adopt-${pool.basePrefix}`}
-                        style={{
-                          background: '#0284c7',
-                          color: '#fff',
-                          border: 'none',
-                          borderRadius: 5,
-                          padding: '4px 10px',
-                          fontSize: 11,
-                          fontWeight: 700,
-                          cursor: 'pointer',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        ➕ Adoptar
-                      </button>
+                  {/* Fila Final: Adoptar / Sumar Reservas directamente en la lista de miembros */}
+                  {freeNodes.length > 0 && (
+                    <div
+                      className="group-pool-member-row"
+                      data-testid={`card-adopt-section-${pool.basePrefix}`}
+                      style={{
+                        background: 'linear-gradient(180deg, rgba(2, 6, 23, 0.75) 0%, rgba(15, 23, 42, 0.85) 100%)',
+                        border: '1px solid rgba(56, 189, 248, 0.4)',
+                        boxShadow: '0 4px 16px rgba(2, 132, 199, 0.15)',
+                        padding: '12px 14px',
+                        gap: 10,
+                        marginTop: 4,
+                      }}
+                    >
+                      <div className="group-pool-member-top" style={{ borderBottom: '1px solid rgba(56, 189, 248, 0.2)', paddingBottom: 6 }}>
+                        <div className="group-pool-member-identity">
+                          <span style={{ color: '#38bdf8', fontSize: 13, flexShrink: 0 }}>➕ 🛡️</span>
+                          <span style={{ fontSize: 12, color: '#f0f9ff', fontWeight: 800, letterSpacing: '0.02em' }}>
+                            SUMAR NUEVA RESERVA AL POOL
+                          </span>
+                        </div>
+                        <span
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 700,
+                            background: 'rgba(56, 189, 248, 0.15)',
+                            color: '#7dd3fc',
+                            padding: '2px 8px',
+                            borderRadius: 4,
+                            border: '1px solid rgba(56, 189, 248, 0.3)',
+                          }}
+                        >
+                          1 POOL = 1 MODELO
+                        </span>
+                      </div>
+
+                      {/* Selector y Modelo que hereda */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 1fr)', gap: 8 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                            🔑 Cuenta Libre Disponible
+                          </span>
+                          <select
+                            className="group-select"
+                            style={{
+                              width: '100%',
+                              padding: '7px 10px',
+                              fontSize: 11,
+                              background: '#090d16',
+                              borderColor: 'rgba(56, 189, 248, 0.3)',
+                              color: '#f8fafc',
+                              borderRadius: 6,
+                            }}
+                            value={cardAdoptSelections[pool.basePrefix] || freeNodes[0]?.id || ''}
+                            onChange={(e) =>
+                              setCardAdoptSelections((prev) => ({
+                                ...prev,
+                                [pool.basePrefix]: e.target.value,
+                              }))
+                            }
+                            data-testid={`select-card-adopt-${pool.basePrefix}`}
+                          >
+                            {freeNodes.map((fn) => (
+                              <option key={fn.id} value={fn.id}>
+                                🔑 {fn.data?.email || fn.data?.fileName || fn.id}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          <span style={{ fontSize: 10, color: '#38bdf8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                            🎯 Modelo que Heredará
+                          </span>
+                          <div
+                            style={{
+                              padding: '6px 10px',
+                              background: 'rgba(14, 165, 233, 0.08)',
+                              border: '1px solid rgba(56, 189, 248, 0.25)',
+                              borderRadius: 6,
+                              fontSize: 11,
+                              color: '#e0f2fe',
+                              fontFamily: 'monospace',
+                              fontWeight: 600,
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 6,
+                            }}
+                            title={`Hereda automáticamente ${pool.targetModel || 'gemini-3.8-flash-high'}`}
+                          >
+                            <span>🔒</span>
+                            <span>{pool.targetModel || 'gemini-3.8-flash-high'} ⭐</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Footer de la acción con botón llamativo */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, paddingTop: 4 }}>
+                        <span style={{ fontSize: 10.5, color: '#94a3b8', lineHeight: 1.3 }}>
+                          ℹ️ Se sumará como siguiente reserva respondiendo ante 429 o fatiga.
+                        </span>
+                        <button
+                          type="button"
+                          disabled={isSubmitting}
+                          onClick={() => {
+                            const selId = cardAdoptSelections[pool.basePrefix] || freeNodes[0]?.id;
+                            const targetNode = freeNodes.find((fn) => fn.id === selId) || freeNodes[0];
+                            if (targetNode) {
+                              handleAdoptAccountIntoPool(pool.basePrefix, targetNode);
+                            }
+                          }}
+                          data-testid={`btn-card-adopt-${pool.basePrefix}`}
+                          style={{
+                            background: 'linear-gradient(135deg, #0284c7 0%, #2563eb 100%)',
+                            color: '#fff',
+                            border: 'none',
+                            borderRadius: 6,
+                            padding: '7px 16px',
+                            fontSize: 11.5,
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                            boxShadow: '0 2px 10px rgba(2, 132, 199, 0.35)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            flexShrink: 0,
+                          }}
+                        >
+                          <span>➕</span>
+                          <span>Sumar Reserva</span>
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
 
                 <button
                   type="button"

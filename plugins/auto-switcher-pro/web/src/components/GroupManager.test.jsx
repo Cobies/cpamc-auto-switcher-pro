@@ -976,7 +976,7 @@ describe('GroupManager - PoolRegistry como fuente única de verdad', () => {
     await waitFor(() => {
       expect(screen.getByTestId('pool-card-clau')).toBeTruthy();
     });
-    expect(screen.getByText(/Disolver \/ Desagrupar Pools \(1\)/)).toBeTruthy();
+    expect(screen.getByText(/Disolver \/ ➕ Sumar \/ Adoptar Reservas \(1\)/)).toBeTruthy();
   });
 
   it('excludes registry pool members from free candidates (prevents duplicate assignment)', async () => {
@@ -990,7 +990,7 @@ describe('GroupManager - PoolRegistry como fuente única de verdad', () => {
 
     // Las 4 cuentas son miembros del pool clau registrado → cero candidatos libres
     await waitFor(() => {
-      expect(screen.getByText(/Disolver \/ Desagrupar Pools \(1\)/)).toBeTruthy();
+      expect(screen.getByText(/Disolver \/ ➕ Sumar \/ Adoptar Reservas \(1\)/)).toBeTruthy();
     });
 
     fireEvent.click(screen.getByTestId('family-claude'));
@@ -1083,7 +1083,7 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
     render(<GroupManager nodes={geminiPooledNodes} />);
 
     await waitFor(() => {
-      expect(screen.getByText(/Disolver \/ Desagrupar Pools \(1\)/)).toBeTruthy();
+      expect(screen.getByText(/Disolver \/ ➕ Sumar \/ Adoptar Reservas \(1\)/)).toBeTruthy();
     });
 
     // Familia Claude: los masters del pool Gemini DEBEN aparecer como candidatos (2N)
@@ -1122,7 +1122,7 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
     render(<GroupManager nodes={mastersWithoutPrefix} />);
 
     await waitFor(() => {
-      expect(screen.getByText(/Disolver \/ Desagrupar Pools \(1\)/)).toBeTruthy();
+      expect(screen.getByText(/Disolver \/ ➕ Sumar \/ Adoptar Reservas \(1\)/)).toBeTruthy();
     });
 
     // Familia Gemini (puro por defecto): los 4 masters ya están en el pool agy → 0 candidatos
@@ -1146,7 +1146,7 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
     render(<GroupManager nodes={geminiPooledNodes} />);
 
     await waitFor(() => {
-      expect(screen.getByText(/Disolver \/ Desagrupar Pools \(1\)/)).toBeTruthy();
+      expect(screen.getByText(/Disolver \/ ➕ Sumar \/ Adoptar Reservas \(1\)/)).toBeTruthy();
     });
 
     fireEvent.click(screen.getByTestId('tab-disolver-pools'));
@@ -1198,22 +1198,22 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
 
     render(<GroupManager nodes={nodesWithNewFree} />);
 
-    // Ir directamente a la nueva pestaña dedicada de Adopción
+    // Ir a la pestaña unificada de Disolver / Sumar / Adoptar Reservas
     await waitFor(() => {
-      expect(screen.getByTestId('tab-adoptar-reserva')).toBeTruthy();
+      expect(screen.getByTestId('tab-disolver-pools')).toBeTruthy();
     });
-    fireEvent.click(screen.getByTestId('tab-adoptar-reserva'));
+    fireEvent.click(screen.getByTestId('tab-disolver-pools'));
 
     await waitFor(() => {
-      expect(screen.getByTestId('adopt-reserves-view')).toBeTruthy();
-      expect(screen.getByTestId('select-adopt-specialist-model')).toBeTruthy();
+      expect(screen.getByTestId('card-adopt-section-agy')).toBeTruthy();
+      expect(screen.getByTestId('select-card-adopt-agy')).toBeTruthy();
+      expect(screen.getByTestId('btn-card-adopt-agy')).toBeTruthy();
     });
 
-    // Verifica que preselecciona el modelo especialista por defecto del pool (gemini-3.8-flash-high)
-    const modelSelect = screen.getByTestId('select-adopt-specialist-model');
-    expect(modelSelect.value).toBe('gemini-3.8-flash-high');
-
-    fireEvent.click(screen.getByTestId('btn-quick-adopt'));
+    // Selecciona la cuenta libre y hace click en sumar reserva en la fila final de la tarjeta
+    const selectFree = screen.getByTestId('select-card-adopt-agy');
+    fireEvent.change(selectFree, { target: { value: 'antigravity-newfree@gmail.com.json' } });
+    fireEvent.click(screen.getByTestId('btn-card-adopt-agy'));
 
     await waitFor(() => {
       expect(patchSpy).toHaveBeenCalledWith([
