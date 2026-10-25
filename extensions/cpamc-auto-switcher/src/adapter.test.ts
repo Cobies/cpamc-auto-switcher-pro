@@ -143,21 +143,24 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		assert.match(text, /90% libre/);
 		assert.match(text, /Ritmo/);
 		assert.match(text, /\[SIGUIENTE\]\s+acc-2/);
-		assert.match(text, /\[CUIDANDO EL CHAT\]/);
-		assert.match(text, /○ Blindaje Activo/);
-		assert.match(text, /Presupuesto Turno/);
-		assert.match(text, /Microcortes:\s+0\/2/);
+		assert.match(text, /\[PROTECCIÓN ACTIVA\]/);
+		assert.match(text, /● En guardia/);
+		assert.match(text, /Turno en vivo:/);
+		assert.match(text, /0\/15 acciones/);
+		assert.match(text, /Rescate Red:\s+0\/2/);
 		assert.match(text, /Subagentes:\s+0\/2/);
-		assert.match(text, /Introspecc:\s+Ok/);
-		assert.match(text, /Poda:\s+\+32k tk/);
+		assert.match(text, /Sesión:\s+Protegida/);
+		assert.match(text, /Ahorro:\s+0 tk/);
+		assert.match(text, /Bucles:\s+0 detectados/);
+		assert.match(text, /Bash:\s+0\/5 llamadas/);
 	});
 
 	it("renders sidebar card in active execution state with LIVE indicator", () => {
 		const lines = formatSidebarQuotaCardLines(mockPoolPair, 48, undefined, undefined, true);
 		const text = lines.map((l: string) => stripAnsi(l)).join("\n");
 		assert.match(text, /\[● Escribiendo\]/);
-		assert.match(text, /\[CUIDANDO EL CHAT\]/);
-		assert.match(text, /● Escribiendo/);
+		assert.match(text, /\[PROTECCIÓN ACTIVA\]/);
+		assert.match(text, /⚡ Monitoreando turno/);
 	});
 
 	it("renders sidebar card in intercepted runaway loop state", () => {
@@ -173,8 +176,8 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		const text = lines.map((l: string) => stripAnsi(l)).join("\n");
 		assert.match(text, /Frenando bucles/);
 		assert.match(text, /⚡ Bucle Interceptado/);
-		assert.match(text, /🛑 5\/5 Bloqueado/);
-		assert.match(text, /🛑 Bloqueado \(1\)/);
+		assert.match(text, /Bash:\s+🛑 Bloqueado/);
+		assert.match(text, /Sesión:\s+🛑 Bloqueado/);
 	});
 
 	it("renders sidebar card in tripped circuit breaker state with hyperlink and tokens saved", () => {

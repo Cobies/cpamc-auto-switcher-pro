@@ -569,7 +569,7 @@ export function formatSidebarQuotaCardLines(
 			? `${s.live("● " + activeAccountLabel)} ${s.live(`(${pair.active.minAvailable} ok)`)}`
 			: `${s.idle("○ " + activeAccountLabel)} ${s.idle(`(${pair.active.minAvailable} ok)`)}`;
 
-	// Bloque reactivo "CUIDANDO EL CHAT" (funciones unificadas de resiliencia y disyuntor anti-bucle)
+	// Bloque reactivo "PROTECCIÓN ACTIVA" (Cockpit / Telemetría viva de seguridad)
 	const telemetry = guardTelemetry || runawayGuard.getTelemetry();
 	const isTripped = Boolean(telemetry.circuitBreakerTripped);
 	const hasActiveInterception =
@@ -580,54 +580,7 @@ export function formatSidebarQuotaCardLines(
 		(telemetry.blockedProhibitedCommands || 0) > 0 ||
 		telemetry.bashExplorationCount >= MAX_BASH_EXPLORATION_PER_TURN;
 
-	const chatStatusHeader = isTripped
-		? `${s.error("[CUIDANDO EL CHAT]")}`
-		: (isAmber || hasActiveInterception)
-			? `${s.amber("[CUIDANDO EL CHAT]")}`
-			: `${s.accent("[CUIDANDO EL CHAT]")}`;
-
-	const chatStatusTag = isTripped
-		? s.error("🛑 DISPARADO")
-		: hasActiveInterception
-			? s.amber("⚡ Bucle Interceptado")
-			: isAmber
-				? s.amber("⚡ Poda activa")
-				: isBusy
-					? s.live("● Escribiendo")
-					: s.idle("○ Blindaje Activo");
-
-	// 1. Rescate Microcortes
-	const rescateVal = isAmber ? s.amber("⚡ Rescate en curso (1/2)") : s.idle("○ En guardia (0/2)");
-	// 2. Parálisis / Falso Stop
-	const paralisisVal = s.idle("○ Vigilando");
-	// 3. Poda de Contexto
-	const podaVal = isAmber ? s.amber("⚡ Poda activa (-800c)") : s.idle("+32k tk optimizados");
-
-	// 4. Evasión Bash (Terminal)
-	let bashVal: string;
-	if (telemetry.blockedBashEvasions > 0 || telemetry.bashExplorationCount > MAX_BASH_EXPLORATION_PER_TURN) {
-		bashVal = `${s.error("🛑 " + telemetry.bashExplorationCount + "/" + MAX_BASH_EXPLORATION_PER_TURN + " Bloqueado")}`;
-	} else if (telemetry.bashExplorationCount > 0) {
-		bashVal = `${s.amber("▲ " + telemetry.bashExplorationCount + "/" + MAX_BASH_EXPLORATION_PER_TURN + " búsquedas")}`;
-	} else {
-		bashVal = s.idle("○ 0/5 búsquedas");
-	}
-
-	// 5. Introspección Sesiones (.pi/agent/sessions)
-	const introVal = telemetry.blockedIntrospections > 0
-		? `${s.error("🛑 Bloqueado (" + telemetry.blockedIntrospections + ")")}`
-		: s.idle("○ Protegido");
-
-	// 6. Polling de Subagentes
-	let pollVal: string;
-	if (telemetry.blockedSubagentPolls > 0 || telemetry.subagentPollCount > MAX_SUBAGENT_POLL_PER_TURN) {
-		pollVal = `${s.error("🛑 Polling bloqueado")}`;
-	} else if (telemetry.subagentPollCount > 0) {
-		pollVal = `${s.amber("▲ " + telemetry.subagentPollCount + "/" + MAX_SUBAGENT_POLL_PER_TURN + " llamadas")}`;
-	} else {
-		pollVal = s.idle("○ 0/2 llamadas");
-	}
-
+	// Enfoque de rotación
 	const approachVal = isTripped
 		? s.error("🛑 Bucle Interceptado")
 		: hasActiveInterception
@@ -638,14 +591,76 @@ export function formatSidebarQuotaCardLines(
 					? s.live("Escribiendo en vivo")
 					: s.text("Misma cuenta fija");
 
-	// Micro-barra de progreso reactiva para presupuesto de turno (15 pasos)
+	// Cabecera unificada Cockpit
+	const headerTitle = isTripped
+		? s.error("🛡 [DISYUNTOR]")
+		: hasActiveInterception
+			? s.amber("🛡 [INTERCEPCIÓN]")
+			: s.accent("🛡 [PROTECCIÓN ACTIVA]");
+
+	const headerTag = isTripped
+		? s.error("🛑 DISPARADO")
+		: hasActiveInterception
+			? s.amber("⚡ Bucle Interceptado")
+			: isBusy
+				? s.live("⚡ Monitoreando turno")
+				: s.idle("● En guardia");
+
+	const rule1Len = Math.max(1, innerW - visibleLen(headerTitle) - visibleLen(headerTag) - 2);
+	const cockpitHeaderLine = fitToWidth(
+		`${s.border("│")} ${headerTitle} ${s.border("─".repeat(rule1Len))} ${headerTag} ${s.border("│")}`,
+		safeW,
+	);
+
+	// Barra del turno en vivo de 10 celdas
 	const toolCount = telemetry.totalToolCount || 0;
-	const budgetGauge = s.paintGauge(`${Math.round((toolCount / 15) * 100)}%`, 5, toolCount >= 10);
-	const budgetVal = toolCount >= 14
-		? `${s.error(budgetGauge)} ${s.error(`${toolCount}/15!`)}`
-		: toolCount >= 10
-			? `${s.amber(budgetGauge)} ${s.amber(`${toolCount}/15`)}`
-			: `${s.idle(budgetGauge)} ${s.idle(`${toolCount}/15`)}`;
+	const turnGauge = renderSpectralGauge(Math.round((toolCount / 15) * 100), 10);
+	const turnPctColor = toolCount >= 14 ? s.error : toolCount >= 10 ? s.amber : s.idle;
+	const turnLabel = `${s.slate("Turno en vivo:")} [${turnGauge}]   ${turnPctColor(String(toolCount) + "/15")} ${s.muted("acciones")}`;
+	const spTurn = Math.max(1, innerW - visibleLen(turnLabel));
+	const cockpitTurnLine = fitToWidth(`${s.border("│")} ${turnLabel}${" ".repeat(spTurn)} ${s.border("│")}`, safeW);
+
+	// Divisoria interior suave
+	const cockpitInnerDivider = fitToWidth(`${s.border("│")} ${s.border("─".repeat(innerW))} ${s.border("│")}`, safeW);
+
+	// Valores dinámicos reales de la matriz 2x2
+	const colW = Math.floor((innerW - 1) / 2);
+	const renderDoubleLine = (l1: string, v1: string, l2: string, v2: string) => {
+		const cell1 = `${l1} ${v1}`;
+		const cell2 = `${l2} ${v2}`;
+		const sp1 = Math.max(0, colW - visibleLen(cell1));
+		const sp2 = Math.max(0, innerW - colW - 1 - visibleLen(cell2));
+		const content = `${cell1}${" ".repeat(sp1)}${s.border("│")}${cell2}${" ".repeat(sp2)}`;
+		return fitToWidth(`${s.border("│")} ${content} ${s.border("│")}`, safeW);
+	};
+
+	// 1. Rescate Red
+	const rescateVal = isAmber ? s.amber("1/2 activo") : s.idle("0/2");
+	// 2. Subagentes
+	const pollVal = telemetry.blockedSubagentPolls > 0
+		? s.error("🛑 Bloqueado")
+		: telemetry.subagentPollCount > 0
+			? s.amber(`${telemetry.subagentPollCount}/2 llamadas`)
+			: s.idle("0/2");
+	// 3. Sesión
+	const introVal = telemetry.blockedIntrospections > 0 ? s.error("🛑 Bloqueado") : s.idle("Protegida");
+	// 4. Ahorro real de tokens podados acumulados
+	const savedTokens = telemetry.tokensSavedEstimate || 0;
+	const ahorroVal = savedTokens > 0
+		? s.cyan(`+${Math.round(savedTokens / 1000)}k tk`)
+		: s.idle("0 tk");
+	// 5. Bucles cíclicos
+	const loopsVal = isTripped
+		? s.error("🛑 DISPARADO")
+		: hasActiveInterception
+			? s.amber("⚡ 1 detectado")
+			: s.idle("0 detectados");
+	// 6. Terminal Bash
+	const bashVal = telemetry.blockedBashEvasions > 0
+		? s.error("🛑 Bloqueado")
+		: telemetry.bashExplorationCount > 0
+			? s.amber(`${telemetry.bashExplorationCount}/5`)
+			: s.idle("0/5 llamadas");
 
 	let chatBlockLines: string[] = [];
 	if (isTripped) {
@@ -669,7 +684,7 @@ export function formatSidebarQuotaCardLines(
 					: "Pasos agotados (15/15)";
 
 		chatBlockLines = [
-			renderLine(chatStatusHeader, chatStatusTag),
+			cockpitHeaderLine,
 			renderLine(s.muted("Disyuntor Anti-Bucle"), s.error("🛑 Disparado")),
 			renderLine(s.muted("Causa"), s.error(reasonLabel)),
 			renderLine(s.muted("Tokens protegidos"), s.live(`~${savedK}k tokens`)),
@@ -678,34 +693,14 @@ export function formatSidebarQuotaCardLines(
 			divider,
 			renderLine(s.error("[ACCIÓN REQUERIDA]"), s.text("Dar orden directa")),
 		];
-	} else if (hasActiveInterception) {
-		// Modo Alerta / Intercepción Activa: Se expanden las métricas afectadas
-		chatBlockLines = [
-			renderLine(chatStatusHeader, chatStatusTag),
-			renderLine(s.muted("Presupuesto Turno"), budgetVal),
-			renderLine(s.muted("Evasión Bash (Terminal)"), bashVal),
-			renderLine(s.muted("Introspección Sesiones"), introVal),
-			renderLine(s.muted("Polling de Subagentes"), pollVal),
-			renderLine(s.muted("Rescate Microcortes"), rescateVal),
-		];
 	} else {
-		// Modo Normal Consolidado (2 columnas por línea para ahorrar 6 líneas verticales)
-		const colW = Math.floor((innerW - 1) / 2);
-		const renderDoubleLine = (l1: string, v1: string, l2: string, v2: string) => {
-			const cell1 = `${l1} ${v1}`;
-			const cell2 = `${l2} ${v2}`;
-			const sp1 = Math.max(0, colW - visibleLen(cell1));
-			const sp2 = Math.max(0, innerW - colW - 1 - visibleLen(cell2));
-			const content = `${cell1}${" ".repeat(sp1)}${s.border("│")}${cell2}${" ".repeat(sp2)}`;
-			return fitToWidth(`${s.border("│")} ${content} ${s.border("│")}`, safeW);
-		};
-
 		chatBlockLines = [
-			renderLine(chatStatusHeader, chatStatusTag),
-			renderLine(s.muted("Presupuesto Turno"), budgetVal),
-			renderDoubleLine(s.muted("Microcortes:"), s.idle("0/2"), s.muted("Subagentes:"), s.idle("0/2")),
-			renderDoubleLine(s.muted("Introspecc:"), s.idle("Ok"), s.muted("Poda:"), s.idle("+32k tk")),
-			renderDoubleLine(s.muted("Anti-Bucle:"), s.idle("Ok"), s.muted("Terminal:"), s.idle("0/5")),
+			cockpitHeaderLine,
+			cockpitTurnLine,
+			cockpitInnerDivider,
+			renderDoubleLine(s.muted("Rescate Red:"), rescateVal, s.muted("Subagentes:"), pollVal),
+			renderDoubleLine(s.muted("Sesión:"), introVal, s.muted("Ahorro:"), ahorroVal),
+			renderDoubleLine(s.muted("Bucles:"), loopsVal, s.muted("Bash:"), bashVal),
 		];
 	}
 
