@@ -471,49 +471,6 @@ install_extension() {
         fi
     fi
 
-    # Parcheo idempotente y universal de Gentle-Shell layout (Linux y macOS M1-M4)
-    if command -v node >/dev/null 2>&1; then
-        node -e "
-          const fs = require('fs');
-          const path = require('path');
-          const os = require('os');
-          const { execSync } = require('child_process');
-
-          let candidates = [
-            path.join(os.homedir(), '.local/share/mise/installs/node/24.21.0/lib/node_modules/gentle-pi/lib/shell-sidebar-layout.ts'),
-            path.join(os.homedir(), '.pi/agent/npm/node_modules/gentle-pi/lib/shell-sidebar-layout.ts'),
-            path.join(os.homedir(), '.gentle-shell/agent/npm/node_modules/gentle-pi/lib/shell-sidebar-layout.ts'),
-          ];
-
-          try {
-            const globalRoot = execSync('npm root -g', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
-            if (globalRoot) {
-              candidates.push(path.join(globalRoot, 'gentle-pi/lib/shell-sidebar-layout.ts'));
-            }
-          } catch {}
-
-          try {
-            const resolved = require.resolve('gentle-pi/lib/shell-sidebar-layout.ts');
-            if (resolved) candidates.push(resolved);
-          } catch {}
-
-          const unique = [...new Set(candidates)];
-          for (const target of unique) {
-            try {
-              if (fs.existsSync(target)) {
-                let content = fs.readFileSync(target, 'utf8');
-                if (!content.includes('cpamc-quota-card')) {
-                  content = content.replace('[\"footer\", \"agents\", \"todo\"]', '[\"footer\", \"cpamc-quota-card\", \"agents\", \"todo\"]');
-                  fs.writeFileSync(target, content, 'utf8');
-                  console.log('    [✓] Layout de Gentle-Shell parcheado exitosamente en: ' + target);
-                } else {
-                  console.log('    [✓] Gentle-Shell layout ya contiene cpamc-quota-card en: ' + target);
-                }
-              }
-            } catch {}
-          }
-        " 2>/dev/null || true
-    fi
 
     # Limpieza temporal
     if [ -n "$tmp_dir" ] && [ -d "$tmp_dir" ]; then

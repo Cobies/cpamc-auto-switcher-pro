@@ -993,8 +993,8 @@ export function getSessionAccordionState(): boolean {
 	if (sessionAccordionExpanded !== null) {
 		return sessionAccordionExpanded;
 	}
-	const termRows = process.stdout?.rows || 24;
-	return termRows >= 48;
+	// Siempre cerrado (collapsed) por defecto; se expande bajo demanda del usuario (click / peek / pinned)
+	return false;
 }
 
 export function setSessionAccordionState(expanded: boolean | AccordionMode): void {
