@@ -455,6 +455,20 @@ install_extension() {
         fi
     fi
 
+    # Parcheo idempotente de Gentle-Shell layout si está instalado en el sistema
+    if command -v node >/dev/null 2>&1; then
+        local gs_target=$(node -e "try { console.log(require.resolve('gentle-pi/lib/shell-sidebar-layout.ts')) } catch {}" 2>/dev/null || true)
+        if [ -n "$gs_target" ] && [ -f "$gs_target" ]; then
+            if grep -q 'cpamc-quota-card' "$gs_target"; then
+                echo -e "${GREEN}    [✓] Gentle-Shell layout ya contiene cpamc-quota-card en sections.${RESET}"
+            else
+                echo -e "    ${YELLOW}[+] Registrando cpamc-quota-card en secciones de Gentle-Shell...${RESET}"
+                sed -i 's/const sections = \["footer",/const sections = \["footer", "cpamc-quota-card",/' "$gs_target" 2>/dev/null || true
+                echo -e "${GREEN}    [✓] Layout de Gentle-Shell parcheado exitosamente.${RESET}"
+            fi
+        fi
+    fi
+
     # Limpieza temporal
     if [ -n "$tmp_dir" ] && [ -d "$tmp_dir" ]; then
         rm -rf "$tmp_dir"

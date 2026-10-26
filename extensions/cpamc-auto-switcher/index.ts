@@ -1,7 +1,7 @@
 import { existsSync, watch } from "node:fs";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { initDynamicProvider, resolveCpamcBaseUrl, resolveManagementKey } from "./src/provider.js";
@@ -390,6 +390,12 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 			}
 		}
 
+		// Intentar captura inmediata de TUI y Terminal si ya están disponibles en ctx
+		const directTui = (ctx as any)?.tui || (ctx as any)?.ui?.terminal;
+		if (directTui) {
+			adapter.bindTui(directTui);
+		}
+
 		// Capturar la instancia viva de TUI y Theme, y registrar el decorador del sidebar
 		if (ctx.hasUI) {
 			ctx.ui.setWidget("cpamc-tui-hook", (tui: any, theme: any) => {
@@ -409,10 +415,19 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 		void checkRemoteUpdate(ctx);
 
 		// Bus Reactivo Instantáneo (<5ms) por Archivo de Época Compartido
-		// Vigila tanto el bind-mount persistente de Docker como la memoria compartida (/dev/shm)
+		// Vigila tanto EasyCLIProxyAPI (Linux Desktop / Windows), bind-mount Docker y /dev/shm
 		const candidateEpochPaths = [
+			// 1. EasyCLIProxyAPI en Linux Desktop
+			join(homedir(), ".local", "share", "EasyCLIProxyAPI", "cpa-core", "plugins", "auto-switcher-pro.epoch"),
+			// 2. EasyCLIProxyAPI en Windows
+			join(process.env.LOCALAPPDATA || join(homedir(), "AppData", "Local"), "EasyCLIProxyAPI", "cpa-core", "plugins", "auto-switcher-pro.epoch"),
+			join(process.env.APPDATA || join(homedir(), "AppData", "Roaming"), "EasyCLIProxyAPI", "cpa-core", "plugins", "auto-switcher-pro.epoch"),
+			// 3. Linux Servidor / Docker / VPS
 			join(homedir(), "services", "cliproxy", "plugins", "auto-switcher-pro.epoch"),
+			join(homedir(), ".cli-proxy-api", "plugins", "auto-switcher-pro.epoch"),
+			// 4. Memoria compartida y temporales
 			"/dev/shm/auto-switcher-pro.epoch",
+			join(tmpdir(), "auto-switcher-pro.epoch"),
 		];
 		let shmDebounce: NodeJS.Timeout | null = null;
 

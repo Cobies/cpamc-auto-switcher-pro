@@ -1076,9 +1076,20 @@ export class CpamcTuiAdapter {
 		}
 	}
 
+	private invalidateSidebarCache(): void {
+		try {
+			const tui = this.tui || (this.ctx as any)?.tui;
+			const terminal = tui?.terminal as any;
+			const cache = terminal?.[Symbol.for("gentle-pi.experimental-sidebar.cache")];
+			if (cache && typeof cache.revision === "number") {
+				cache.revision++;
+			}
+			tui?.requestRender?.();
+		} catch {}
+	}
+
 	private requestRender(): void {
-		const tui = this.tui || (this.ctx as any)?.tui;
-		tui?.requestRender?.();
+		this.invalidateSidebarCache();
 	}
 
 	destroy(): void {
@@ -1186,6 +1197,7 @@ export class CpamcTuiAdapter {
 	private injectIntoSidebar(gentleState: any): void {
 		if (!gentleState?.parts) return;
 
+		// 1. Siempre registrar la tarjeta cpamc-quota-card independiente
 		gentleState.parts.set("cpamc-quota-card", {
 			render: () => {
 				try {
@@ -1221,8 +1233,6 @@ export class CpamcTuiAdapter {
 				try {
 					if (event && (event.type === "click" || event.type === "press")) {
 						this.toggleExpanded();
-						const tui = this.tui || (this.ctx as any)?.tui;
-						tui?.requestRender?.();
 						return { handled: true, render: true };
 					}
 				} catch {}
@@ -1230,109 +1240,120 @@ export class CpamcTuiAdapter {
 			},
 		});
 
-		// Decoración de la sección "footer" nativa del sidebar
-		const currentFooter = gentleState.parts.get("footer");
+		// 2. Interceptor reactivo universal sobre "footer"
+		const self = this;
+		const wrapFooter = (originalRail: any) => {
+			if (!originalRail || originalRail.__isCpamcDecorated) {
+				return originalRail;
+			}
 
-		// Si ya está decorado por nosotros, no volvemos a envolver
-		if (currentFooter && (currentFooter as any).__isCpamcDecorated) {
-			return;
-		}
-
-		// Si hay un footer base, lo conservamos
-		this.originalFooterPart = currentFooter;
-
-		this.decoratedFooter = {
-			__isCpamcDecorated: true,
-			render: (width: number) => {
-				try {
-					let baseLines: string[] = [];
+			return {
+				__isCpamcDecorated: true,
+				__originalRail: originalRail,
+				render: (width: number) => {
 					try {
-						baseLines = this.originalFooterPart?.render
-							? (this.originalFooterPart.render(width) ?? [])
-							: [];
+						let baseLines: string[] = [];
+						try {
+							baseLines = originalRail.render ? (originalRail.render(width) ?? []) : [];
+						} catch {
+							baseLines = [];
+						}
+
+						const model = self.safeGetModel();
+						const pair = model
+							? (getRotationPairForModelSync(model.id, model.provider) || self.currentPair)
+							: self.currentPair;
+
+						if (!pair) {
+							return baseLines;
+						}
+
+						const bColor = extractBorderColor(baseLines, self.theme);
+						const quotaLines = formatSidebarQuotaCardLines(
+							pair,
+							width,
+							bColor,
+							self.theme,
+							self.isBusy,
+							undefined,
+							self.getPeriodLabel(),
+							self.accordionMode,
+							self.peekRemainingSec,
+						);
+
+						if (!baseLines.length) {
+							return quotaLines;
+						}
+
+						// Inserción orgánica: Status Card arriba, Quota Card inmediatamente abajo
+						return [...baseLines, "", ...quotaLines].map((line) => fitToWidth(line, width));
 					} catch {
-						baseLines = [];
+						return [];
 					}
-
-					const model = this.safeGetModel();
-					const pair = model
-						? (getRotationPairForModelSync(model.id, model.provider) || this.currentPair)
-						: this.currentPair;
-
-					if (!pair) {
-						return baseLines;
-					}
-
-					const bColor = extractBorderColor(baseLines, this.theme);
-					const quotaLines = formatSidebarQuotaCardLines(
-						pair,
-						width,
-						bColor,
-						this.theme,
-						this.isBusy,
-						undefined,
-						this.getPeriodLabel(),
-						this.accordionMode,
-						this.peekRemainingSec,
-					);
-
-					if (!baseLines.length) {
-						return quotaLines;
-					}
-
-					return [...baseLines, "", ...quotaLines].map((line) => fitToWidth(line, width));
-				} catch {
-					return [];
-				}
-			},
-			digest: () => {
-				try {
-					let baseDigest = "";
+				},
+				digest: () => {
 					try {
-						baseDigest = this.originalFooterPart?.digest
-							? this.originalFooterPart.digest()
-							: "";
+						let baseDigest = "";
+						try {
+							baseDigest = typeof originalRail.digest === "function" ? originalRail.digest() : "";
+						} catch {
+							baseDigest = "";
+						}
+
+						const model = self.safeGetModel();
+						const modelKey = model ? `${model.provider}:${model.id}` : "none";
+						const pair = model
+							? (getRotationPairForModelSync(model.id, model.provider) || self.currentPair)
+							: self.currentPair;
+
+						const g = runawayGuard.getTelemetry();
+						const cpamcDigest = pair
+							? `${pair.poolKey || ""}-${pair.active?.prefix || ""}-${pair.active?.minAvailable || ""}-${pair.active?.consumed5h || ""}-${pair.active?.consumedWeekly || ""}-${self.accordionMode}-${self.peekRemainingSec}-${g.bashExplorationCount}-${g.subagentPollCount}-${g.blockedIntrospections}-${g.blockedBashEvasions}`
+							: "none";
+
+						return `${baseDigest}::cpamc::${modelKey}::${cpamcDigest}`;
 					} catch {
-						baseDigest = "";
+						return "none";
 					}
-
-					const model = this.safeGetModel();
-					const modelKey = model ? `${model.provider}:${model.id}` : "none";
-					const pair = model
-						? (getRotationPairForModelSync(model.id, model.provider) || this.currentPair)
-						: this.currentPair;
-
-					const g = runawayGuard.getTelemetry();
-					const cpamcDigest = pair
-						? `${pair.poolKey || ""}-${pair.active?.prefix || ""}-${pair.active?.minAvailable || ""}-${pair.active?.consumed5h || ""}-${pair.active?.consumedWeekly || ""}-${this.accordionMode}-${this.peekRemainingSec}-${g.bashExplorationCount}-${g.subagentPollCount}-${g.blockedIntrospections}-${g.blockedBashEvasions}`
-						: "none";
-
-					return `${baseDigest}::m::${modelKey}::c::${cpamcDigest}`;
-				} catch {
-					return "none";
-				}
-			},
-			invalidate: () => {
-				try {
-					this.originalFooterPart?.invalidate?.();
-				} catch {}
-			},
-			handleMouse: (event: any) => {
-				try {
-					if (event && (event.type === "click" || event.type === "press")) {
-						// Si el clic ocurre en la fila del botón acordeón o en la tarjeta
-						this.toggleExpanded();
-						const tui = this.tui || (this.ctx as any)?.tui;
-						tui?.requestRender?.();
-						return { handled: true, render: true };
+				},
+				invalidate: () => {
+					try {
+						originalRail.invalidate?.();
+					} catch {}
+				},
+				handleMouse: (event: any) => {
+					try {
+						if (event && (event.type === "click" || event.type === "press")) {
+							self.toggleExpanded();
+							return { handled: true, render: true };
+						}
+						return originalRail.handleMouse?.(event);
+					} catch {
+						return false;
 					}
-					return this.originalFooterPart?.handleMouse?.(event);
-				} catch {
-					return false;
-				}
-			},
+				},
+			};
 		};
 
-		gentleState.parts.set("footer", this.decoratedFooter);
+		// Si ya existe un footer en parts, decorarlo ahora mismo
+		if (gentleState.parts.has("footer")) {
+			const current = gentleState.parts.get("footer");
+			if (!current?.__isCpamcDecorated) {
+				const originalSet = gentleState.parts.set.bind(gentleState.parts);
+				originalSet("footer", wrapFooter(current));
+			}
+		}
+
+		// Interceptar llamadas futuras a .set() del Map de Gentle-Shell
+		if (!gentleState.parts.__cpamcHooked) {
+			const originalSet = gentleState.parts.set.bind(gentleState.parts);
+			gentleState.parts.set = function (key: string, value: any) {
+				if (key === "footer") {
+					return originalSet(key, wrapFooter(value));
+				}
+				return originalSet(key, value);
+			};
+			gentleState.parts.__cpamcHooked = true;
+		}
 	}
 }

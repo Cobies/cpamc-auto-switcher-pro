@@ -264,6 +264,71 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		assert.ok(digestStr.includes("none"));
 	});
 
+	it("resiliently hooks gentleState.parts.set so future footer overrides by Gentle-Shell are auto-decorated", () => {
+		const mockContext: any = {
+			model: { id: "Pool-01-gemini", provider: "cpamc" },
+		};
+		const adapter = new CpamcTuiAdapter(mockContext);
+		(adapter as any).currentPair = mockPoolPair;
+
+		const parts = new Map<string, any>();
+		const gentleState = { parts };
+
+		// 1. Initially Gentle-Shell has mounted its own footer rail
+		const initialNativeFooter = {
+			render: () => ["╭─ Status ─╮", "│ Session  │", "╰──────────╯"],
+			digest: () => "status_123",
+		};
+		parts.set("footer", initialNativeFooter);
+
+		// 2. Adapter injects into sidebar
+		(adapter as any).injectIntoSidebar(gentleState);
+
+		// Verified: footer was decorated
+		const decorated1 = parts.get("footer");
+		assert.ok(decorated1.__isCpamcDecorated, "footer must be decorated with CPAMC");
+		const renderedLines1 = decorated1.render(48);
+		const fullText1 = renderedLines1.join("\n");
+		assert.match(fullText1, /Status/);
+		assert.match(fullText1, /CUIDANDO EL CHAT/);
+
+		// 3. Gentle-Shell triggers an event (resize, git check, etc.) and overwrites footer with a new rail
+		const reRegisteredFooter = {
+			render: () => ["╭─ Status v2 ─╮", "│ Git: clean  │", "╰─────────────╯"],
+			digest: () => "status_v2",
+		};
+		parts.set("footer", reRegisteredFooter);
+
+		// Verified: The hook automatically re-wrapped the new footer on the fly!
+		const decorated2 = parts.get("footer");
+		assert.ok(decorated2.__isCpamcDecorated, "re-registered footer must be automatically re-wrapped");
+		const renderedLines2 = decorated2.render(48);
+		const fullText2 = renderedLines2.join("\n");
+		assert.match(fullText2, /Status v2/);
+		assert.match(fullText2, /CUIDANDO EL CHAT/);
+
+		// 4. Test cache invalidation and mouse toggle
+		const cache = { revision: 1 };
+		let requestedRender = false;
+		const mockTerminal: any = {
+			[Symbol.for("gentle-pi.experimental-sidebar.cache")]: cache,
+		};
+		const mockTui = {
+			terminal: mockTerminal,
+			requestRender: () => { requestedRender = true; },
+		};
+		adapter.bindTui(mockTui);
+
+		assert.equal(adapter.getAccordionMode(), "collapsed");
+		const mouseRes = decorated2.handleMouse({ type: "click" });
+		assert.equal(mouseRes?.handled, true);
+		assert.equal(adapter.getAccordionMode(), "pinned");
+		assert.equal(cache.revision, 2, "sidebar cache revision must be incremented on mouse toggle");
+		assert.equal(requestedRender, true, "requestRender must be called");
+
+		adapter.destroy();
+	});
+
 	it("satisfies Acceptance Criteria 1: 40% time elapsed and 25% consumed -> Ritmo holgado", () => {
 		const dummyStyler: any = {
 			easy: (t: string) => t,

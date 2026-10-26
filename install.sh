@@ -84,6 +84,28 @@ if [ "${LINKED}" -eq 0 ]; then
   echo "🔗 Extensión vinculada en la ruta predeterminada de Pi: ${DEFAULT_TARGET}/cpamc-auto-switcher"
 fi
 
+# ==============================================================================
+# Parcheo idempotente de Gentle-Shell layout (Capa 3 - Soporte nativo opcional)
+# ==============================================================================
+patch_gentle_shell_layout() {
+  local target=""
+  if command -v node >/dev/null 2>&1; then
+    target=$(node -e "try { console.log(require.resolve('gentle-pi/lib/shell-sidebar-layout.ts')) } catch {}" 2>/dev/null || true)
+  fi
+
+  if [ -n "${target}" ] && [ -f "${target}" ]; then
+    if grep -q 'cpamc-quota-card' "${target}"; then
+      echo "  [✓] Gentle-Shell layout ya contiene cpamc-quota-card en sections."
+    else
+      echo "  [+] Registrando cpamc-quota-card en secciones de Gentle-Shell (${target})..."
+      sed -i 's/const sections = \["footer",/const sections = \["footer", "cpamc-quota-card",/' "${target}" 2>/dev/null || true
+      echo "  [✓] Layout de Gentle-Shell parcheado exitosamente."
+    fi
+  fi
+}
+
+patch_gentle_shell_layout
+
 echo "=========================================================="
 echo "🎉 ¡Instalación Completada con Éxito!"
 echo ""

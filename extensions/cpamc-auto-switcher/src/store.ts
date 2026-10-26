@@ -128,6 +128,24 @@ function maskEmailFromAuth(authName: string): string {
 	return `${local}@${domain}`;
 }
 
+export function getCandidateStatePaths(): string[] {
+	const home = homedir();
+	const localAppData = process.env.LOCALAPPDATA || join(home, "AppData", "Local");
+	const appData = process.env.APPDATA || join(home, "AppData", "Roaming");
+
+	return [
+		// 1. EasyCLIProxyAPI en Linux Desktop
+		join(home, ".local", "share", "EasyCLIProxyAPI", "cpa-core", "plugins", "auto-switcher-pro-state.json"),
+		// 2. EasyCLIProxyAPI en Windows
+		join(localAppData, "EasyCLIProxyAPI", "cpa-core", "plugins", "auto-switcher-pro-state.json"),
+		join(appData, "EasyCLIProxyAPI", "cpa-core", "plugins", "auto-switcher-pro-state.json"),
+		// 3. Linux Servidor / VPS / Docker / CLIProxyAPI nativo
+		join(home, "services", "cliproxy", "plugins", "auto-switcher-pro-state.json"),
+		"/CLIProxyAPI/plugins/auto-switcher-pro-state.json",
+		join(home, ".cli-proxy-api", "plugins", "auto-switcher-pro-state.json"),
+	];
+}
+
 /**
  * Lee el archivo de estado de pools si existe en rutas conocidas.
  */
@@ -137,11 +155,7 @@ function getStoredPools(): StoredPool[] {
 		return cachedPoolsState;
 	}
 
-	const candidates = [
-		"/home/wilox/services/cliproxy/plugins/auto-switcher-pro-state.json",
-		join(homedir(), "services", "cliproxy", "plugins", "auto-switcher-pro-state.json"),
-		"/CLIProxyAPI/plugins/auto-switcher-pro-state.json",
-	];
+	const candidates = getCandidateStatePaths();
 
 	for (const p of candidates) {
 		try {
