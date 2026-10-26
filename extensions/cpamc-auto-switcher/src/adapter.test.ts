@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
 import { existsSync } from "node:fs";
@@ -39,9 +39,14 @@ const {
 	stripAnsi,
 	visibleLen,
 } = await import("./adapter.js");
+const { runawayGuard } = await import("./guards.js");
 import type { PoolRotationPair } from "./store.js";
 
 describe("Adapter Footer Formatting & Origin Indicator", () => {
+	beforeEach(() => {
+		runawayGuard.dismissIncident();
+		runawayGuard.resetTurn();
+	});
 	const mockNativePair: PoolRotationPair = {
 		poolKey: "native",
 		familyName: "Antigravity",
@@ -313,9 +318,98 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		assert.equal(pace.remainingFormatted, "5h 0m");
 	});
 
+	it("renders unified sidebar card for native standalone model collapsed by default with CUIDANDO EL CHAT and no rotations", () => {
+		const lines = formatSidebarQuotaCardLines(mockNativePair, 48, undefined, undefined, false, undefined, undefined, false);
+		const text = lines.map((l: string) => stripAnsi(l)).join("\n");
+		assert.match(text, /⚡ CUENTA DIRECTA:/);
+		assert.match(text, /\[CUENTA FIJA · SIN FAILOVER\]/);
+		assert.doesNotMatch(text, /Caché Afinidad/);
+		assert.match(text, /5 HORAS/);
+		assert.match(text, /SEMANAL/);
+		assert.match(text, /\[CUIDANDO EL CHAT\]/);
+		assert.match(text, /Turno en vivo:/);
+		assert.match(text, /▶ \[Ver más: Contexto de Sesión\]/);
+		assert.match(text, /Ctrl\+Alt\+X/);
+		assert.doesNotMatch(text, /ROTACIONES & LIDERAZGO/);
+		assert.doesNotMatch(text, /Candidato a Líder/);
+		assert.doesNotMatch(text, /📦 CONTEXTO & COMPRESIÓN/);
+		assert.doesNotMatch(text, /⚠️ CAUSAS DE ROTACIÓN/);
+		lines.forEach((l: string, idx: number) => {
+			const len = visibleLen(l);
+			assert.strictEqual(len, 48, `Fila nativa colapsada ${idx} debe tener 48 columnas (actual: ${len})`);
+		});
+	});
+
+	it("renders unified sidebar card for native standalone model in fatigue state showing Cuota baja instead of Limpiando", () => {
+		const fatiguedNativePair: PoolRotationPair = {
+			...mockNativePair,
+			active: {
+				...mockNativePair.active,
+				minAvailable: "12%",
+				consumed5h: "88/100",
+			},
+		};
+		const lines = formatSidebarQuotaCardLines(fatiguedNativePair, 48, undefined, undefined, false, undefined, undefined, false);
+		const text = lines.map((l: string) => stripAnsi(l)).join("\n");
+		assert.match(text, /\[⚠️ Cuota baja\]/);
+		assert.doesNotMatch(text, /\[⚡ Limpiando\]/);
+	});
+
+	it("renders unified sidebar card for native standalone model expanded with Context and quota reset time", () => {
+		const nativeWithReset: PoolRotationPair = {
+			...mockNativePair,
+			active: {
+				...mockNativePair.active,
+				reset5hInSec: 7200, // 2h 0m
+			},
+		};
+		const lines = formatSidebarQuotaCardLines(nativeWithReset, 48, undefined, undefined, false, undefined, undefined, true);
+		const text = lines.map((l: string) => stripAnsi(l)).join("\n");
+		assert.match(text, /⚡ CUENTA DIRECTA:/);
+		assert.match(text, /\[CUIDANDO EL CHAT\]/);
+		assert.match(text, /▼ \[Ocultar detalles de contexto\]/);
+		assert.match(text, /📦 CONTEXTO & COMPRESIÓN/);
+		assert.match(text, /Reinicio 5h:\s+en 2h 0m/);
+		assert.doesNotMatch(text, /ROTACIONES & LIDERAZGO/);
+		assert.doesNotMatch(text, /Candidato a Líder/);
+		assert.doesNotMatch(text, /⚠️ CAUSAS DE ROTACIÓN/);
+		lines.forEach((l: string, idx: number) => {
+			const len = visibleLen(l);
+			assert.strictEqual(len, 48, `Fila nativa expandida ${idx} debe tener 48 columnas (actual: ${len})`);
+		});
+	});
+
+	it("renders unified sidebar card collapsed by default ending after CUIDANDO EL CHAT with accordion row", () => {
+		const lines = formatSidebarQuotaCardLines(mockPoolPair, 48, undefined, undefined, false, undefined, undefined, false);
+		const text = lines.map((l: string) => stripAnsi(l)).join("\n");
+		assert.match(text, /\[CUIDANDO EL CHAT\]/);
+		assert.match(text, /▶ \[Ver más: Contexto, Historial y Líderes\]/);
+		assert.doesNotMatch(text, /📦 CONTEXTO & COMPRESIÓN/);
+		assert.doesNotMatch(text, /⚠️ CAUSAS DE ROTACIÓN/);
+		assert.doesNotMatch(text, /Estado actual:/);
+		lines.forEach((l: string, idx: number) => {
+			const len = visibleLen(l);
+			assert.strictEqual(len, 48, `Fila colapsada ${idx} debe tener 48 columnas (actual: ${len})`);
+		});
+	});
+
+	it("renders unified sidebar card fully expanded when isExpanded is true", () => {
+		const lines = formatSidebarQuotaCardLines(mockPoolPair, 48, undefined, undefined, false, undefined, undefined, true);
+		const text = lines.map((l: string) => stripAnsi(l)).join("\n");
+		assert.match(text, /\[CUIDANDO EL CHAT\]/);
+		assert.match(text, /▼ \[Ocultar detalles extendidos\]/);
+		assert.match(text, /📦 CONTEXTO & COMPRESIÓN/);
+		assert.match(text, /⚠️ CAUSAS DE ROTACIÓN/);
+		assert.match(text, /Estado actual:/);
+		lines.forEach((l: string, idx: number) => {
+			const len = visibleLen(l);
+			assert.strictEqual(len, 48, `Fila expandida ${idx} debe tener 48 columnas (actual: ${len})`);
+		});
+	});
+
 	it("renders unified sidebar card perfectly aligned to 48 columns matching reference screenshot", () => {
 		const lines = formatSidebarQuotaCardLines(mockPoolPair, 48);
-		assert.strictEqual(lines.length >= 25, true);
+		assert.strictEqual(lines.length >= 20, true);
 		lines.forEach((l: string, idx: number) => {
 			const len = visibleLen(l);
 			assert.strictEqual(len, 48, `Fila ${idx} debe tener exactamente 48 caracteres visibles (actual: ${len}): "${stripAnsi(l)}"`);

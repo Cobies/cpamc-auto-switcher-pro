@@ -214,6 +214,32 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 		},
 	});
 
+	// 3e-bis. Comando para alternar acordeón colapsable en la tarjeta del sidebar
+	pi.registerCommand("switcher-accordion", {
+		description: "Alterna el acordeón colapsable de la tarjeta de telemetría en el sidebar (Contexto, Historial y Líderes)",
+		handler: async (_args, ctx) => {
+			const expanded = adapter?.toggleExpanded();
+			await adapter?.update(true, ctx);
+			if (ctx.hasUI) {
+				ctx.ui.notify?.(
+					expanded
+						? "📂 Acordeón desplegado: Contexto, Historial y Líderes visibles"
+						: "📁 Acordeón colapsado: Tarjeta compactada en Cuidando el Chat",
+					"info",
+				);
+			}
+		},
+	});
+
+	// Atajo de teclado para alternar acordeón (Ctrl+Alt+X)
+	pi.registerShortcut("ctrl+alt+x", {
+		description: "Alternar acordeón de la tarjeta de telemetría en el sidebar",
+		handler: async (ctx) => {
+			adapter?.toggleExpanded();
+			await adapter?.update(true, ctx);
+		},
+	});
+
 	// 3f. Captura en caliente de eventos de compresión y uso de tokens de contexto
 	pi.on("session_compact", (_event, _ctx) => {
 		recordContextCompression();
