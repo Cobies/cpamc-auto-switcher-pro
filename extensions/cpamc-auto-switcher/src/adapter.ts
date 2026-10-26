@@ -435,18 +435,18 @@ function renderRaceBox(
 	// Barras de 11 celdas para aprovechar el espacio ganado
 	const gaugeCells = 11;
 
-	// Línea 2: │ ⏱  [▱▱▱▱▱▱▱▱▱▱▱]  0%    ▲ Ritmo ajustado │ (solo icono de reloj ⏱)
+	// Línea 2: │ ⏱   [▱▱▱▱▱▱▱▱▱▱▱]  0%   ● Ritmo holgado │ (⏱ + 3 espacios = 4 cols, alineado con "Uso ")
 	const timeBar = renderTimeGauge(pace.timeElapsedPct, gaugeCells);
 	const timePctStr = `${Math.round(pace.timeElapsedPct)}%`.padStart(3, " ");
-	const leftTime = `${s.border("│")} ${s.cyan("⏱ ")} ${timeBar} ${s.cyan(timePctStr)}`;
+	const leftTime = `${s.border("│")} ${s.cyan("⏱   ")}${timeBar} ${s.cyan(timePctStr)}`;
 	const rightPill = `${pace.pillColor(pace.pillLabel)} ${s.border("│")}`;
 	const spTime = Math.max(1, boxW - visibleLen(leftTime) - visibleLen(rightPill));
 	const boxLine1 = `${leftTime}${" ".repeat(spTime)}${rightPill}`;
 
-	// Línea 3: │ Uso [▰▰▱▱▱▱▱▱▱▱▱] 15%        85% libre    │ (etiqueta "Uso")
+	// Línea 3: │ Uso [▰▰▱▱▱▱▱▱▱▱▱] 15%        85% libre    │ (Uso + 1 espacio = 4 cols)
 	const quotaBar = renderSpectralGauge(pace.consumedPct, gaugeCells);
 	const quotaPctStr = `${pace.consumedPct}%`.padStart(3, " ");
-	const leftQuota = `${s.border("│")} ${s.slate("Uso")} ${quotaBar} ${s.boldWhite(quotaPctStr)}`;
+	const leftQuota = `${s.border("│")} ${s.slate("Uso ")}${quotaBar} ${s.boldWhite(quotaPctStr)}`;
 	const rightFree = `${s.slate(pace.remainingPct + "% libre")} ${s.border("│")}`;
 	const spQuota = Math.max(1, boxW - visibleLen(leftQuota) - visibleLen(rightFree));
 	const boxLine2 = `${leftQuota}${" ".repeat(spQuota)}${rightFree}`;
@@ -734,7 +734,7 @@ export function formatSidebarQuotaCardLines(
 			divider,
 			renderLine(s.error("[ACCIÓN REQUERIDA]"), s.text("Dar orden directa")),
 		];
-	} else {
+	} else if (hasActiveInterception) {
 		chatBlockLines = [
 			cockpitHeaderLine,
 			cockpitTurnLine,
@@ -742,6 +742,22 @@ export function formatSidebarQuotaCardLines(
 			renderDoubleLine(s.muted("Rescate Red:"), rescateVal, s.muted("Subagentes:"), pollVal),
 			renderDoubleLine(s.muted("Sesión:"), introVal, s.muted("Ahorro:"), ahorroVal),
 			renderDoubleLine(s.muted("Bucles:"), loopsVal, s.muted("Bash:"), bashVal),
+		];
+	} else {
+		// En la vista colapsada normal, CUIDANDO EL CHAT muestra:
+		// Fila 1: Cabecera con estado vivo
+		// Fila 2: Turno en vivo [barra]
+		// Fila 3: Anti-Sobrediseño (Activo KISS/YAGNI)
+		const antiOverContent = `${s.amber("⚠️")} ${s.cyan("Anti-Sobrediseño:")} ${s.idle("Activo (KISS/YAGNI)")}`;
+		const padAnti = Math.max(0, innerW - visibleLen(antiOverContent));
+		const antiOverRow = fitToWidth(
+			`${s.border("│")} ${antiOverContent}${" ".repeat(padAnti)} ${s.border("│")}`,
+			safeW,
+		);
+		chatBlockLines = [
+			cockpitHeaderLine,
+			cockpitTurnLine,
+			antiOverRow,
 		];
 	}
 
@@ -782,52 +798,94 @@ export function formatSidebarQuotaCardLines(
 		const spL2 = Math.max(1, innerW - visibleLen(line2Left) - visibleLen(line2Right));
 		const headerRow3 = fitToWidth(`${s.border("│")} ${line2Left}${" ".repeat(spL2)}${line2Right} ${s.border("│")}`, safeW);
 
-		// Bloque ROTACIONES & LIDERAZGO (solo si no es cuenta directa fija)
+		// Bloque ROTACIONES & LIDERAZGO con Telemetría de Red y Seguridad integrada
 		const rotSectionLines: string[] = [];
 		if (!pair.isNativeReadOnly) {
-			const rotCount = lifecycle?.rotations_count ?? 4;
-			const curLeadDur = lifecycle?.current_leader_dur ?? "1h 45m";
+			const rotCount = lifecycle?.rotations_count ?? 1019;
+			const curLeadDur = lifecycle?.current_leader_dur ?? "14h 06m";
 			const rescuesCount = lifecycle?.rescues_429_count ?? 0;
-			const tokensFmt = lifecycle?.tokens_consumed_fmt ?? "420k";
-			const sustainedTurns = lifecycle?.sustained_turns ?? 38;
+			const tokensFmt = lifecycle?.tokens_consumed_fmt ?? "48.7M";
+			const sustainedTurns = lifecycle?.sustained_turns ?? 8292;
 
-			const rotTitle = `${s.cyan("🔄 ROTACIONES & LIDERAZGO:")} ${s.text(pair.poolKey)}`;
-			const rotHeader = fitToWidth(`${s.border("│")} ${rotTitle}${" ".repeat(Math.max(1, innerW - visibleLen(rotTitle)))} ${s.border("│")}`, safeW);
+			const rotBaseTitle = `${s.cyan("🔄 ROTACIONES & LIDERAZGO")}`;
+			const maxPoolKeyW = Math.max(6, innerW - visibleLen(rotBaseTitle) - 3);
+			const poolKeyTrunc = truncateWithAnsi(pair.poolKey, maxPoolKeyW);
+			const rotFullTitle = `${rotBaseTitle} ${s.border("·")} ${s.text(poolKeyTrunc)}`;
+			const rotPad = Math.max(0, innerW - visibleLen(rotFullTitle));
+			const rotHeader = fitToWidth(`${s.border("│")} ${rotFullTitle}${" ".repeat(rotPad)} ${s.border("│")}`, safeW);
 			const rotRow1 = renderDoubleLine(s.muted("Rotaciones hoy:"), s.text(String(rotCount)), s.muted("Líder actual:"), s.text(curLeadDur));
 			const rotRow2 = renderDoubleLine(s.muted("Rescates 429:"), s.text(String(rescuesCount)), s.muted("Tokens consumidos:"), s.text(tokensFmt));
 			const rotRow3 = renderLine(s.muted("Turnos sostenidos:"), `${s.text(String(sustainedTurns))} ${s.slate("turnos sin corte")}`);
-			rotSectionLines.push(rotHeader, rotRow1, rotRow2, rotRow3, divider);
+			const innerDivider = fitToWidth(`${s.border("│")} ${s.border("─".repeat(innerW))} ${s.border("│")}`, safeW);
+			const netRow1 = renderDoubleLine(s.muted("Rescate Red:"), rescateVal, s.muted("Subagentes:"), pollVal);
+			const netRow2 = renderDoubleLine(s.muted("Sesión:"), introVal, s.muted("Ahorro:"), ahorroVal);
+			const netRow3 = renderDoubleLine(s.muted("Bucles:"), loopsVal, s.muted("Bash:"), bashVal);
+			rotSectionLines.push(rotHeader, rotRow1, rotRow2, rotRow3, innerDivider, netRow1, netRow2, netRow3);
 		}
 
-		// Línea de cuenta activa con tiempo de líder: ⚡ wil...io7 (Líder hace 42m) ○ agy (84.2% ok)
-		const activeLeadSince = lifecycle?.active_leader_since ?? "42m";
-		const maxActiveEmailW = Math.max(8, innerW - visibleLen(activeStateLabel) - 18);
+		// Bloque de Líder y Candidato para la vista principal (justo bajo los relojes)
+		const leaderInfoLines: string[] = [];
+		const activeLeadSince = lifecycle?.active_leader_since ?? "14h";
+		const maxActiveEmailW = Math.max(8, innerW - 32);
 		const activeEmailTrunc = truncateWithAnsi(pair.active.accountId, maxActiveEmailW);
-		const activeLeadSuffix = pair.isNativeReadOnly ? "(Cuenta fija)" : `(Líder hace ${activeLeadSince})`;
-		const leftActive = `${s.accent("⚡ ")}${s.text(activeEmailTrunc)} ${s.muted(activeLeadSuffix)}`;
-		const spActive = Math.max(1, innerW - visibleLen(leftActive) - visibleLen(activeStateLabel));
-		const activeLine = fitToWidth(`${s.border("│")} ${leftActive}${" ".repeat(spActive)}${activeStateLabel} ${s.border("│")}`, safeW);
-
-		// Línea de siguiente cuenta: Candidato a Líder (solo en pools)
-		const nextAccountLines: string[] = [];
-		if (!pair.isNativeReadOnly) {
-			let nextLine: string;
-			if (pair.next) {
-				const nextStateLabel = pair.next.minAvailable
-					? `${s.idle("○ " + nextAccountLabel)} ${s.muted(`(${pair.next.minAvailable})`)}`
-					: s.text(nextAccountLabel);
-				const maxNextEmailW = Math.max(8, innerW - visibleLen(nextStateLabel) - 22);
-				const nextEmailTrunc = truncateWithAnsi(pair.next.accountId, maxNextEmailW);
-				const leftNext = `${s.muted("Candidato a Líder:")} ${s.text(nextEmailTrunc)}`;
-				const spNext = Math.max(1, innerW - visibleLen(leftNext) - visibleLen(nextStateLabel));
-				nextLine = fitToWidth(`${s.border("│")} ${leftNext}${" ".repeat(spNext)}${nextStateLabel} ${s.border("│")}`, safeW);
+		const leaderTag = pair.isNativeReadOnly ? "(Cuenta fija)" : `(Líder hace ${activeLeadSince})`;
+		const leadPrefix = `${s.muted("Estado actual:")}  ${s.accent("⚡ ")}`;
+		const leadFixedW = visibleLen(leadPrefix) + visibleLen(leaderTag) + 2;
+		const leadEmailW = Math.max(6, innerW - leadFixedW);
+		let cleanLeadEmail = pair.active.accountId;
+		if (visibleLen(cleanLeadEmail) > leadEmailW) {
+			const atIdx = cleanLeadEmail.indexOf("@");
+			if (atIdx > 0) {
+				const domain = cleanLeadEmail.slice(atIdx);
+				const user = cleanLeadEmail.slice(0, atIdx);
+				const uSpace = Math.max(3, leadEmailW - visibleLen(domain) - 3);
+				cleanLeadEmail = user.slice(0, uSpace) + "..." + domain;
 			} else {
-				const leftNext = `${s.muted("Candidato a Líder:")}`;
-				const rightNone = s.muted("Ninguno (Sola)");
-				const spNext = Math.max(1, innerW - visibleLen(leftNext) - visibleLen(rightNone));
-				nextLine = fitToWidth(`${s.border("│")} ${leftNext}${" ".repeat(spNext)}${rightNone} ${s.border("│")}`, safeW);
+				cleanLeadEmail = truncateWithAnsi(cleanLeadEmail, leadEmailW);
 			}
-			nextAccountLines.push(nextLine);
+		}
+		const leadFull = `${leadPrefix}${s.text(cleanLeadEmail)} ${s.muted(leaderTag)}`;
+		const leadPad = Math.max(0, innerW - visibleLen(leadFull));
+		const leadLine = fitToWidth(`${s.border("│")} ${leadFull}${" ".repeat(leadPad)} ${s.border("│")}`, safeW);
+		leaderInfoLines.push(leadLine);
+
+		if (!pair.isNativeReadOnly) {
+			const prevLeadDur = lifecycle?.prev_leader_dur ?? "24h 01m";
+			const avgLeadDur = lifecycle?.avg_leader_dur ?? "28m";
+			const row2Left = `${s.muted("Líder anterior:")} ${s.text(prevLeadDur)}`;
+			const row2Right = `${s.muted("Promedio/cta:")} ${s.text(avgLeadDur)}`;
+			const spR2 = Math.max(1, innerW - visibleLen(row2Left) - visibleLen(row2Right));
+			leaderInfoLines.push(fitToWidth(`${s.border("│")} ${row2Left}${" ".repeat(spR2)}${row2Right} ${s.border("│")}`, safeW));
+
+			if (pair.next) {
+				const nextAvailPct = pair.next.minAvailable || "21%";
+				const candConsumedPct = pair.next.consumed5h ? parseInt(pair.next.consumed5h.replace("%", "").trim(), 10) : 21;
+				const candGauge = renderSpectralGauge(candConsumedPct, 10);
+				const candRight = `${candGauge} ${s.text(nextAvailPct)}`;
+				const candPrefix = `${s.muted("Candidato a Líder:")} `;
+				const candFixedW = visibleLen(candPrefix) + visibleLen(candRight) + 1;
+				const candEmailW = Math.max(6, innerW - candFixedW);
+				let cleanCandEmail = pair.next.accountId;
+				if (visibleLen(cleanCandEmail) > candEmailW) {
+					const atIdx = cleanCandEmail.indexOf("@");
+					if (atIdx > 0) {
+						const domain = cleanCandEmail.slice(atIdx);
+						const user = cleanCandEmail.slice(0, atIdx);
+						const uSpace = Math.max(3, candEmailW - visibleLen(domain) - 3);
+						cleanCandEmail = user.slice(0, uSpace) + "..." + domain;
+					} else {
+						cleanCandEmail = truncateWithAnsi(cleanCandEmail, candEmailW);
+					}
+				}
+				const candLeft = `${candPrefix}${s.text(cleanCandEmail)}`;
+				const spCand = Math.max(1, innerW - visibleLen(candLeft) - visibleLen(candRight));
+				leaderInfoLines.push(fitToWidth(`${s.border("│")} ${candLeft}${" ".repeat(spCand)}${candRight} ${s.border("│")}`, safeW));
+			} else {
+				const candLeft = `${s.muted("Candidato a Líder:")}`;
+				const candRight = s.muted("Ninguno (Sola)");
+				const spCand = Math.max(1, innerW - visibleLen(candLeft) - visibleLen(candRight));
+				leaderInfoLines.push(fitToWidth(`${s.border("│")} ${candLeft}${" ".repeat(spCand)}${candRight} ${s.border("│")}`, safeW));
+			}
 		}
 
 		// Fila interactiva del acordeón colapsable
@@ -871,9 +929,8 @@ export function formatSidebarQuotaCardLines(
 				headerRow2,
 				headerRow3,
 				divider,
-				activeLine,
 				...renderDualConcentricClocks(pair.active, s, innerW, safeW),
-				...nextAccountLines,
+				...leaderInfoLines,
 				divider,
 				...chatBlockLines,
 				divider,
@@ -912,10 +969,10 @@ export function formatSidebarQuotaCardLines(
 			const recentCauses = lifecycle?.recent_causes && lifecycle.recent_causes.length > 0
 				? lifecycle.recent_causes
 				: [
-					{ time_str: "14:20", previous_leader: "wil...io7", new_leader: "mar...tro", reason_display: "[Fatiga 80%]", timestamp: 0 },
-					{ time_str: "12:05", previous_leader: "mar...tro", new_leader: "wil...io7", reason_display: "[HTTP 429]", timestamp: 0 },
-					{ time_str: "09:30", previous_leader: "wil...io7", new_leader: "infosoy..", reason_display: "[Histéresis Δ]", timestamp: 0 },
-					{ time_str: "08:15", previous_leader: "infosoy..", new_leader: "wil...io7", reason_display: "[Manual Hook]", timestamp: 0 },
+					{ time_str: "15:32", previous_leader: "mar...tro", new_leader: "wil...io7", reason_display: "[Histéresis Δ]", timestamp: 0 },
+					{ time_str: "12:42", previous_leader: "mar...tro", new_leader: "wil...io7", reason_display: "[Fatiga 80%]", timestamp: 0 },
+					{ time_str: "12:37", previous_leader: "mar...tro", new_leader: "wil...io7", reason_display: "[Fatiga 80%]", timestamp: 0 },
+					{ time_str: "12:36", previous_leader: "mar...tro", new_leader: "wil...io7", reason_display: "[shadow_infe..]", timestamp: 0 },
 				];
 
 			for (const cause of recentCauses.slice(0, 4)) {
@@ -924,35 +981,7 @@ export function formatSidebarQuotaCardLines(
 				const spC = Math.max(1, innerW - visibleLen(causeLeft) - visibleLen(causeRight));
 				causesLines.push(fitToWidth(`${s.border("│")} ${causeLeft}${" ".repeat(spC)}${causeRight} ${s.border("│")}`, safeW));
 			}
-			causesSectionLines.push(divider, causesHeader, ...causesLines);
-		}
-
-		// Bloque Pie de Tarjeta: Estado actual y Duraciones
-		const footSectionLines: string[] = [];
-		const activeAccShort = activeEmailTrunc;
-		if (pair.isNativeReadOnly) {
-			const curLeadState = `${s.muted("Estado actual:")}  ${s.accent("⚡ ")}${s.text(activeAccShort)} ${s.muted("(Cuenta fija)")}`;
-			const footRow1 = fitToWidth(`${s.border("│")} ${curLeadState}${" ".repeat(Math.max(1, innerW - visibleLen(curLeadState)))} ${s.border("│")}`, safeW);
-			const footRow2Left = `${s.muted("Conexión:")} ${s.text("Directa (sin relevos)")}`;
-			const spFoot2 = Math.max(1, innerW - visibleLen(footRow2Left));
-			const footRow2 = fitToWidth(`${s.border("│")} ${footRow2Left}${" ".repeat(spFoot2)} ${s.border("│")}`, safeW);
-			const guardInfoLeft = `${s.cyan("🛡️ Anti-Sobrediseño:")} ${s.idle("Activo (KISS/YAGNI)")}`;
-			const spGuard = Math.max(1, innerW - visibleLen(guardInfoLeft));
-			const footRow3 = fitToWidth(`${s.border("│")} ${guardInfoLeft}${" ".repeat(spGuard)} ${s.border("│")}`, safeW);
-			footSectionLines.push(footRow1, footRow2, divider, footRow3);
-		} else {
-			const curLeadState = `${s.muted("Estado actual:")}  ${s.accent("⚡ ")}${s.text(activeAccShort)} ${s.muted(`(Líder hace ${activeLeadSince})`)}`;
-			const footRow1 = fitToWidth(`${s.border("│")} ${curLeadState}${" ".repeat(Math.max(1, innerW - visibleLen(curLeadState)))} ${s.border("│")}`, safeW);
-			const prevLeadDur = lifecycle?.prev_leader_dur ?? "2h 10m";
-			const avgLeadDur = lifecycle?.avg_leader_dur ?? "1h 22m";
-			const footRow2Left = `${s.muted("Líder anterior:")} ${s.text(prevLeadDur)}`;
-			const footRow2Right = `${s.muted("Promedio/cta:")} ${s.text(avgLeadDur)}`;
-			const spFoot2 = Math.max(1, innerW - visibleLen(footRow2Left) - visibleLen(footRow2Right));
-			const footRow2 = fitToWidth(`${s.border("│")} ${footRow2Left}${" ".repeat(spFoot2)}${footRow2Right} ${s.border("│")}`, safeW);
-			const guardInfoLeft = `${s.cyan("🛡️ Anti-Sobrediseño:")} ${s.idle("Activo (KISS/YAGNI)")}`;
-			const spGuard = Math.max(1, innerW - visibleLen(guardInfoLeft));
-			const footRow3 = fitToWidth(`${s.border("│")} ${guardInfoLeft}${" ".repeat(spGuard)} ${s.border("│")}`, safeW);
-			footSectionLines.push(footRow1, footRow2, divider, footRow3);
+			causesSectionLines.push(causesHeader, ...causesLines);
 		}
 
 		const rawLines = [
@@ -961,19 +990,18 @@ export function formatSidebarQuotaCardLines(
 			headerRow2,
 			headerRow3,
 			divider,
-			activeLine,
 			...renderDualConcentricClocks(pair.active, s, innerW, safeW),
-			...nextAccountLines,
+			...leaderInfoLines,
 			divider,
 			...chatBlockLines,
 			divider,
 			accordionLine,
 			divider,
 			...expandedRotLines,
-			...compLines,
-			...causesSectionLines,
 			divider,
-			...footSectionLines,
+			...compLines,
+			divider,
+			...causesSectionLines,
 			bottom,
 		];
 

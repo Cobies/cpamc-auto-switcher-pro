@@ -154,12 +154,7 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		assert.match(text, /● En guardia/);
 		assert.match(text, /Turno en vivo:/);
 		assert.match(text, /0\/15 acciones/);
-		assert.match(text, /Rescate Red:\s+0\/2/);
-		assert.match(text, /Subagentes:\s+0\/2/);
-		assert.match(text, /Sesión:\s+Protegida/);
-		assert.match(text, /Ahorro:\s+0 tk/);
-		assert.match(text, /Bucles:\s+0 detectados/);
-		assert.match(text, /Bash:\s+0\/5 llamadas/);
+		assert.match(text, /Anti-Sobrediseño:\s+Activo \(KISS\/YAGNI\)/);
 	});
 
 	it("renders sidebar card in active execution state with LIVE indicator", () => {
@@ -524,7 +519,8 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		assert.match(text, /▶ \[Ver más: Contexto, Historial y Líderes\]/);
 		assert.doesNotMatch(text, /📦 CONTEXTO & COMPRESIÓN/);
 		assert.doesNotMatch(text, /⚠️ CAUSAS DE ROTACIÓN/);
-		assert.doesNotMatch(text, /Estado actual:/);
+		assert.doesNotMatch(text, /🔄 ROTACIONES & LIDERAZGO/);
+		assert.match(text, /Estado actual:/);
 		lines.forEach((l: string, idx: number) => {
 			const len = visibleLen(l);
 			assert.strictEqual(len, 48, `Fila colapsada ${idx} debe tener 48 columnas (actual: ${len})`);
@@ -536,6 +532,13 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		const text = lines.map((l: string) => stripAnsi(l)).join("\n");
 		assert.match(text, /\[CUIDANDO EL CHAT\]/);
 		assert.match(text, /▼ \[Ocultar detalles extendidos\]/);
+		assert.match(text, /🔄 ROTACIONES & LIDERAZGO/);
+		assert.match(text, /Rescate Red:\s+0\/2/);
+		assert.match(text, /Subagentes:\s+0\/2/);
+		assert.match(text, /Sesión:\s+Protegida/);
+		assert.match(text, /Ahorro:\s+0 tk/);
+		assert.match(text, /Bucles:\s+0 detectados/);
+		assert.match(text, /Bash:\s+0\/5 llamadas/);
 		assert.match(text, /📦 CONTEXTO & COMPRESIÓN/);
 		assert.match(text, /⚠️ CAUSAS DE ROTACIÓN/);
 		assert.match(text, /Estado actual:/);
