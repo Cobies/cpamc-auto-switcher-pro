@@ -238,6 +238,10 @@ verify_connection() {
         echo -e "${YELLOW}    [!] Advertencia: No se pudo verificar respuesta inmediata en ${check_endpoint} (HTTP ${http_code:-timeout}).${RESET}"
         echo -e "        Continuando la instalación con el endpoint configurado."
     fi
+
+    # Persistir endpoint en ~/.cliproxy_url para enlace automático de agentes
+    echo "${TARGET_URL}" > "${HOME}/.cliproxy_url"
+    chmod 600 "${HOME}/.cliproxy_url" 2>/dev/null || true
 }
 
 # ------------------------------------------------------------------------------
@@ -358,9 +362,12 @@ install_extension() {
         target_agent_dirs+=("$HOME/.pi/agent")
         echo -e "Detectado agente: ${GREEN}Pi Vanilla${RESET} (~/.pi/agent)"
     fi
-    if [ -d "$HOME/.pi/agent-j0k3r" ]; then
+    if [ -d "$HOME/.pi/agent-wilox" ]; then
+        target_agent_dirs+=("$HOME/.pi/agent-wilox")
+        echo -e "Detectado agente: ${GREEN}Wilox Pi${RESET} (~/.pi/agent-wilox)"
+    elif [ -d "$HOME/.pi/agent-j0k3r" ]; then
         target_agent_dirs+=("$HOME/.pi/agent-j0k3r")
-        echo -e "Detectado agente: ${GREEN}J0k3r Pi${RESET} (~/.pi/agent-j0k3r)"
+        echo -e "Detectado agente legado: ${YELLOW}Wilox/J0k3r Pi${RESET} (~/.pi/agent-j0k3r)"
     fi
 
     # Si ninguno existe aún, preparar Gentle-Shell por defecto
@@ -455,18 +462,24 @@ install_extension() {
         fi
     fi
 
-    # Parcheo idempotente de Gentle-Shell layout si está instalado en el sistema
+    # Parcheo idempotente y universal de Gentle-Shell layout (Linux y macOS M1-M4)
     if command -v node >/dev/null 2>&1; then
-        local gs_target=$(node -e "try { console.log(require.resolve('gentle-pi/lib/shell-sidebar-layout.ts')) } catch {}" 2>/dev/null || true)
-        if [ -n "$gs_target" ] && [ -f "$gs_target" ]; then
-            if grep -q 'cpamc-quota-card' "$gs_target"; then
-                echo -e "${GREEN}    [✓] Gentle-Shell layout ya contiene cpamc-quota-card en sections.${RESET}"
-            else
-                echo -e "    ${YELLOW}[+] Registrando cpamc-quota-card en secciones de Gentle-Shell...${RESET}"
-                sed -i 's/const sections = \["footer",/const sections = \["footer", "cpamc-quota-card",/' "$gs_target" 2>/dev/null || true
-                echo -e "${GREEN}    [✓] Layout de Gentle-Shell parcheado exitosamente.${RESET}"
-            fi
-        fi
+        node -e "
+          const fs = require('fs');
+          try {
+            const target = require.resolve('gentle-pi/lib/shell-sidebar-layout.ts');
+            if (target && fs.existsSync(target)) {
+              let content = fs.readFileSync(target, 'utf8');
+              if (!content.includes('cpamc-quota-card')) {
+                content = content.replace(/const sections = \[\"footer\",/, 'const sections = [\"footer\", \"cpamc-quota-card\",');
+                fs.writeFileSync(target, content, 'utf8');
+                console.log('    [✓] Layout de Gentle-Shell parcheado exitosamente.');
+              } else {
+                console.log('    [✓] Gentle-Shell layout ya contiene cpamc-quota-card.');
+              }
+            }
+          } catch {}
+        " 2>/dev/null || true
     fi
 
     # Limpieza temporal

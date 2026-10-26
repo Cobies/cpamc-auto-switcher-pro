@@ -214,15 +214,96 @@ function resolveRecommendedContextWindow(modelId: string, reportedContext?: numb
 }
 
 function resolveBaseUrl(): string {
-    const raw = (process.env.CLIPROXYAPI_BASE_URL || process.env.CPAMC_URL || DEFAULT_BASE_URL).trim().replace(/\/+$/, "").replace(/\/v1$/, "");
-    return raw || DEFAULT_BASE_URL;
+    const candidateUrls = resolveCandidateBaseUrls();
+    return candidateUrls[0] || DEFAULT_BASE_URL;
+}
+
+/**
+ * Intenta leer el host y puerto de CPAMC desde archivos de configuración locales
+ * (útil si el usuario configuró un puerto personalizado como 8080, 8000, 9000, etc.)
+ */
+function discoverCpamcFromLocalConfig(): string | null {
+    const home = homedir();
+    const localAppData = process.env.LOCALAPPDATA || join(home, "AppData", "Local");
+    const appData = process.env.APPDATA || join(home, "AppData", "Roaming");
+
+    const candidateConfigs = [
+        join(home, ".cli-proxy-api", "config.yaml"),
+        join(home, "Library", "Application Support", "cli-proxy-api", "config.yaml"),
+        join(localAppData, "cli-proxy-api", "config.yaml"),
+        join(appData, "cli-proxy-api", "config.yaml"),
+        join(home, "services", "cliproxy", "config.yaml"),
+        "/CLIProxyAPI/config.yaml",
+        join(home, ".local", "share", "EasyCLIProxyAPI", "cpa-core", "config.yaml"),
+    ];
+
+    for (const confPath of candidateConfigs) {
+        try {
+            if (existsSync(confPath)) {
+                const text = readFileSync(confPath, "utf-8");
+                // Buscar server.port o port: \d+
+                const portMatch = text.match(/^\s*port:\s*(\d+)/m);
+                const hostMatch = text.match(/^\s*host:\s*['"]?([^'"\s]+)['"]?/m);
+                const tlsMatch = text.match(/^\s*enable:\s*(true|false)/m);
+
+                if (portMatch) {
+                    const port = portMatch[1];
+                    let host = hostMatch && hostMatch[1] ? hostMatch[1].trim() : "127.0.0.1";
+                    if (host === "" || host === "0.0.0.0") {
+                        host = "127.0.0.1";
+                    }
+                    const scheme = tlsMatch && tlsMatch[1] === "true" ? "https" : "http";
+                    return `${scheme}://${host}:${port}`;
+                }
+            }
+        } catch {}
+    }
+    return null;
+}
+
+/**
+ * Lee archivo de enlace persistente .cliproxy_url si existe
+ * (permite al instalador o al usuario vincular un VPS/Proxmox/LAN con 1 sola línea)
+ */
+function discoverCpamcFromUrlFile(): string | null {
+    const home = homedir();
+    const candidates = [
+        join(home, ".cliproxy_url"),
+        join(home, ".cpamc_url"),
+        join(home, ".gentle-shell", "agent", ".cliproxy_url"),
+        join(home, ".gentle-shell", "agent", "cpamc.url"),
+        join(home, ".pi", "agent", ".cliproxy_url"),
+        join(home, ".pi", "agent", "cpamc.url"),
+    ];
+    if (process.env.PI_CODING_AGENT_DIR) {
+        candidates.push(
+            join(process.env.PI_CODING_AGENT_DIR, ".cliproxy_url"),
+            join(process.env.PI_CODING_AGENT_DIR, "cpamc.url")
+        );
+    }
+
+    for (const p of candidates) {
+        try {
+            if (existsSync(p)) {
+                const content = readFileSync(p, "utf-8").trim();
+                if (content && (content.startsWith("http://") || content.startsWith("https://"))) {
+                    return content.replace(/\/+$/, "").replace(/\/v1$/, "");
+                }
+            }
+        } catch {}
+    }
+    return null;
 }
 
 /**
  * Cascada universal de URLs base para CPAMC:
- * 1. URL explícita por entorno (CLIPROXYAPI_BASE_URL / CPAMC_URL)
- * 2. Loopback IPv4 estándar (http://127.0.0.1:8317)
- * 3. Loopback hostname (http://localhost:8317)
+ * 1. Variable de entorno explícita (CLIPROXYAPI_BASE_URL / CPAMC_URL)
+ * 2. Archivo de enlace persistente (.cliproxy_url / .cpamc_url)
+ * 3. Descubrimiento de puerto personalizado en config.yaml local
+ * 4. Loopback IPv4 estándar (http://127.0.0.1:8317)
+ * 5. Loopback hostname (http://localhost:8317)
+ * 6. Entornos de contenedor Docker / WSL (http://host.docker.internal:8317)
+ * 7. Puertos alternativos comunes (8080, 8000, 9000)
  */
 export function resolveCandidateBaseUrls(): string[] {
     const urls = new Set<string>();
@@ -230,8 +311,26 @@ export function resolveCandidateBaseUrls(): string[] {
     if (explicit) {
         urls.add(explicit);
     }
+
+    const fileUrl = discoverCpamcFromUrlFile();
+    if (fileUrl) {
+        urls.add(fileUrl);
+    }
+
+    const configUrl = discoverCpamcFromLocalConfig();
+    if (configUrl) {
+        urls.add(configUrl);
+    }
+
+    // Candidatos estándar
     urls.add("http://127.0.0.1:8317");
     urls.add("http://localhost:8317");
+
+    // Fallbacks para entornos dockerizados / WSL
+    if (process.env.DOCKER_CONTAINER || process.env.WSL_DISTRO_NAME) {
+        urls.add("http://host.docker.internal:8317");
+    }
+
     return Array.from(urls);
 }
 

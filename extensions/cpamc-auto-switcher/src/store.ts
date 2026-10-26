@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { resolveCandidateBaseUrls, resolveCpamcBaseUrl } from "./provider.js";
 
 const TIMEOUT_MS = 6000;
 export const QUOTA_REFRESH_MS = 25_000;
@@ -134,15 +135,22 @@ export function getCandidateStatePaths(): string[] {
 	const appData = process.env.APPDATA || join(home, "AppData", "Roaming");
 
 	return [
-		// 1. EasyCLIProxyAPI en Linux Desktop
-		join(home, ".local", "share", "EasyCLIProxyAPI", "cpa-core", "plugins", "auto-switcher-pro-state.json"),
-		// 2. EasyCLIProxyAPI en Windows
-		join(localAppData, "EasyCLIProxyAPI", "cpa-core", "plugins", "auto-switcher-pro-state.json"),
-		join(appData, "EasyCLIProxyAPI", "cpa-core", "plugins", "auto-switcher-pro-state.json"),
-		// 3. Linux Servidor / VPS / Docker / CLIProxyAPI nativo
+		// 1. CPAMC / CLIProxyAPI Console Canónico (PRIORIDAD 1 - Universal: Linux, macOS M1-M4, Windows)
+		join(home, ".cli-proxy-api", "plugins", "auto-switcher-pro-state.json"),
+		// macOS Apple Silicon / Intel Application Support
+		join(home, "Library", "Application Support", "cli-proxy-api", "plugins", "auto-switcher-pro-state.json"),
+		// Windows CLIProxyAPI nativo
+		join(localAppData, "cli-proxy-api", "plugins", "auto-switcher-pro-state.json"),
+		join(appData, "cli-proxy-api", "plugins", "auto-switcher-pro-state.json"),
+		// Linux Servidor / VPS / Docker
 		join(home, "services", "cliproxy", "plugins", "auto-switcher-pro-state.json"),
 		"/CLIProxyAPI/plugins/auto-switcher-pro-state.json",
-		join(home, ".cli-proxy-api", "plugins", "auto-switcher-pro-state.json"),
+
+		// 2. EasyCLIProxyAPI (PRIORIDAD 2 - Derivado / Desktop)
+		join(home, ".local", "share", "EasyCLIProxyAPI", "cpa-core", "plugins", "auto-switcher-pro-state.json"),
+		join(localAppData, "EasyCLIProxyAPI", "cpa-core", "plugins", "auto-switcher-pro-state.json"),
+		join(appData, "EasyCLIProxyAPI", "cpa-core", "plugins", "auto-switcher-pro-state.json"),
+		join(home, "Library", "Application Support", "EasyCLIProxyAPI", "cpa-core", "plugins", "auto-switcher-pro-state.json"),
 	];
 }
 
@@ -190,8 +198,7 @@ export async function querySwitcherAccounts(force = false): Promise<SwitcherAcco
 
 	isFetching = true;
 	try {
-		const rawUrl = (process.env.CLIPROXYAPI_BASE_URL || process.env.CPAMC_URL || "http://127.0.0.1:8317").trim().replace(/\/+$/, "").replace(/\/v1$/, "");
-		const baseUrl = rawUrl || "http://127.0.0.1:8317";
+		const candidateUrls = resolveCandidateBaseUrls();
 		let key = (process.env.CLIPROXYAPI_MANAGEMENT_KEY || "").trim();
 		if (!key) {
 			const home = homedir();
@@ -229,134 +236,147 @@ export async function querySwitcherAccounts(force = false): Promise<SwitcherAcco
 			headers["Authorization"] = `Bearer ${key}`;
 		}
 
-		// Prioridad 1: Consulta O(1) vía /auto-switcher-pro/manifest (elimina peticiones múltiples)
-		try {
-			const manifestRes = await fetch(`${baseUrl}/v0/management/auto-switcher-pro/manifest`, {
-				headers,
-				signal: AbortSignal.timeout(TIMEOUT_MS),
-			});
-			if (manifestRes.ok) {
-				const mData = (await manifestRes.json()) as any;
-				if (mData?.lifecycle) {
-					cachedLifecycle = mData.lifecycle;
-				}
-				if (mData?.ok && Array.isArray(mData?.accounts) && mData.accounts.length > 0) {
-					const reserveIndexByPool = new Map<string, number>();
-					const list: SwitcherAccount[] = mData.accounts.map((a: any) => {
-						const isLeader = a.role === "leader";
-						const basePref = a.base_prefix || "default";
-						let prefix = basePref;
-						if (!isLeader) {
-							const nextIdx = (reserveIndexByPool.get(basePref) || 0) + 1;
-							reserveIndexByPool.set(basePref, nextIdx);
-							prefix = `${basePref}_${nextIdx}`;
-						}
-
-						const w5h = typeof a.window_5h_pct === "number" ? a.window_5h_pct : 95;
-						const wWk = typeof a.weekly_pct === "number" ? a.weekly_pct : 95;
-						const minPct = Math.round(Math.min(w5h, wWk));
-						const c5h = Math.max(0, Math.min(100, Math.round(100 - w5h)));
-						const cWk = Math.max(0, Math.min(100, Math.round(100 - wWk)));
-						const reset5h = typeof a.window_5h_reset_in === "number" ? a.window_5h_reset_in : undefined;
-						const resetWk = typeof a.weekly_reset_in === "number" ? a.weekly_reset_in : undefined;
-
-						return {
-							status: isLeader ? "[ACTIVE]" : "[RESERVE]",
-							provider: "antigravity",
-							profile: basePref,
-							accountId: maskEmailFromAuth(a.account_key || a.email),
-							prefix,
-							consumed5h: `${c5h}%`,
-							consumedWeekly: `${cWk}%`,
-							minAvailable: `${minPct}%`,
-							reset5hInSec: reset5h,
-							resetWeeklyInSec: resetWk,
-						};
+		// Probar cada URL candidata de CPAMC hasta encontrar el endpoint vivo
+		for (const baseUrl of candidateUrls) {
+			try {
+				// Prioridad 1: Consulta O(1) vía /auto-switcher-pro/manifest (elimina peticiones múltiples)
+				try {
+					const manifestRes = await fetch(`${baseUrl}/v0/management/auto-switcher-pro/manifest`, {
+						headers,
+						signal: AbortSignal.timeout(TIMEOUT_MS),
 					});
-					if (list.length > 0) {
-						cachedAccounts = list;
-						lastFetchTime = Date.now();
-						return cachedAccounts;
+					if (manifestRes.ok) {
+						const mData = (await manifestRes.json()) as any;
+						if (mData?.lifecycle) {
+							cachedLifecycle = mData.lifecycle;
+						}
+						if (mData?.ok && Array.isArray(mData?.accounts) && mData.accounts.length > 0) {
+							const reserveIndexByPool = new Map<string, number>();
+							const list: SwitcherAccount[] = mData.accounts.map((a: any) => {
+								const isLeader = a.role === "leader";
+								const basePref = a.base_prefix || "default";
+								let prefix = basePref;
+								if (!isLeader) {
+									const nextIdx = (reserveIndexByPool.get(basePref) || 0) + 1;
+									reserveIndexByPool.set(basePref, nextIdx);
+									prefix = `${basePref}_${nextIdx}`;
+								}
+
+								const w5h = typeof a.window_5h_pct === "number" ? a.window_5h_pct : 95;
+								const wWk = typeof a.weekly_pct === "number" ? a.weekly_pct : 95;
+								const minPct = Math.round(Math.min(w5h, wWk));
+								const c5h = Math.max(0, Math.min(100, Math.round(100 - w5h)));
+								const cWk = Math.max(0, Math.min(100, Math.round(100 - wWk)));
+								const reset5h = typeof a.window_5h_reset_in === "number" ? a.window_5h_reset_in : undefined;
+								const resetWk = typeof a.weekly_reset_in === "number" ? a.weekly_reset_in : undefined;
+
+								return {
+									status: isLeader ? "[ACTIVE]" : "[RESERVE]",
+									provider: "antigravity",
+									profile: basePref,
+									accountId: maskEmailFromAuth(a.account_key || a.email),
+									prefix,
+									consumed5h: `${c5h}%`,
+									consumedWeekly: `${cWk}%`,
+									minAvailable: `${minPct}%`,
+									reset5hInSec: reset5h,
+									resetWeeklyInSec: resetWk,
+								};
+							});
+							if (list.length > 0) {
+								cachedAccounts = list;
+								lastFetchTime = Date.now();
+								return cachedAccounts;
+							}
+						}
+					}
+				} catch {}
+
+				// Prioridad 2 (Fallback): Consultar telemetría de cuotas y pools en paralelo sin procesos hijos
+				const [telemetryRes, poolsRes] = await Promise.allSettled([
+					fetch(`${baseUrl}/auto-switcher-pro/predictive/telemetry`, {
+						headers,
+						signal: AbortSignal.timeout(TIMEOUT_MS),
+					}),
+					fetch(`${baseUrl}/v0/management/auto-switcher-pro/pools`, {
+						headers,
+						signal: AbortSignal.timeout(TIMEOUT_MS),
+					}),
+				]);
+
+				const list: SwitcherAccount[] = [];
+
+				if (poolsRes.status === "fulfilled" && poolsRes.value.ok) {
+					const poolsData = (await poolsRes.value.json()) as any;
+					const pools = Array.isArray(poolsData?.pools) ? poolsData.pools : [];
+
+					let telemetryAccounts: any[] = [];
+					if (telemetryRes.status === "fulfilled" && telemetryRes.value.ok) {
+						const tData = (await telemetryRes.value.json()) as any;
+						if (Array.isArray(tData?.accounts)) {
+							telemetryAccounts = tData.accounts;
+						}
+					}
+
+					// Mapear cada pool a su cuenta activa en RAM y sus reservas
+					for (const p of pools) {
+						const basePref = p.base_prefix || "";
+						const leaderAuth = p.active_leader || p.leader_auth || "";
+						const members: string[] = Array.isArray(p.members) ? p.members : [];
+
+						// Buscar telemetría para el líder
+						const leaderTele = telemetryAccounts.find((a: any) =>
+							a.account_email === leaderAuth || a.prefix === basePref || (leaderAuth && a.account_email && leaderAuth.includes(a.account_email))
+						);
+
+						const minAvail = leaderTele?.min_available_pct !== undefined ? `${Math.round(leaderTele.min_available_pct)}%` : "95%";
+						const c5h = leaderTele?.consumed_5h !== undefined ? `${leaderTele.consumed_5h}` : "0";
+						const cW = leaderTele?.consumed_weekly !== undefined ? `${leaderTele.consumed_weekly}` : "0";
+
+						list.push({
+							status: "[ACTIVE]",
+							provider: "antigravity",
+							profile: p.family || "default",
+							accountId: maskEmailFromAuth(leaderAuth),
+							prefix: basePref,
+							consumed5h: c5h,
+							consumedWeekly: cW,
+							minAvailable: minAvail,
+						});
+
+						// Listar miembros de reserva
+						let reserveIdx = 0;
+						for (const m of members) {
+							if (m === leaderAuth) continue;
+							reserveIdx++;
+							const mTele = telemetryAccounts.find((a: any) =>
+								a.account_email === m || (m && a.account_email && m.includes(a.account_email))
+							);
+							const mMinAvail = mTele?.min_available_pct !== undefined ? `${Math.round(mTele.min_available_pct)}%` : "100%";
+							const m5h = mTele?.consumed_5h !== undefined ? `${mTele.consumed_5h}` : "0";
+							const mWeekly = mTele?.consumed_weekly !== undefined ? `${mTele.consumed_weekly}` : "0";
+
+							list.push({
+								status: "[RESERVE]",
+								provider: "antigravity",
+								profile: p.family || "default",
+								accountId: maskEmailFromAuth(m),
+								prefix: `${basePref}_${reserveIdx}`,
+								consumed5h: m5h,
+								consumedWeekly: mWeekly,
+								minAvailable: mMinAvail,
+							});
+						}
 					}
 				}
-			}
-		} catch {}
 
-		// Prioridad 2 (Fallback): Consultar telemetría de cuotas y pools en paralelo sin procesos hijos
-		const [telemetryRes, poolsRes] = await Promise.allSettled([
-			fetch(`${baseUrl}/auto-switcher-pro/predictive/telemetry`, {
-				headers,
-				signal: AbortSignal.timeout(TIMEOUT_MS),
-			}),
-			fetch(`${baseUrl}/v0/management/auto-switcher-pro/pools`, {
-				headers,
-				signal: AbortSignal.timeout(TIMEOUT_MS),
-			}),
-		]);
-
-		const list: SwitcherAccount[] = [];
-
-		if (poolsRes.status === "fulfilled" && poolsRes.value.ok) {
-			const poolsData = (await poolsRes.value.json()) as any;
-			const pools = Array.isArray(poolsData?.pools) ? poolsData.pools : [];
-
-			let telemetryAccounts: any[] = [];
-			if (telemetryRes.status === "fulfilled" && telemetryRes.value.ok) {
-				const tData = (await telemetryRes.value.json()) as any;
-				if (Array.isArray(tData?.accounts)) {
-					telemetryAccounts = tData.accounts;
+				if (list.length > 0) {
+					cachedAccounts = list;
+					lastFetchTime = Date.now();
+					return cachedAccounts;
 				}
-			}
-
-			// Mapear cada pool a su cuenta activa en RAM y sus reservas
-			for (const p of pools) {
-				const basePref = p.base_prefix || "";
-				const leaderAuth = p.active_leader || p.leader_auth || "";
-				const members: string[] = Array.isArray(p.members) ? p.members : [];
-
-				// Buscar telemetría para el líder
-				const leaderTele = telemetryAccounts.find((a: any) =>
-					a.account_email === leaderAuth || a.prefix === basePref || (leaderAuth && a.account_email && leaderAuth.includes(a.account_email))
-				);
-
-				const minAvail = leaderTele?.min_available_pct !== undefined ? `${Math.round(leaderTele.min_available_pct)}%` : "95%";
-				const c5h = leaderTele?.consumed_5h !== undefined ? `${leaderTele.consumed_5h}` : "0";
-				const cW = leaderTele?.consumed_weekly !== undefined ? `${leaderTele.consumed_weekly}` : "0";
-
-				list.push({
-					status: "[ACTIVE]",
-					provider: "antigravity",
-					profile: p.family || "default",
-					accountId: maskEmailFromAuth(leaderAuth),
-					prefix: basePref,
-					consumed5h: c5h,
-					consumedWeekly: cW,
-					minAvailable: minAvail,
-				});
-
-				// Listar miembros de reserva
-				let reserveIdx = 0;
-				for (const m of members) {
-					if (m === leaderAuth) continue;
-					reserveIdx++;
-					const mTele = telemetryAccounts.find((a: any) =>
-						a.account_email === m || (m && a.account_email && m.includes(a.account_email))
-					);
-					const mMinAvail = mTele?.min_available_pct !== undefined ? `${Math.round(mTele.min_available_pct)}%` : "100%";
-					const m5h = mTele?.consumed_5h !== undefined ? `${mTele.consumed_5h}` : "0";
-					const mWeekly = mTele?.consumed_weekly !== undefined ? `${mTele.consumed_weekly}` : "0";
-
-					list.push({
-						status: "[RESERVE]",
-						provider: "antigravity",
-						profile: p.family || "default",
-						accountId: maskEmailFromAuth(m),
-						prefix: `${basePref}_${reserveIdx}`,
-						consumed5h: m5h,
-						consumedWeekly: mWeekly,
-						minAvailable: mMinAvail,
-					});
-				}
+			} catch {
+				// Siguiente URL candidata
 			}
 		}
 

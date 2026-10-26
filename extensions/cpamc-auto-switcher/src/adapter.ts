@@ -8,6 +8,7 @@ import {
 	type LifecycleSummary,
 	type ContextCompressionState,
 } from "./store.js";
+import { resolveCpamcBaseUrl } from "./provider.js";
 import { runawayGuard, type RunawayGuardTelemetry, MAX_BASH_EXPLORATION_PER_TURN, MAX_SUBAGENT_POLL_PER_TURN } from "./guards.js";
 
 // Colores ANSI suaves compatibles con temas oscuros y claros (Cyber-Pastel)
@@ -670,7 +671,13 @@ export function formatSidebarQuotaCardLines(
 	let chatBlockLines: string[] = [];
 	if (isTripped) {
 		const incId = telemetry.incidentId || "active";
-		const linkUrl = `http://127.0.0.1:8317/management.html#/plugin-pages/auto-switcher-pro-linux-amd64/2#incident-${incId}`;
+		const baseUrl = resolveCpamcBaseUrl();
+		const pluginTarget = process.platform === "win32"
+			? "auto-switcher-pro-windows-amd64"
+			: process.platform === "darwin"
+				? "auto-switcher-pro-darwin-arm64"
+				: "auto-switcher-pro-linux-amd64";
+		const linkUrl = `${baseUrl}/management.html#/plugin-pages/${pluginTarget}/2#incident-${incId}`;
 		const eventCount =
 			telemetry.lastIncident?.actions_blocked ||
 			(telemetry.circuitBreakerReason === "STEP_BUDGET_EXCEEDED"
@@ -1136,20 +1143,20 @@ export class CpamcTuiAdapter {
 		try {
 			this.currentPair = await getRotationPairForModel(model.id, model.provider);
 
-			// Detección de modo TUI y sidebars (gentle-pi y j0k3r-theme):
+			// Detección de modo TUI y sidebars (gentle-pi, wilox-pi y temas afines):
 			const tui = this.tui || (this.ctx as any)?.tui;
 			const terminal = tui?.terminal as any;
 			const gentleState = terminal?.[Symbol.for("gentle-pi.experimental-sidebar.state")];
-			const j0k3rSidebarState = terminal?.[Symbol.for("j0k3r-theme.sidebar.state")];
+			const altSidebarState = terminal?.[Symbol.for("wilox-pi.sidebar.state")] || terminal?.[Symbol.for("j0k3r-theme.sidebar.state")];
 
-			this.isFullscreen = Boolean(gentleState?.active || j0k3rSidebarState?.active || terminal?.fullscreen || process.env.PI_TUI_MODE === "fullscreen");
+			this.isFullscreen = Boolean(gentleState?.active || altSidebarState?.active || terminal?.fullscreen || process.env.PI_TUI_MODE === "fullscreen");
 
 			if (gentleState?.parts) {
 				this.injectIntoSidebar(gentleState);
 				tui?.requestRender?.();
 			}
-			if (j0k3rSidebarState?.parts) {
-				this.injectIntoSidebar(j0k3rSidebarState);
+			if (altSidebarState?.parts) {
+				this.injectIntoSidebar(altSidebarState);
 				tui?.requestRender?.();
 			}
 
@@ -1183,7 +1190,7 @@ export class CpamcTuiAdapter {
 			const block = formatFooterRotationBlock(this.currentPair, isBusy, originTag);
 			const tui = this.tui || (this.ctx as any)?.tui;
 			const terminal = tui?.terminal as any;
-			const footer = (this.ctx as any)?.footer || terminal?.[Symbol.for("j0k3r-theme.footer")];
+			const footer = (this.ctx as any)?.footer || terminal?.[Symbol.for("wilox-pi.footer")] || terminal?.[Symbol.for("j0k3r-theme.footer")];
 
 			if (typeof footer?.setQuota === "function") {
 				footer.setQuota(block || undefined);
@@ -1193,26 +1200,30 @@ export class CpamcTuiAdapter {
 
 	private originalFooterPart: any = null;
 	private decoratedFooter: any = null;
+	private lastStandaloneRenderTime = 0;
 
 	private injectIntoSidebar(gentleState: any): void {
 		if (!gentleState?.parts) return;
 
-		// 1. Siempre registrar la tarjeta cpamc-quota-card independiente
+		const self = this;
+
+		// 1. Siempre registrar la tarjeta cpamc-quota-card independiente (para hosts con sección habilitada)
 		gentleState.parts.set("cpamc-quota-card", {
 			render: () => {
 				try {
-					const m = this.safeGetModel();
-					const p = m ? (getRotationPairForModelSync(m.id, m.provider) || this.currentPair) : this.currentPair;
+					self.lastStandaloneRenderTime = Date.now();
+					const m = self.safeGetModel();
+					const p = m ? (getRotationPairForModelSync(m.id, m.provider) || self.currentPair) : self.currentPair;
 					return formatSidebarQuotaCardLines(
 						p,
 						48,
 						"\x1b[38;2;120;153;166m",
-						this.theme,
-						this.isBusy,
+						self.theme,
+						self.isBusy,
 						undefined,
-						this.getPeriodLabel(),
-						this.accordionMode,
-						this.peekRemainingSec,
+						self.getPeriodLabel(),
+						self.accordionMode,
+						self.peekRemainingSec,
 					);
 				} catch {
 					return [];
@@ -1220,10 +1231,10 @@ export class CpamcTuiAdapter {
 			},
 			digest: () => {
 				try {
-					const m = this.safeGetModel();
-					const p = m ? (getRotationPairForModelSync(m.id, m.provider) || this.currentPair) : this.currentPair;
+					const m = self.safeGetModel();
+					const p = m ? (getRotationPairForModelSync(m.id, m.provider) || self.currentPair) : self.currentPair;
 					const g = runawayGuard.getTelemetry();
-					return `${m?.id || "none"}-${p?.poolKey || "none"}-${p?.active?.prefix || "none"}-${p?.active?.minAvailable || "none"}-${this.isBusy}-${this.accordionMode}-${this.peekRemainingSec}-${g.bashExplorationCount}-${g.subagentPollCount}-${g.blockedIntrospections}-${g.blockedBashEvasions}`;
+					return `${m?.id || "none"}-${p?.poolKey || "none"}-${p?.active?.prefix || "none"}-${p?.active?.minAvailable || "none"}-${self.isBusy}-${self.accordionMode}-${self.peekRemainingSec}-${g.bashExplorationCount}-${g.subagentPollCount}-${g.blockedIntrospections}-${g.blockedBashEvasions}`;
 				} catch {
 					return "none";
 				}
@@ -1232,7 +1243,7 @@ export class CpamcTuiAdapter {
 			handleMouse: (event: any) => {
 				try {
 					if (event && (event.type === "click" || event.type === "press")) {
-						this.toggleExpanded();
+						self.toggleExpanded();
 						return { handled: true, render: true };
 					}
 				} catch {}
@@ -1240,8 +1251,7 @@ export class CpamcTuiAdapter {
 			},
 		});
 
-		// 2. Interceptor reactivo universal sobre "footer"
-		const self = this;
+		// 2. Interceptor reactivo universal sobre "footer" con protección anti-duplicación
 		const wrapFooter = (originalRail: any) => {
 			if (!originalRail || originalRail.__isCpamcDecorated) {
 				return originalRail;
@@ -1257,6 +1267,13 @@ export class CpamcTuiAdapter {
 							baseLines = originalRail.render ? (originalRail.render(width) ?? []) : [];
 						} catch {
 							baseLines = [];
+						}
+
+						// Mecanismo Anti-Duplicación: Si Gentle-Shell ya está renderizando cpamc-quota-card de forma autónoma
+						// (recientemente en los últimos 2000ms), evitamos duplicar la tarjeta en el footer.
+						const isStandaloneActive = Date.now() - self.lastStandaloneRenderTime < 2000;
+						if (isStandaloneActive) {
+							return baseLines;
 						}
 
 						const model = self.safeGetModel();

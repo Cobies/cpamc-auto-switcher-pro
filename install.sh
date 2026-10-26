@@ -4,7 +4,7 @@
 #
 # Compatible con cualquier entorno de Pi:
 # - Gentle-Shell (~/.gentle-shell/agent/extensions/)
-# - J0k3r-Pi (~/.pi/agent-j0k3r/extensions/)
+# - Wilox-Pi (~/.pi/agent-wilox/extensions/)
 # - Pi Vanilla (~/.pi/agent/extensions/ o ~/.pi/extensions/)
 # ==============================================================================
 
@@ -20,6 +20,16 @@ echo "=========================================================="
 if [ ! -d "${EXT_DIR}" ]; then
   echo "❌ Error: Directorio de extensión no encontrado en ${EXT_DIR}"
   exit 1
+fi
+
+# 1.1. Manejo de parámetro opcional de URL para servidores remotos (VPS / Proxmox / LAN)
+# Uso opcional: ./install.sh [https://mi-vps.com:8317 o http://192.168.1.100:8317]
+TARGET_URL="${1:-}"
+if [ -n "${TARGET_URL}" ]; then
+  CLEAN_URL="$(echo "${TARGET_URL}" | sed -e 's/\/\{1,\}$//' -e 's/\/v1$//')"
+  echo "${CLEAN_URL}" > "${HOME}/.cliproxy_url"
+  chmod 600 "${HOME}/.cliproxy_url" 2>/dev/null || true
+  echo "🌐 Servidor CPAMC remoto configurado en ~/.cliproxy_url: ${CLEAN_URL}"
 fi
 
 # 1. Detectar o Compilar el Binario CLI de Go si 'go' está presente
@@ -69,8 +79,8 @@ link_extension() {
 # A. Gentle-Shell
 link_extension "${HOME}/.gentle-shell/agent/extensions" "Gentle-Shell"
 
-# B. J0k3r-Pi
-link_extension "${HOME}/.pi/agent-j0k3r/extensions" "J0k3r-Pi"
+# B. Wilox-Pi
+link_extension "${HOME}/.pi/agent-wilox/extensions" "Wilox-Pi"
 
 # C. Pi Vanilla (~/.pi/agent/extensions o ~/.pi/extensions)
 link_extension "${HOME}/.pi/agent/extensions" "Pi Vanilla (agent)"
@@ -85,22 +95,26 @@ if [ "${LINKED}" -eq 0 ]; then
 fi
 
 # ==============================================================================
-# Parcheo idempotente de Gentle-Shell layout (Capa 3 - Soporte nativo opcional)
+# Parcheo idempotente y universal de Gentle-Shell layout (Linux y macOS M1-M4)
 # ==============================================================================
 patch_gentle_shell_layout() {
-  local target=""
   if command -v node >/dev/null 2>&1; then
-    target=$(node -e "try { console.log(require.resolve('gentle-pi/lib/shell-sidebar-layout.ts')) } catch {}" 2>/dev/null || true)
-  fi
-
-  if [ -n "${target}" ] && [ -f "${target}" ]; then
-    if grep -q 'cpamc-quota-card' "${target}"; then
-      echo "  [✓] Gentle-Shell layout ya contiene cpamc-quota-card en sections."
-    else
-      echo "  [+] Registrando cpamc-quota-card en secciones de Gentle-Shell (${target})..."
-      sed -i 's/const sections = \["footer",/const sections = \["footer", "cpamc-quota-card",/' "${target}" 2>/dev/null || true
-      echo "  [✓] Layout de Gentle-Shell parcheado exitosamente."
-    fi
+    node -e "
+      const fs = require('fs');
+      try {
+        const target = require.resolve('gentle-pi/lib/shell-sidebar-layout.ts');
+        if (target && fs.existsSync(target)) {
+          let content = fs.readFileSync(target, 'utf8');
+          if (!content.includes('cpamc-quota-card')) {
+            content = content.replace(/const sections = \[\"footer\",/, 'const sections = [\"footer\", \"cpamc-quota-card\",');
+            fs.writeFileSync(target, content, 'utf8');
+            console.log('  [✓] Layout de Gentle-Shell parcheado exitosamente en: ' + target);
+          } else {
+            console.log('  [✓] Gentle-Shell layout ya contiene cpamc-quota-card.');
+          }
+        }
+      } catch {}
+    " 2>/dev/null || true
   fi
 }
 

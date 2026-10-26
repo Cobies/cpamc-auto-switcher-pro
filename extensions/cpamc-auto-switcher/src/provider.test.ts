@@ -28,9 +28,37 @@ export async function resolve(specifier, context, nextResolve) {
 
 register("data:text/javascript," + encodeURIComponent(loaderCode));
 
-const { isCleanIncludedModel, buildPoolLabelMap, reconcileActivePoolFacades, initDynamicProvider, resolveManagementKeyWithDiagnostics } = await import("./provider.js");
+const { isCleanIncludedModel, buildPoolLabelMap, reconcileActivePoolFacades, initDynamicProvider, resolveManagementKeyWithDiagnostics, resolveCandidateBaseUrls, resolveCpamcBaseUrl } = await import("./provider.js");
 
 describe("Dynamic Provider Filtering & Granular Coexistence", () => {
+    it("evaluates universal base URL resolution cascade (env, custom port, fallbacks)", () => {
+        const origBase = process.env.CLIPROXYAPI_BASE_URL;
+        const origCpa = process.env.CPAMC_URL;
+        try {
+            delete process.env.CLIPROXYAPI_BASE_URL;
+            delete process.env.CPAMC_URL;
+
+            const urlsDefault = resolveCandidateBaseUrls();
+            assert.ok(urlsDefault.includes("http://127.0.0.1:8317"));
+            assert.ok(urlsDefault.includes("http://localhost:8317"));
+
+            // Test: URL explícita de red local (ej. Proxmox / VPS / LAN)
+            process.env.CLIPROXYAPI_BASE_URL = "http://192.168.1.100:9000";
+            const urlsCustom = resolveCandidateBaseUrls();
+            assert.equal(urlsCustom[0], "http://192.168.1.100:9000");
+            assert.equal(resolveCpamcBaseUrl(), "http://192.168.1.100:9000");
+
+            // Test: URL HTTPS con dominio de servidor
+            process.env.CLIPROXYAPI_BASE_URL = "https://cpamc.mi-servidor.cloud/";
+            assert.equal(resolveCpamcBaseUrl(), "https://cpamc.mi-servidor.cloud");
+        } finally {
+            if (origBase !== undefined) process.env.CLIPROXYAPI_BASE_URL = origBase;
+            else delete process.env.CLIPROXYAPI_BASE_URL;
+            if (origCpa !== undefined) process.env.CPAMC_URL = origCpa;
+            else delete process.env.CPAMC_URL;
+        }
+    });
+
     const mockFilterData = {
         validPrefixes: new Set(["agy", "agy2"]),
         prefixExclusions: new Map([["agy", new Set<string>()], ["agy2", new Set<string>()]]),

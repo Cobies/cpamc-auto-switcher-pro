@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { resolveCandidateBaseUrls, resolveCpamcBaseUrl } from "./provider.js";
 
 const TIMEOUT_MS = 15_000;
 const TERMINAL_STATUSES = new Set([
@@ -181,8 +182,7 @@ function notify(ctx: any, message: string, level: "info" | "warning" | "error" =
 
 async function attemptVirtualRotation(ctx: any, source?: string, force = false): Promise<boolean> {
 	try {
-		const rawUrl = (process.env.CLIPROXYAPI_BASE_URL || process.env.CPAMC_URL || "http://127.0.0.1:8317").trim().replace(/\/+$/, "").replace(/\/v1$/, "");
-		const baseUrl = rawUrl || "http://127.0.0.1:8317";
+		const candidateUrls = resolveCandidateBaseUrls();
 		const keyFile = join(homedir(), ".cliproxy_management_key");
 		let key = (process.env.CLIPROXYAPI_MANAGEMENT_KEY || "").trim();
 		if (!key && existsSync(keyFile)) {
@@ -222,34 +222,39 @@ async function attemptVirtualRotation(ctx: any, source?: string, force = false):
 			payload.prefix = prefix;
 		}
 
-		const res = await fetch(`${baseUrl}/v0/management/auto-switcher-pro/pools/rotate`, {
-			method: "POST",
-			headers,
-			body: JSON.stringify(payload),
-			signal: ctx?.signal,
-		});
-		if (res.ok) {
-			const data = (await res.json()) as any;
-			if (data?.ok) {
-				// Si el backend indicó que el líder está sano y no fue necesario rotar (ahorro de caché)
-				if (data.rotated === false) {
-					if (data.warmup_needed && data.warmup_reserve) {
-						triggerShadowWarmup(baseUrl, key, data.warmup_reserve, data.target_model, data.prefix);
-					}
-					return true;
-				}
+		for (const baseUrl of candidateUrls) {
+			try {
+				const res = await fetch(`${baseUrl}/v0/management/auto-switcher-pro/pools/rotate`, {
+					method: "POST",
+					headers,
+					body: JSON.stringify(payload),
+					signal: ctx?.signal,
+				});
+				if (res.ok) {
+					const data = (await res.json()) as any;
+					if (data?.ok) {
+						// Si el backend indicó que el líder está sano y no fue necesario rotar (ahorro de caché)
+						if (data.rotated === false) {
+							if (data.warmup_needed && data.warmup_reserve) {
+								triggerShadowWarmup(baseUrl, key, data.warmup_reserve, data.target_model, data.prefix);
+							}
+							return true;
+						}
 
-				const poolName = data.prefix || data.pool_id || poolId || "Pool";
-				const newLeader = data.new_leader ? ` hacia ${data.new_leader.replace(/^antigravity-/, "").replace(/\.json$/, "")}` : "";
-				if (force) {
-					notify(ctx, `⚡ [Rescate Reactivo] ${poolName} rotó exitosamente${newLeader} para restaurar conexión`, "warning");
+						const poolName = data.prefix || data.pool_id || poolId || "Pool";
+						const newLeader = data.new_leader ? ` hacia ${data.new_leader.replace(/^antigravity-/, "").replace(/\.json$/, "")}` : "";
+						if (force) {
+							notify(ctx, `⚡ [Rescate Reactivo] ${poolName} rotó exitosamente${newLeader} para restaurar conexión`, "warning");
+						}
+						return true;
+					}
 				}
-				// Las rotaciones preventivas rutinarias ocurren silenciosamente en background sin interrumpir al usuario
-				return true;
+			} catch {
+				// Siguiente URL candidata
 			}
 		}
 	} catch {
-		// Error de red o endpoint no disponible
+		// Error general
 	}
 	return false;
 }

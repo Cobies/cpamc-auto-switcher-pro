@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Instalador Universal Dinámico de Auto Switcher Pro para Windows
-    Compatible con Gentle-Shell, Pi Vanilla, J0k3r-Pi y CLIProxyAPI (CPAMC).
+    Compatible con Gentle-Shell, Pi Vanilla, Wilox-Pi y CLIProxyAPI (CPAMC).
 
 .DESCRIPTION
     Realiza una instalación totalmente dinámica, segura y no destructiva:
@@ -330,14 +330,26 @@ if (-not [string]::IsNullOrWhiteSpace($Url)) {
     # El usuario pasó un parámetro explícito -Url
     [Environment]::SetEnvironmentVariable("CLIPROXYAPI_BASE_URL", $Url.TrimEnd("/"), "User")
     $env:CLIPROXYAPI_BASE_URL = $Url.TrimEnd("/")
+    try {
+        $urlFile = Join-Path $env:USERPROFILE ".cliproxy_url"
+        Set-Content -Path $urlFile -Value $Url.TrimEnd("/") -Encoding utf8 -Force
+    } catch {}
     Write-Host "`n🌐 CLIPROXYAPI_BASE_URL configurada explícitamente como: $Url" -ForegroundColor Cyan
 } elseif ([string]::IsNullOrWhiteSpace($currentUrl)) {
     # No existe configuración previa: sugerir o establecer localhost
     $defaultBase = "http://localhost:8317"
     [Environment]::SetEnvironmentVariable("CLIPROXYAPI_BASE_URL", $defaultBase, "User")
     $env:CLIPROXYAPI_BASE_URL = $defaultBase
+    try {
+        $urlFile = Join-Path $env:USERPROFILE ".cliproxy_url"
+        Set-Content -Path $urlFile -Value $defaultBase -Encoding utf8 -Force
+    } catch {}
     Write-Host "`n🌐 CLIPROXYAPI_BASE_URL inicializada en: $defaultBase" -ForegroundColor Cyan
 } else {
+    try {
+        $urlFile = Join-Path $env:USERPROFILE ".cliproxy_url"
+        Set-Content -Path $urlFile -Value $currentUrl.TrimEnd("/") -Encoding utf8 -Force
+    } catch {}
     Write-Host "`n🌐 CLIPROXYAPI_BASE_URL preservada: $currentUrl" -ForegroundColor DarkCyan
 }
 
@@ -345,6 +357,39 @@ if (-not [string]::IsNullOrWhiteSpace($Key)) {
     [Environment]::SetEnvironmentVariable("CLIPROXYAPI_MANAGEMENT_KEY", $Key.Trim(), "User")
     $env:CLIPROXYAPI_MANAGEMENT_KEY = $Key.Trim()
     Write-Host "🔑 CLIPROXYAPI_MANAGEMENT_KEY configurada con éxito." -ForegroundColor Cyan
+}
+
+# ------------------------------------------------------------------------------
+# 3.1. PARCHEO IDEMPOTENTE DE GENTLE-SHELL LAYOUT EN WINDOWS
+# ------------------------------------------------------------------------------
+try {
+    $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+    if ($nodeCmd) {
+        $patchScript = @"
+const fs = require('fs');
+try {
+    const target = require.resolve('gentle-pi/lib/shell-sidebar-layout.ts');
+    if (target && fs.existsSync(target)) {
+        let content = fs.readFileSync(target, 'utf8');
+        if (!content.includes('cpamc-quota-card')) {
+            content = content.replace(/const sections = \[\"footer\",/, 'const sections = [\"footer\", \"cpamc-quota-card\",');
+            fs.writeFileSync(target, content, 'utf8');
+            console.log('PATCHED');
+        } else {
+            console.log('ALREADY');
+        }
+    }
+} catch (e) {}
+"@
+        $res = node -e $patchScript 2>$null
+        if ($res -like "*PATCHED*") {
+            Write-Host "✓ Layout de Gentle-Shell parcheado exitosamente para cpamc-quota-card." -ForegroundColor Green
+        } elseif ($res -like "*ALREADY*") {
+            Write-Host "✓ Gentle-Shell layout ya contiene cpamc-quota-card." -ForegroundColor DarkGray
+        }
+    }
+} catch {
+    # Ignorar silenciosamente si no está instalado gentle-pi globalmente
 }
 
 # ------------------------------------------------------------------------------

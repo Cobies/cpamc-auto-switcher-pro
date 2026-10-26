@@ -211,9 +211,9 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		assert.match(text, /\[ACCIÓN REQUERIDA\]/);
 		assert.match(text, /Dar orden directa/);
 
-		// Verificar que el formato OSC 8 esté presente en las líneas sin stripAnsi
+		// Verificar que el formato OSC 8 esté presente en las líneas sin stripAnsi con URL dinámica
 		const rawText = lines.join("\n");
-		assert.match(rawText, /\x1b\]8;;http:\/\/127\.0\.0\.1:8317\/management\.html#\/plugin-pages\/auto-switcher-pro-linux-amd64\/2#incident-cb_test123\x1b\\/);
+		assert.match(rawText, /\x1b\]8;;https?:\/\/[^\/]+\/management\.html#\/plugin-pages\/auto-switcher-pro-[^\/]+\/2#incident-cb_test123\x1b\\/);
 	});
 
 	it("handles malformed pair with missing active account safely without throwing", () => {
@@ -290,7 +290,7 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		const renderedLines1 = decorated1.render(48);
 		const fullText1 = renderedLines1.join("\n");
 		assert.match(fullText1, /Status/);
-		assert.match(fullText1, /CUIDANDO EL CHAT/);
+		assert.match(fullText1, /DISYUNTOR|CUIDANDO EL CHAT/);
 
 		// 3. Gentle-Shell triggers an event (resize, git check, etc.) and overwrites footer with a new rail
 		const reRegisteredFooter = {
@@ -305,7 +305,7 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		const renderedLines2 = decorated2.render(48);
 		const fullText2 = renderedLines2.join("\n");
 		assert.match(fullText2, /Status v2/);
-		assert.match(fullText2, /CUIDANDO EL CHAT/);
+		assert.match(fullText2, /DISYUNTOR|CUIDANDO EL CHAT/);
 
 		// 4. Test cache invalidation and mouse toggle
 		const cache = { revision: 1 };
@@ -325,6 +325,44 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		assert.equal(adapter.getAccordionMode(), "pinned");
 		assert.equal(cache.revision, 2, "sidebar cache revision must be incremented on mouse toggle");
 		assert.equal(requestedRender, true, "requestRender must be called");
+
+		adapter.destroy();
+	});
+
+	it("avoids duplicate rendering when Gentle-Shell already mounts cpamc-quota-card standalone", () => {
+		const mockContext: any = {
+			model: { id: "Pool-01-gemini", provider: "cpamc" },
+		};
+		const adapter = new CpamcTuiAdapter(mockContext);
+		(adapter as any).currentPair = mockPoolPair;
+
+		const parts = new Map<string, any>();
+		const gentleState = { parts };
+
+		const initialNativeFooter = {
+			render: () => ["╭─ Status ─╮", "│ Session  │", "╰──────────╯"],
+			digest: () => "status_123",
+		};
+		parts.set("footer", initialNativeFooter);
+
+		// Inyectar en el sidebar
+		(adapter as any).injectIntoSidebar(gentleState);
+
+		// Caso A: Gentle-Shell NO renderiza standalone -> El footer SÍ incluye la tarjeta de cuotas
+		const decoratedFooter = parts.get("footer");
+		const linesWithDecorator = decoratedFooter.render(48);
+		assert.match(linesWithDecorator.join("\n"), /DISYUNTOR|CUIDANDO EL CHAT/);
+
+		// Caso B: Gentle-Shell ejecuta render() del standalone 'cpamc-quota-card'
+		const standaloneCard = parts.get("cpamc-quota-card");
+		assert.ok(standaloneCard);
+		const standaloneLines = standaloneCard.render(48);
+		assert.match(standaloneLines.join("\n"), /DISYUNTOR|CUIDANDO EL CHAT/);
+
+		// Ahora el render() del footer decorado debe detectar que el standalone ya se dibujó y NO duplicar
+		const linesWithoutDuplication = decoratedFooter.render(48);
+		assert.doesNotMatch(linesWithoutDuplication.join("\n"), /DISYUNTOR|CUIDANDO EL CHAT/);
+		assert.match(linesWithoutDuplication.join("\n"), /Status/);
 
 		adapter.destroy();
 	});

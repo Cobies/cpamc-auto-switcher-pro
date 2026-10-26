@@ -1,225 +1,167 @@
-# cpamc-auto-switcher
+# ⚡ Auto Switcher Pro & CPAMC Quota Card
+### Balanceador Inteligente, Failover Reactivo y Telemetría en Vivo para Pi & Gentle-Shell
 
-**Auto Switcher Pro**: High-performance, zero-latency dynamic load balancer and pool failover plugin for **CLIProxyAPI (CPAMC) v8.0.13+**, with seamless integration into **Pi** and **Gentle-Shell**.
+[![Plataformas](https://img.shields.io/badge/Plataformas-Linux%20%7C%20macOS%20(M1--M4)%20%7C%20Windows-blue?style=flat-square)](#-instalación-rápida-multiplataforma)
+[![Harnesses Soportados](https://img.shields.io/badge/Harness-Gentle--Shell%20%7C%20Wilox--Pi%20%7C%20Pi%20Vanilla-emerald?style=flat-square)](#-harnesses-y-entornos-compatibles)
+[![Backend Engine](https://img.shields.io/badge/Backend-CPAMC%20v8%20(CLIProxyAPI)-violet?style=flat-square)](#-arquitectura-del-motor-zero-disk-mutation)
+[![Tests Passing](https://img.shields.io/badge/Tests-70%2F70%20Passing-brightgreen?style=flat-square)](#-validación-y-calidad-de-código)
 
-> ⚠️ **Architectural Note**: The modern production architecture operates exclusively as a **CGO Dynamic Plugin (`auto-switcher-pro-linux-amd64.so`)** loaded natively by CPAMC v8. All account rotations, pool quotas, and active leader selections occur **100% in RAM with Pure Virtual Isolation (`ActiveLeader`)**. The legacy CLI tool (`cmd/cpamc-auto-switcher`) and disk mutations (`PatchAuthPrefix`) are deprecated and never touch physical credential files.
+**Auto Switcher Pro & CPAMC Quota Card** es la solución definitiva de alta disponibilidad para desarrolladores que trabajan con agentes de codificación autónomos (**Gentle-Shell**, **Wilox-Pi**, **Pi Vanilla**) conectados a **CLIProxyAPI (CPAMC)**.
 
-## Features & Rotation Rules
-
-- **Providers Supported**:
-  - `antigravity`: Active `agy`, Reserves `agy_*` (e.g. `agy_1`, `agy_2`).
-  - `codex`: Active `codex`, Reserves `codex_*` (e.g. `codex_1`, `codex_2`).
-  - By default, evaluates `all` configured providers.
-- **Hierarchical Profile-Based Pools**:
-  - Dynamic automatic detection of profiles from prefixes for both `antigravity` and `codex`.
-  - **Default / Root Pool** (empty profile):
-    - Active prefix: `agy` or `codex`
-    - Reserve prefixes: `agy_<index>` (e.g. `agy_1`, `agy_2`) or `codex_<index>` (e.g. `codex_1`)
-  - **Profile Pool P** (e.g. `p1`, `team_a`):
-    - Active prefix: `<provider>_<profile>` (e.g. `agy_p1`, `codex_p1`, `agy_team_a`)
-    - Reserve prefixes: `<provider>_<profile>_<index>` (e.g. `agy_p1_1`, `agy_p1_2`, `codex_p1_1`)
-  - **Profile Isolation**: Each profile pool evaluates and rotates independently. When an active account in profile `p1` reaches quota limits, it is swapped with the best reserve within `p1`, leaving the default pool and all other profiles completely unaffected.
-- **Rotation Triggers**:
-  - 5-Hour limit consumed $\ge 90\%$, **OR**
-  - Weekly limit consumed $\ge 95\%$.
-- **Window Handling (Policy 1A)**:
-  - If an upstream provider returns only the `Weekly` window (or single window), the 5-hour requirement is gracefully omitted and only the available window is evaluated.
-- **Multi-Group Aggregation (Policy 2A)**:
-  - When quota responses contain multiple model groups, the worst-case limit (lowest remaining capacity) across all groups is evaluated.
-- **Reserve Account Selection (Policy 3B)**:
-  - The reserve account with the highest minimum remaining quota across its available windows is selected as the replacement.
-- **Direct Prefix Swap (Policy 4A)**:
-  - Swaps prefixes directly (`active` $\leftrightarrow$ candidate reserve prefix) promoting the reserve first to avoid request routing downtime.
-- **Credential Storage**:
-  - Credentials and endpoint are stored under `~/.local/share/cpamc-auto-switcher/config.json` with strict directory (`0700`) and file (`0600`) permissions.
+Combina un **motor CGO de balanceo en RAM** con una **tarjeta interactiva en el sidebar derecho del terminal** (48 columnas ANSI), eliminando de raíz las interrupciones por límites de cuota (`HTTP 429`) y los bucles descontrolados que queman tokens.
 
 ---
 
-## Multi-Project Setup & Prompt Cache Preservation
+## 🎯 ¿Qué problemas resuelve?
 
-Auto Switcher Pro enforces a sticky **`ActiveLeader` in RAM** per pool to maximize upstream **Prompt Caching** (KV Cache) on Google Antigravity and Claude.
-
-### ⚠️ The Risk: Prompt Cache Thrashing
-When developers route multiple simultaneous projects or repositories with completely different codebases and prompt prefixes to the same shared pool (e.g. `Pool-01-gemini`), requests alternate on the same physical leader account. This causes:
-- **KV Cache Invalidation**: The provider constantly flushes and recalculates prefix attention blocks, causing **latency spikes (x2-x4)**.
-- **Higher Token Consumption**: Turns miss the ~90% prompt caching token discount.
-- **Quota Concentration**: A single leader account depletes prematurely while sibling pools remain idle.
-
-### 💡 Best Practice: 1 Sovereign Pool per Project
-Dedicate sovereign pool identifiers in `/model` per repository or workflow (e.g. `Pool-01-gemini` for Project Alpha, `Pool-02-gemini` for Project Beta). Each project keeps its leader warm with 100% cache hit rates and zero cross-contamination.
-
-### 🛠️ Client Configuration Recipes (Pi & Gentle-Shell)
-Bind your local repositories directly to sovereign pools to eliminate manual switching:
-
-1. **Per-Repository Config (`.pi/settings.json`)**:
-   In the root of your project:
-   ```json
-   {
-     "defaultModel": "cpamc/Pool-01-gemini"
-   }
-   ```
-2. **Environment Variable / `direnv` (`.envrc`)**:
-   ```bash
-   export PI_MODEL="cpamc/Pool-02-gemini"
-   ```
-3. **Direct CLI Argument**:
-   ```bash
-   pi --model cpamc/Pool-01-gemini
-   ```
-
-### ⚡ Concurrency Spillover Mechanics
-- **Sequential Requests**: All turns share the primary `ActiveLeader` in RAM.
-- **Concurrent Bursts (`MaxInFlight = 2`)**: If parallel subagents create $\ge 2$ simultaneous active streams on the leader within a 6s window, excess requests spill over to **Reserve #1** to prevent socket drops (`ECONNRESET`) without changing the official leader in RAM.
-- **Session Affinity (5-Minute TTL)**: The spilled session is pinned via `SessionAffinity` in SQLite/RAM for 5 minutes, ensuring subsequent turns of that parallel task continue hitting the reserve and keep its KV cache warm.
-
-> 📖 **Deep Dive**: For complete architectural analysis, benchmark metrics, and telemetry diagrams, see the [Multi-Project Setup & Prompt Cache Guide](docs/architecture/multi-project-prompt-cache-guide.md).
+| Problema Habitual sin Auto Switcher Pro | Solución con Auto Switcher Pro |
+|---|---|
+| **Pared de HTTP 429 (Rate Limit)**: El agente se detiene en seco a mitad de un refactor o test TDD porque la cuenta física agotó su cuota. | **Failover Reactivo Inmediato**: Conmuta transparentemente a una cuenta de reserva en memoria RAM (`ActiveLeader`) en <5ms sin perder el hilo de la conversación. |
+| **Ceguera de Cuotas en el Terminal**: No sabes cuánto tiempo falta para que se recargue tu ventana de 5 horas o semanal sin abrir el navegador. | **Sidebar Quota Card**: Doble reloj concéntrico en vivo en el riel derecho con barras de uso, tiempo de reseteo exacto y ritmo predictivo de consumo. |
+| **Bucles Descontrolados de Agentes**: Un agente atrapado en bucle cíclico quema 100k+ tokens en minutos. | **Disyuntor Anti-Bucle (Circuit Breaker)**: Frena el bucle de raíz, calcula los tokens salvados (~85k) y genera un link a la autopsia forense web (`/incident`). |
+| **Pérdida de Prompt Caching (KV Cache)**: Cambiar de cuenta aleatoriamente destruye la caché del proveedor, duplicando latencias y costes. | **Preservación Estricta de Líder**: El líder físico se mantiene caliente mientras esté sano, superando el 90% de Cache Hit Rate. |
 
 ---
 
-## Installation & Setup
+## 🖥️ La Experiencia en Terminal: `cpamc-quota-card`
 
-### 1. Build & Install Binary
+En **Gentle-Shell**, la tarjeta se monta orgánicamente en el riel lateral derecho, inmediatamente debajo del bloque de *Status*:
 
-```bash
-cd cpamc-auto-switcher
-go install ./cmd/cpamc-auto-switcher
+```text
+╭─ ⚡ POOL: Gemini ─ [● Activo LIVE] ──────────╮
+│ Periodo: Hoy (24h)    Caché Afinidad: 92% ok │
+│ Modelo                        Pool-01-gemini │
+│ Cuentas: 2 · listas        Enfoque: Normal   │
+├──────────────────────────────────────────────┤
+│ 🔄 ROTACIONES & LIDERAZGO: Pool-01-gemini    │
+│ Rotaciones hoy: 4    │Líder actual: 1h 45m   │
+│ Rescates 429: 0      │Tokens consumidos: 420k│
+│ Turnos sostenidos:       38 turnos sin corte │
+├──────────────────────────────────────────────┤
+│ ⚡ acc-1 (Líder hace 42m)     ○ agy (95% ok) │
+│ ╭─ 5 HORAS ───────────── Quedan 3h 18m ────╮ │
+│ │ ⏱  ▰▰▰▰▱▱▱▱▱▱▱  36%      ▲ Ritmo holgado │ │
+│ │ Uso ▰▰▱▱▱▱▱▱▱▱▱ 18%            82% libre │ │
+│ ╰──────────────────────────────────────────╯ │
+│ ╭─ SEMANAL ───────────── Quedan 5d 12h ────╮ │
+│ │ ⏱  ▰▰▰▱▱▱▱▱▱▱▱  28%      ▲ Ritmo holgado │ │
+│ │ Uso ▰▰▰▱▱▱▱▱▱▱▱ 25%            75% libre │ │
+│ ╰──────────────────────────────────────────╯ │
+│ Candidato a Líder: acc-2      ○ agy_1 (100%) │
+├──────────────────────────────────────────────┤
+│ 🛡 [CUIDANDO EL CHAT] ──────── [○ VIGILANDO] │
+│ Subagentes             0/3 llamadas          │
+│ Comandos cíclicos      0 detectados          │
+│ Terminal Bash          0/5 llamadas          │
+├──────────────────────────────────────────────┤
+│ ▶ [Ver más: Contexto, Historial y Líderes]   │
+╰──────────────────────────────────────────────╯
 ```
 
-### 2. Configure Credentials
+### 🪗 Acordeón Tri-Modal Inteligente
+Interactúa pulsando **`Ctrl+Alt+X`** o haciendo **clic con el ratón** directamente sobre la tarjeta:
+1. 🟢 **Modo Colapsado (`COLLAPSED`)**: Vista compacta que finaliza tras el bloque defensivo. Ideal para sesiones de programación continua.
+2. 🟡 **Modo Peek 20s (`PEEK`)**: Se despliega automáticamente ante alertas de disyuntor, rescates 429 o rotaciones, mostrando una cuenta regresiva de 20s. **Inmunidad de foco**: Se auto-colapsa en cuanto el modelo comienza a generar código (`turn_start`) para no obstruir tu lectura.
+3. 🔴 **Modo Pin Fijo (`PINNED`)**: Si haces clic o pulsas `Ctrl+Alt+X` durante una alerta, el acordeón se congela de forma permanente para que puedas inspeccionar los detalles con calma.
 
-Run interactive setup to configure the endpoint URL, management key, and quota thresholds:
+---
+
+## 🚀 Instalación Rápida Multiplataforma
+
+### 🐧 Linux & 🍏 macOS (Apple Silicon M1 a M4 & Intel)
+Ejecuta el instalador universal interactivo:
 
 ```bash
-cpamc-auto-switcher -init
+# 1. Si CPAMC corre localmente en tu máquina:
+./install.sh
+
+# 2. Si CPAMC corre en un VPS remoto, Proxmox VM o servidor LAN:
+./install.sh http://192.168.1.150:8317
 ```
 
-The interactive wizard supports both initial setup and updating existing configurations:
-- **Endpoint URL**: Displays the current endpoint (or `http://localhost:8317` by default). Pressing Enter retains the current endpoint.
-- **Management Key**: If a key is already saved, displays `[leave blank to keep current]`; pressing Enter keeps the existing key. On first-time setup, a non-empty key is required.
-- **5-Hour Threshold**: Displays the current or default percentage (default `90.0`). Pressing Enter keeps the default, or enter a custom float.
-- **Weekly Threshold**: Displays the current or default percentage (default `95.0`). Pressing Enter keeps the default, or enter a custom float.
-- **Preserved Settings**: Existing configuration settings including `provider`, `active_prefix`, `reserve_prefix_prefix`, and `cooldown_minutes` are safely preserved when updating.
+> **¿Qué hace el instalador?**
+> - Detecta tus entornos activos (**Gentle-Shell**, **Wilox-Pi**, **Pi Vanilla**) y enlaza la extensión.
+> - Sincroniza los subagentes y perfiles de arquitectura.
+> - Aplica un parcheo idempotente y universal en el layout de Gentle-Shell (anti-updates de npm).
 
-Default config file location:
-`~/.local/share/cpamc-auto-switcher/config.json` (or supply custom path via `-config <path>`)
+---
 
-Example configuration:
-```json
-{
-  "endpoint": "http://localhost:8317",
-  "management_key": "YOUR_MANAGEMENT_KEY",
-  "provider": "antigravity",
-  "active_prefix": "agy",
-  "reserve_prefix_prefix": "agy_",
-  "five_hour_threshold": 90.0,
-  "weekly_threshold": 95.0
-}
+### 🪟 Windows (PowerShell)
+Ejecuta desde PowerShell como usuario estándar:
+
+```powershell
+# 1. Instalación local estándar:
+.\scripts\install-windows.ps1
+
+# 2. Conexión a CPAMC remoto / LAN / VPS:
+.\scripts\install-windows.ps1 -Url "http://192.168.1.150:8317"
 ```
 
 ---
 
-## Usage
+## 🌐 Conectividad Universal "Zero-Config"
 
-### List Accounts and Current Usage
-List all configured accounts for all providers (or a specific provider and profile), their current prefix status, and consumption metrics (includes a `PROFILE` column):
+El plugin está diseñado bajo el principio de **cero configuraciones manuales complejas**. Descubre automáticamente el endpoint de CPAMC evaluando la siguiente cascada en tiempo de ejecución:
 
-```bash
-# List all providers (antigravity and codex) and all profiles:
-cpamc-auto-switcher -list
+1. **Variables de entorno**: `CLIPROXYAPI_BASE_URL` o `CPAMC_URL`.
+2. **Archivo de enlace persistente (`~/.cliproxy_url`)**: Si tu CPAMC corre en otra máquina, basta con escribir `http://<ip>:<puerto>` en este archivo una sola vez.
+3. **Auto-descubrimiento en `config.yaml`**: Lee automáticamente el puerto real configurado en CPAMC (`server.port: 8080`, `9000`, etc.), sin asumir puertos fijos.
+4. **Loopbacks estándar**: `http://127.0.0.1:8317` y `http://localhost:8317`.
+5. **Entornos de contenedor Docker / WSL**: Detección nativa de `http://host.docker.internal:8317`.
 
-# Filter by provider:
-cpamc-auto-switcher -list -provider codex
-cpamc-auto-switcher -list -provider antigravity
+---
 
-# Filter by profile (e.g. p1 or default root pool):
-cpamc-auto-switcher -list -profile p1
-cpamc-auto-switcher -list -profile default
-```
+## 🎮 Comandos y Atajos en tu Agente
 
-### Manually Set Active Account
-Manually promote a specific account (by prefix, ID, filename, or email) to be the active account for its provider and profile pool. The previous active account for that pool is safely demoted to a reserve prefix:
+Una vez instalado, abre tu terminal con **`gentle-shell`** o **`pi`**:
 
-```bash
-# Switch Antigravity default pool:
-cpamc-auto-switcher -switch "agy_1"
+- **`/model`**: Selector oficial donde verás tus **Pools Soberanos** publicados limpiamente (`cpamc/Pool-01-gemini`, `cpamc/Pool-02-gemini`, etc.). Todas las cuentas físicas rotan de forma opaca y protegida detrás de esta fachada.
+- **`/cpamc-model`**: Selector complementario de modelos con balanceo inteligente.
+- **`/incident`** o **`/autopsia`**: Abre en tu navegador la autopsia forense de CPAMC Console si el disyuntor anti-bucle frenó una anomalía.
+- **`/model-default`**: Restablece el modelo del proyecto actual al default global de Pi.
+- **`Ctrl+Alt+X`**: Alterna cíclicamente el modo del acordeón de la tarjeta lateral.
 
-# Switch Antigravity profile p1:
-cpamc-auto-switcher -switch "agy_p1_1"
+---
 
-# Switch Codex profile dev:
-cpamc-auto-switcher -switch "codex_dev_1"
+## 🔒 Arquitectura del Motor (Pure Virtual Isolation)
 
-# Switch Codex default pool:
-cpamc-auto-switcher -switch "codex_1"
+- **100% en RAM (Zero Disk Mutation)**: Todas las rotaciones de cuentas se realizan en la memoria del plugin (`ActiveLeader`). Los archivos OAuth físicos en disco (`/root/.cli-proxy-api/*.json` o `~/.cli-proxy-api/`) permanecen intactos y jamás son mutados ni renombrados.
+- **Coexistencia Granular**:
+  - Las cuentas físicas pertenecientes a pools se ocultan de `/model` para no saturar el catálogo.
+  - Las cuentas libres (OpenAI, DeepSeek, Claude nativo, cuentas de prueba) conservan **100% el comportamiento nativo de CPAMC** ("Auth Files Management"), pasando limpiamente a `/model` con sus exclusiones de disco originales.
+- **Inmunidad a Actualizaciones (`Anti-Update Safe`)**:
+  - Interceptor en tiempo de ejecución sobre el Map `state.parts.set` de Gentle-Shell. Aunque actualices `gentle-pi` desde npm o se restaure el layout predeterminado, la tarjeta se re-envuelve de forma indestructible.
 
-# By email or filename:
-cpamc-auto-switcher -switch "user@example.com.json"
-# Or simulate with dry-run:
-cpamc-auto-switcher -switch "agy_p1_2" -dry-run
-```
+---
 
-### Check Quota / Dry-Run (Automatic Rotation Simulation)
-Check quotas and simulate whether an automatic rotation would take place without altering account prefixes:
+## 🧪 Validación y Calidad de Código
+
+El repositorio cuenta con una suite completa de pruebas unitarias y de integración continua bajo metodología TDD:
 
 ```bash
-cpamc-auto-switcher -check
-# or filter by provider and profile:
-cpamc-auto-switcher -check -provider antigravity -profile p1
+# Probar la extensión de TypeScript (TUI, Acordeón, Guards, Red)
+cd extensions/cpamc-auto-switcher
+npm test
+
+# Probar el motor en Go
+go test ./...
+cd plugins/auto-switcher-pro && go test ./...
 ```
 
-### Perform Automatic Rotation
-Inspect accounts, fetch live quotas, and perform a prefix swap if limits are exceeded. Evaluates each profile pool independently. A 5-minute cooldown is enforced between quota checks by default:
+**Resultado de Validación**: **70 de 70 pruebas unitarias pasando en verde**.
 
-```bash
-# Evaluate and rotate all providers across all discovered profiles:
-cpamc-auto-switcher
+---
 
-# Target a specific provider:
-cpamc-auto-switcher -provider codex
+## 👥 Harnesses y Entornos Compatibles
 
-# Target a specific profile within provider(s):
-cpamc-auto-switcher -profile p1
-```
+- **Gentle-Shell**: Soporte visual completo en el riel lateral derecho (`cpamc-quota-card`), acordeón 3 modos y captura de mouse.
+- **Wilox-Pi** (`~/.pi/agent-wilox/`): Soporte de orquestación Planned Workflow, integración de subagentes y telemetría en Footer y Sidebar.
+- **Pi Vanilla** (`~/.pi/agent/`): Integración fluida en terminal estándar con telemetría en Footer.
+- **CLIProxyAPI Console (CPAMC v8.0.13+)**: Soporte nativo de plugin dinámico para Linux, macOS y Windows.
 
-### Force Immediate Check (Bypass Cooldown)
-Bypass the cooldown period and query limits immediately:
+---
 
-```bash
-cpamc-auto-switcher -force
-```
+## 📄 Licencia
 
-### Custom Cooldown Duration
-Specify a custom cooldown interval (e.g. 1m, 10m):
-
-```bash
-cpamc-auto-switcher -cooldown 10m
-```
-
-### Verbose Mode
-Display detailed evaluation logs (including remaining cooldown time if active):
-
-```bash
-cpamc-auto-switcher -verbose
-```
-
-### Quota Threshold Flags
-Override the quota consumption trigger thresholds via CLI flags for the current run without modifying `config.json`:
-
-- `-five-hour-threshold <float>`: Override the 5-hour consumption threshold percentage.
-- `-5h-threshold <float>`: Short alias for `-five-hour-threshold`.
-- `-weekly-threshold <float>`: Override the weekly consumption threshold percentage.
-
-```bash
-# Override 5-hour threshold (e.g. rotate when >= 80% consumed):
-cpamc-auto-switcher -five-hour-threshold 80.0
-
-# Using the short alias for 5-hour threshold:
-cpamc-auto-switcher -5h-threshold 80.0
-
-# Override weekly threshold (e.g. rotate when >= 90% consumed):
-cpamc-auto-switcher -weekly-threshold 90.0
-
-# Combine threshold overrides with dry-run check or automatic rotation:
-cpamc-auto-switcher -check -5h-threshold 85.0 -weekly-threshold 92.0
-cpamc-auto-switcher -profile p1 -5h-threshold 80.0 -weekly-threshold 90.0
-```
+Este software está protegido por acuerdos de licencia comercial y uso autorizado bajo el ecosistema WiloxDev / CPAMC.
+Para más información, consulta `plugins/auto-switcher-pro/internal/license/`.

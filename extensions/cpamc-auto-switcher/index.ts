@@ -415,19 +415,24 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 		void checkRemoteUpdate(ctx);
 
 		// Bus Reactivo Instantáneo (<5ms) por Archivo de Época Compartido
-		// Vigila tanto EasyCLIProxyAPI (Linux Desktop / Windows), bind-mount Docker y /dev/shm
+		// Prioridad 1: CPAMC / CLIProxyAPI Console nativo (Linux, macOS M1-M4, Windows)
 		const candidateEpochPaths = [
-			// 1. EasyCLIProxyAPI en Linux Desktop
-			join(homedir(), ".local", "share", "EasyCLIProxyAPI", "cpa-core", "plugins", "auto-switcher-pro.epoch"),
-			// 2. EasyCLIProxyAPI en Windows
-			join(process.env.LOCALAPPDATA || join(homedir(), "AppData", "Local"), "EasyCLIProxyAPI", "cpa-core", "plugins", "auto-switcher-pro.epoch"),
-			join(process.env.APPDATA || join(homedir(), "AppData", "Roaming"), "EasyCLIProxyAPI", "cpa-core", "plugins", "auto-switcher-pro.epoch"),
-			// 3. Linux Servidor / Docker / VPS
-			join(homedir(), "services", "cliproxy", "plugins", "auto-switcher-pro.epoch"),
+			// 1. CPAMC Console Canónico
 			join(homedir(), ".cli-proxy-api", "plugins", "auto-switcher-pro.epoch"),
-			// 4. Memoria compartida y temporales
+			join(homedir(), "Library", "Application Support", "cli-proxy-api", "plugins", "auto-switcher-pro.epoch"),
+			join(process.env.LOCALAPPDATA || join(homedir(), "AppData", "Local"), "cli-proxy-api", "plugins", "auto-switcher-pro.epoch"),
+			join(process.env.APPDATA || join(homedir(), "AppData", "Roaming"), "cli-proxy-api", "plugins", "auto-switcher-pro.epoch"),
+			join(homedir(), "services", "cliproxy", "plugins", "auto-switcher-pro.epoch"),
+
+			// 2. Memoria compartida y temporales del sistema
 			"/dev/shm/auto-switcher-pro.epoch",
 			join(tmpdir(), "auto-switcher-pro.epoch"),
+
+			// 3. EasyCLIProxyAPI (Derivado Desktop)
+			join(homedir(), ".local", "share", "EasyCLIProxyAPI", "cpa-core", "plugins", "auto-switcher-pro.epoch"),
+			join(process.env.LOCALAPPDATA || join(homedir(), "AppData", "Local"), "EasyCLIProxyAPI", "cpa-core", "plugins", "auto-switcher-pro.epoch"),
+			join(process.env.APPDATA || join(homedir(), "AppData", "Roaming"), "EasyCLIProxyAPI", "cpa-core", "plugins", "auto-switcher-pro.epoch"),
+			join(homedir(), "Library", "Application Support", "EasyCLIProxyAPI", "cpa-core", "plugins", "auto-switcher-pro.epoch"),
 		];
 		let shmDebounce: NodeJS.Timeout | null = null;
 
@@ -621,7 +626,13 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 		}
 
 		const incId = tele.incidentId || "active";
-		const directUrl = `http://127.0.0.1:8317/management.html#/plugin-pages/auto-switcher-pro-linux-amd64/2#incident-${incId}`;
+		const baseUrl = resolveCpamcBaseUrl();
+		const pluginTarget = process.platform === "win32"
+			? "auto-switcher-pro-windows-amd64"
+			: process.platform === "darwin"
+				? "auto-switcher-pro-darwin-arm64"
+				: "auto-switcher-pro-linux-amd64";
+		const directUrl = `${baseUrl}/management.html#/plugin-pages/${pluginTarget}/2#incident-${incId}`;
 
 		// Intentar abrir en navegador automáticamente si el entorno lo soporta
 		exec(`xdg-open "${directUrl}" 2>/dev/null || open "${directUrl}" 2>/dev/null || true`);
