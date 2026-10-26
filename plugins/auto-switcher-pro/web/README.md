@@ -91,7 +91,7 @@ Interactive React Flow prefix topology editor for CLIProxyAPI parent/child accou
   - `vite-plugin-singlefile` inlines all CSS (`<style>`) and JavaScript (`<script>`) directly into a single self-contained `index.html`.
   - External browser subresource requests (`<script src="...">`, `<link rel="stylesheet" ...>`, `<link rel="icon" ...>`) are completely eliminated.
   - Vite `modulePreload` polyfill is explicitly disabled (`modulePreload: { polyfill: false }`), removing dead `fetch()` calls for module scripts.
-  - Zero runtime CDN or remote resource dependencies; single HTML unchanged semantics authored by `gonzalez962`.
+  - Zero runtime CDN or remote resource dependencies; single HTML unchanged semantics authored by `WiloxDev`.
 - **Host Route Alignment (Slashless Runtime vs. Internal Isolation)**:
   - The CLIProxyAPI host (`ServeResourceHTTP`) resolves resources via exact route table lookup (`resourceRoutes[GET full r.URL.Path]`), where only the slashless `/profiles` route is registered.
   - **Host-Facing Runtime URL**: Only slashless `/profiles` is supported at runtime through CLIProxyAPI; runtime requests with a trailing slash (`/profiles/`) are not matched by the host router and return 404.

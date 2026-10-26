@@ -28,7 +28,7 @@ jobs:
   build:
     name: Build and Validate Linux Plugin
     runs-on: ubuntu-latest
-    if: (github.repository == 'WiloxDev/cpamc-auto-switcher-pro' || github.repository == 'gonzalez962/cpamc-auto-switcher') && github.ref == 'refs/heads/main'
+    if: github.repository == 'WiloxDev/cpamc-auto-switcher-pro' && github.ref == 'refs/heads/main'
     permissions:
       contents: write
     outputs:
@@ -50,7 +50,7 @@ jobs:
           INPUT_TAG: ${{ github.event.inputs.tag }}
         run: |
           set -euo pipefail
-          if [ "${REPO}" != "WiloxDev/cpamc-auto-switcher-pro" ] && [ "${REPO}" != "gonzalez962/cpamc-auto-switcher" ]; then
+          if [ "${REPO}" != "WiloxDev/cpamc-auto-switcher-pro" ]; then
             echo "::error::Unauthorized repository: ${REPO}. Workflow only allowed on authorized repositories."
             exit 1
           fi
@@ -369,14 +369,14 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    if: (github.repository == 'WiloxDev/cpamc-auto-switcher-pro' || github.repository == 'gonzalez962/cpamc-auto-switcher') && needs.build.outputs.should_release == 'true'
+    if: github.repository == 'WiloxDev/cpamc-auto-switcher-pro' && needs.build.outputs.should_release == 'true'
     steps:
       - name: Verify repository authorization
         env:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          if [ "${REPO}" != "WiloxDev/cpamc-auto-switcher-pro" ] && [ "${REPO}" != "gonzalez962/cpamc-auto-switcher" ]; then
+          if [ "${REPO}" != "WiloxDev/cpamc-auto-switcher-pro" ]; then
             echo "::error::Unauthorized repository: ${REPO}. Workflow only allowed on authorized repositories."
             exit 1
           fi
@@ -493,7 +493,7 @@ jobs:
               SEC_COMMITS="${SEC_COMMITS}- ${line}\n"
             elif [[ "$lower" =~ pool|routing|ram|quota|matrix|cache|failover|affinity|predictive ]]; then
               RAM_COMMITS="${RAM_COMMITS}- ${line}\n"
-            elif [[ "$lower" =~ cobies|totopo|gonzalez|pull\ request|\#[0-9]+ ]]; then
+            elif [[ "$lower" =~ cobies|totopo|pull\ request|\#[0-9]+ ]]; then
               COMMUNITY_COMMITS="${COMMUNITY_COMMITS}- ${line}\n"
             else
               MAINT_COMMITS="${MAINT_COMMITS}- ${line}\n"

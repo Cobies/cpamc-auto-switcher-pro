@@ -18,7 +18,7 @@ Releases are published strictly through manual dispatch via the GitHub Actions w
 
 ### Core Security & Provenance Principles
 - **No Hardcoded Actors**: Execution rights are governed entirely by GitHub repository collaborator permissions, not static usernames in YAML.
-- **Repository Boundary Isolation**: Asserts `github.repository == 'gonzalez962/cpamc-auto-switcher'`, preventing accidental execution or asset pollution on forks.
+- **Repository Boundary Isolation**: Asserts `github.repository == 'WiloxDev/cpamc-auto-switcher-pro'`, preventing accidental execution or asset pollution on forks.
 - **Strict Version Tag Format**: Tag inputs must strictly conform to regex `^v[0-9]+\.[0-9]+\.[0-9]+$` before any git fetch or checkout operations proceed.
 - **Checked-Out SHA Pinned to `main` Before Mutation**:
   The workflow verifies that the checked-out commit matches the dispatched `github.sha` and confirms that this commit is an ancestor of `origin/main` (`git merge-base --is-ancestor`) *before* running builds, tests, or artifact generation.
@@ -112,7 +112,7 @@ The workflow executes two strictly isolated jobs:
         │
         ▼
 [build job] (permissions: contents: read)
-  ├── 1. Verify repository (gonzalez962/cpamc-auto-switcher) and branch (refs/heads/main)
+  ├── 1. Verify repository (WiloxDev/cpamc-auto-switcher-pro) and branch (refs/heads/main)
   ├── 2. Validate input tag format strictly: ^v[0-9]+\.[0-9]+\.[0-9]+$
   ├── 3. Checkout repository (fetch-depth: 0)
   ├── 4. Pin checked-out SHA to workflow_dispatch commit and verify origin/main ancestry
