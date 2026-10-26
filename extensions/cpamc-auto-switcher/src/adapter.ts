@@ -469,6 +469,8 @@ function extractBorderColor(lines: string[], theme?: any): string {
 	return "\x1b[38;2;120;153;166m";
 }
 
+export type AccordionMode = "collapsed" | "peek" | "pinned";
+
 /**
  * Formatea la tarjeta completa para el Sidebar en modo Fullscreen (gentle-shell / gentle-pi).
  * Se adapta dinámicamente al ancho exacto del panel de Status (48 columnas) y hereda
@@ -482,8 +484,16 @@ export function formatSidebarQuotaCardLines(
 	isBusy = false,
 	guardTelemetry?: RunawayGuardTelemetry,
 	periodLabel = "Hoy (24h)",
-	isExpanded = false,
+	accordionState: boolean | AccordionMode = false,
+	peekRemainingSec = 20,
 ): string[] {
+	const mode: AccordionMode =
+		typeof accordionState === "string"
+			? accordionState
+			: accordionState
+				? "pinned"
+				: "collapsed";
+	const isExpanded = mode !== "collapsed";
 	if (width < 20) {
 		// Modo ultra-compacto si el ancho disponible es extremadamente pequeño
 		if (!pair) return [truncateWithAnsi("⚡ Sin pool activo", width)];
@@ -786,17 +796,37 @@ export function formatSidebarQuotaCardLines(
 
 		// Fila interactiva del acordeón colapsable
 		const hintSuffix = s.muted(" (Ctrl+Alt+X)");
-		const accordionLabel = pair.isNativeReadOnly
-			? isExpanded
-				? `${s.amber("▼")} ${s.text("[Ocultar detalles de contexto]")}`
-				: `${s.accent("▶")} ${s.text("[Ver más: Contexto de Sesión]")}${hintSuffix}`
-			: isExpanded
-				? `${s.amber("▼")} ${s.text("[Ocultar detalles extendidos]")}`
+		let accordionLabel = "";
+
+		if (mode === "peek") {
+			const pauseHint = innerW >= 56 ? " (Pausar con Ctrl+Alt+X)" : innerW >= 42 ? " (Pausa)" : "";
+			const timerBadge = s.muted(`· Cierra en ${peekRemainingSec}s${pauseHint}`);
+			accordionLabel = `${s.amber("▼")} ${s.text("[Ocultar detalles]")} ${timerBadge}`;
+		} else if (mode === "pinned") {
+			const pinnedSuffix = innerW >= 56 ? "· Fijo (Ctrl+Alt+X)" : "· Fijo";
+			const pinnedBadge = s.muted(pinnedSuffix);
+			accordionLabel = pair.isNativeReadOnly
+				? `${s.amber("▼")} ${s.text("[Ocultar detalles de contexto]")} ${pinnedBadge}`
+				: `${s.amber("▼")} ${s.text("[Ocultar detalles extendidos]")} ${pinnedBadge}`;
+		} else {
+			// collapsed
+			accordionLabel = pair.isNativeReadOnly
+				? `${s.accent("▶")} ${s.text("[Ver más: Contexto de Sesión]")}${hintSuffix}`
 				: `${s.accent("▶")} ${s.text("[Ver más: Contexto, Historial y Líderes]")}${hintSuffix}`;
-		const accordionLine = fitToWidth(
-			`${s.border("│")} ${accordionLabel}${" ".repeat(Math.max(1, innerW - visibleLen(accordionLabel)))} ${s.border("│")}`,
-			safeW,
-		);
+		}
+
+		const makeBoxLine = (content: string) => {
+			const vis = visibleLen(content);
+			if (vis > innerW) {
+				const truncated = truncateWithAnsi(content, innerW);
+				const pad = Math.max(0, innerW - visibleLen(truncated));
+				return `${s.border("│")} ${truncated}${" ".repeat(pad)} ${s.border("│")}`;
+			}
+			const pad = Math.max(0, innerW - vis);
+			return `${s.border("│")} ${content}${" ".repeat(pad)} ${s.border("│")}`;
+		};
+
+		const accordionLine = makeBoxLine(accordionLabel);
 
 		if (!isExpanded) {
 			const rawCollapsedLines = [
@@ -910,8 +940,12 @@ export function formatSidebarQuotaCardLines(
  * Estado volátil en memoria para preservar la preferencia del acordeón durante la sesión de Pi.
  */
 let sessionAccordionExpanded: boolean | null = null;
+let sessionAccordionMode: AccordionMode | null = null;
 
 export function getSessionAccordionState(): boolean {
+	if (sessionAccordionMode !== null) {
+		return sessionAccordionMode !== "collapsed";
+	}
 	if (sessionAccordionExpanded !== null) {
 		return sessionAccordionExpanded;
 	}
@@ -919,8 +953,14 @@ export function getSessionAccordionState(): boolean {
 	return termRows >= 48;
 }
 
-export function setSessionAccordionState(expanded: boolean): void {
-	sessionAccordionExpanded = expanded;
+export function setSessionAccordionState(expanded: boolean | AccordionMode): void {
+	if (typeof expanded === "string") {
+		sessionAccordionMode = expanded;
+		sessionAccordionExpanded = expanded !== "collapsed";
+	} else {
+		sessionAccordionExpanded = expanded;
+		sessionAccordionMode = expanded ? "pinned" : "collapsed";
+	}
 }
 
 /**
@@ -929,7 +969,9 @@ export function setSessionAccordionState(expanded: boolean): void {
 export class CpamcTuiAdapter {
 	private isFullscreen = false;
 	private isBusy = false;
-	private isExpanded = getSessionAccordionState();
+	private accordionMode: AccordionMode = getSessionAccordionState() ? "pinned" : "collapsed";
+	private peekRemainingSec = 0;
+	private peekTimer: NodeJS.Timeout | null = null;
 	private currentPair: PoolRotationPair | null = null;
 	private ctx: ExtensionContext | null = null;
 	private tui: any = null;
@@ -937,8 +979,16 @@ export class CpamcTuiAdapter {
 	private periodIndex = 0;
 	private readonly periods = ["Hoy (24h)", "Semana (7d)", "Mes (30d)"];
 
-	constructor(ctx: ExtensionContext) {
+	constructor(ctx: ExtensionContext | null) {
 		this.ctx = ctx;
+	}
+
+	getAccordionMode(): AccordionMode {
+		return this.accordionMode;
+	}
+
+	getPeekRemainingSeconds(): number {
+		return this.peekRemainingSec;
 	}
 
 	togglePeriod(): string {
@@ -950,23 +1000,97 @@ export class CpamcTuiAdapter {
 		return this.periods[this.periodIndex];
 	}
 
-	toggleExpanded(): boolean {
-		this.isExpanded = !this.isExpanded;
-		setSessionAccordionState(this.isExpanded);
-		return this.isExpanded;
+	toggleExpanded(): AccordionMode {
+		this.clearPeekTimer();
+		if (this.accordionMode === "collapsed") {
+			this.accordionMode = "pinned";
+			setSessionAccordionState("pinned");
+		} else if (this.accordionMode === "peek") {
+			// Congelar/Pausar -> pasa a PINNED fijo
+			this.accordionMode = "pinned";
+			setSessionAccordionState("pinned");
+		} else {
+			// Estaba en PINNED -> Colapsar
+			this.accordionMode = "collapsed";
+			setSessionAccordionState("collapsed");
+		}
+		this.requestRender();
+		return this.accordionMode;
 	}
 
 	isCardExpanded(): boolean {
-		return this.isExpanded;
+		return this.accordionMode !== "collapsed";
 	}
 
 	setExpanded(expanded: boolean): void {
-		this.isExpanded = expanded;
-		setSessionAccordionState(expanded);
+		this.clearPeekTimer();
+		this.accordionMode = expanded ? "pinned" : "collapsed";
+		setSessionAccordionState(this.accordionMode);
+		this.requestRender();
+	}
+
+	triggerPeek(seconds = 20): void {
+		if (this.accordionMode === "pinned") {
+			return;
+		}
+
+		this.accordionMode = "peek";
+		this.peekRemainingSec = seconds;
+		this.clearPeekTimer();
+
+		this.peekTimer = setInterval(() => {
+			this.tickPeek();
+		}, 1000);
+
+		this.requestRender();
+	}
+
+	tickPeek(): void {
+		if (this.accordionMode !== "peek") {
+			this.clearPeekTimer();
+			return;
+		}
+
+		this.peekRemainingSec = Math.max(0, this.peekRemainingSec - 1);
+		if (this.peekRemainingSec <= 0) {
+			this.clearPeekTimer();
+			this.accordionMode = "collapsed";
+			setSessionAccordionState("collapsed");
+		}
+		this.requestRender();
+	}
+
+	onTurnStart(): void {
+		if (this.accordionMode === "peek") {
+			this.clearPeekTimer();
+			this.accordionMode = "collapsed";
+			setSessionAccordionState("collapsed");
+			this.requestRender();
+		}
+	}
+
+	private clearPeekTimer(): void {
+		if (this.peekTimer) {
+			clearInterval(this.peekTimer);
+			this.peekTimer = null;
+		}
+	}
+
+	private requestRender(): void {
+		const tui = this.tui || (this.ctx as any)?.tui;
+		tui?.requestRender?.();
+	}
+
+	destroy(): void {
+		this.clearPeekTimer();
+		this.ctx = null;
 	}
 
 	setContext(ctx: ExtensionContext | null): void {
 		this.ctx = ctx;
+		if (!ctx) {
+			this.clearPeekTimer();
+		}
 	}
 
 	bindTui(tui: any, theme?: any): void {
@@ -1075,7 +1199,8 @@ export class CpamcTuiAdapter {
 						this.isBusy,
 						undefined,
 						this.getPeriodLabel(),
-						this.isExpanded,
+						this.accordionMode,
+						this.peekRemainingSec,
 					);
 				} catch {
 					return [];
@@ -1086,7 +1211,7 @@ export class CpamcTuiAdapter {
 					const m = this.safeGetModel();
 					const p = m ? (getRotationPairForModelSync(m.id, m.provider) || this.currentPair) : this.currentPair;
 					const g = runawayGuard.getTelemetry();
-					return `${m?.id || "none"}-${p?.poolKey || "none"}-${p?.active?.prefix || "none"}-${p?.active?.minAvailable || "none"}-${this.isBusy}-${this.isExpanded}-${g.bashExplorationCount}-${g.subagentPollCount}-${g.blockedIntrospections}-${g.blockedBashEvasions}`;
+					return `${m?.id || "none"}-${p?.poolKey || "none"}-${p?.active?.prefix || "none"}-${p?.active?.minAvailable || "none"}-${this.isBusy}-${this.accordionMode}-${this.peekRemainingSec}-${g.bashExplorationCount}-${g.subagentPollCount}-${g.blockedIntrospections}-${g.blockedBashEvasions}`;
 				} catch {
 					return "none";
 				}
@@ -1147,7 +1272,8 @@ export class CpamcTuiAdapter {
 						this.isBusy,
 						undefined,
 						this.getPeriodLabel(),
-						this.isExpanded,
+						this.accordionMode,
+						this.peekRemainingSec,
 					);
 
 					if (!baseLines.length) {
@@ -1178,7 +1304,7 @@ export class CpamcTuiAdapter {
 
 					const g = runawayGuard.getTelemetry();
 					const cpamcDigest = pair
-						? `${pair.poolKey || ""}-${pair.active?.prefix || ""}-${pair.active?.minAvailable || ""}-${pair.active?.consumed5h || ""}-${pair.active?.consumedWeekly || ""}-${this.isExpanded}-${g.bashExplorationCount}-${g.subagentPollCount}-${g.blockedIntrospections}-${g.blockedBashEvasions}`
+						? `${pair.poolKey || ""}-${pair.active?.prefix || ""}-${pair.active?.minAvailable || ""}-${pair.active?.consumed5h || ""}-${pair.active?.consumedWeekly || ""}-${this.accordionMode}-${this.peekRemainingSec}-${g.bashExplorationCount}-${g.subagentPollCount}-${g.blockedIntrospections}-${g.blockedBashEvasions}`
 						: "none";
 
 					return `${baseDigest}::m::${modelKey}::c::${cpamcDigest}`;

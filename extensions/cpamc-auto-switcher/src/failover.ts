@@ -287,7 +287,7 @@ export function scheduleAutoSwitcher(ctx: any, reason: string, force = false): v
 	schedule(ctx, reason, force);
 }
 
-export function initFailoverHook(pi: ExtensionAPI): void {
+export function initFailoverHook(pi: ExtensionAPI, onAlert?: () => void): void {
 
 	// Capturar system prompt de la sesión para Ghost Warmup con inferencia real
 	pi.on("before_agent_start", (event: any) => {
@@ -299,6 +299,7 @@ export function initFailoverHook(pi: ExtensionAPI): void {
 	// 1. Immediate detection of HTTP 429 response from provider before stream consumption
 	pi.on("after_provider_response", (event: any, ctx: any) => {
 		if (event?.status === 429) {
+			onAlert?.();
 			notify(ctx, "⚡ Rate limit (429) detectado en proveedor. Ejecutando cambio forzado de cuenta...", "warning");
 			schedule(ctx, "provider status 429", true);
 		}
@@ -309,6 +310,7 @@ export function initFailoverHook(pi: ExtensionAPI): void {
 		const message = event?.message;
 		if (message?.role === "assistant" && message?.stopReason === "error") {
 			if (isRateLimitOrNetworkError(message.errorMessage)) {
+				onAlert?.();
 				const isTerminated = /terminated|socket|ECONNRESET|broken.?pipe/i.test(message.errorMessage || "");
 				const label = isTerminated
 					? `⚡ Conexión interrumpida (${message.errorMessage.split("\n")[0]}). Rotando cuenta para recuperar flujo...`
@@ -334,6 +336,7 @@ export function initFailoverHook(pi: ExtensionAPI): void {
 		}
 
 		if (message?.stopReason === "error" && isRateLimitOrNetworkError(message?.errorMessage)) {
+			onAlert?.();
 			schedule(ctx, "turn network/unexpected EOF error", true);
 
 			// Blindaje de Tokens contra Loops Infinitos de Reanudación:

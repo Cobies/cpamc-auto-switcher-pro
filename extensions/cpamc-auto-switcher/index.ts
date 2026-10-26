@@ -53,7 +53,9 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 
 	// 2. Inicializar hook de failover y rotación automática
 	try {
-		initFailoverHook(pi);
+		initFailoverHook(pi, () => {
+			adapter?.triggerPeek(20);
+		});
 	} catch (err: any) {
 		console.error("cpamc-auto-switcher: fallo al registrar failover hook:", err?.message || err);
 	}
@@ -216,17 +218,18 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 
 	// 3e-bis. Comando para alternar acordeón colapsable en la tarjeta del sidebar
 	pi.registerCommand("switcher-accordion", {
-		description: "Alterna el acordeón colapsable de la tarjeta de telemetría en el sidebar (Contexto, Historial y Líderes)",
+		description: "Alterna el acordeón de telemetría en el sidebar (Peek / Pin permanente / Colapsado)",
 		handler: async (_args, ctx) => {
-			const expanded = adapter?.toggleExpanded();
+			const mode = adapter?.toggleExpanded();
 			await adapter?.update(true, ctx);
 			if (ctx.hasUI) {
-				ctx.ui.notify?.(
-					expanded
-						? "📂 Acordeón desplegado: Contexto, Historial y Líderes visibles"
-						: "📁 Acordeón colapsado: Tarjeta compactada en Cuidando el Chat",
-					"info",
-				);
+				const msg =
+					mode === "pinned"
+						? "📌 Acordeón fijado: Modo permanente activo (Ctrl+Alt+X para cerrar)"
+						: mode === "peek"
+							? "⏱️ Acordeón en modo alerta temporal (20s)"
+							: "📁 Acordeón colapsado: Tarjeta compacta";
+				ctx.ui.notify?.(msg, "info");
 			}
 		},
 	});
@@ -243,6 +246,7 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 	// 3f. Captura en caliente de eventos de compresión y uso de tokens de contexto
 	pi.on("session_compact", (_event, _ctx) => {
 		recordContextCompression();
+		adapter?.triggerPeek(20);
 		if (adapter) {
 			void adapter.update(false, _ctx);
 		}
@@ -470,6 +474,7 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 	pi.on("turn_start", async (_event: any, ctx: ExtensionContext) => {
 		try {
 			runawayGuard.resetTurn();
+			adapter?.onTurnStart();
 			await adapter?.update(true, ctx);
 		} catch {}
 	});

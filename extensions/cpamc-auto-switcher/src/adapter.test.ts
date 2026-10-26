@@ -38,6 +38,7 @@ const {
 	parseConsumedNumber,
 	stripAnsi,
 	visibleLen,
+	setSessionAccordionState,
 } = await import("./adapter.js");
 const { runawayGuard } = await import("./guards.js");
 import type { PoolRotationPair } from "./store.js";
@@ -413,6 +414,159 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		lines.forEach((l: string, idx: number) => {
 			const len = visibleLen(l);
 			assert.strictEqual(len, 48, `Fila ${idx} debe tener exactamente 48 caracteres visibles (actual: ${len}): "${stripAnsi(l)}"`);
+		});
+	});
+
+	describe("Accordion 3-Mode State Machine (Peek / Pin / Auto-Collapse)", () => {
+		beforeEach(() => {
+			setSessionAccordionState(false);
+		});
+
+		it("Test 1: Manual toggle transitions COLLAPSED -> PINNED -> COLLAPSED", () => {
+			const adapter = new CpamcTuiAdapter(null);
+			assert.equal(adapter.getAccordionMode(), "collapsed");
+			assert.equal(adapter.isCardExpanded(), false);
+
+			// First toggle: user manually opens -> PINNED
+			const mode1 = adapter.toggleExpanded();
+			assert.equal(mode1, "pinned");
+			assert.equal(adapter.getAccordionMode(), "pinned");
+			assert.equal(adapter.isCardExpanded(), true);
+
+			// Second toggle: user closes -> COLLAPSED
+			const mode2 = adapter.toggleExpanded();
+			assert.equal(mode2, "collapsed");
+			assert.equal(adapter.getAccordionMode(), "collapsed");
+			assert.equal(adapter.isCardExpanded(), false);
+
+			adapter.destroy();
+		});
+
+		it("Test 2: Triggering peek from COLLAPSED opens PEEK mode with 20s countdown", () => {
+			const adapter = new CpamcTuiAdapter(null);
+			adapter.triggerPeek(20);
+
+			assert.equal(adapter.getAccordionMode(), "peek");
+			assert.equal(adapter.isCardExpanded(), true);
+			assert.equal(adapter.getPeekRemainingSeconds(), 20);
+
+			adapter.destroy();
+		});
+
+		it("Test 3: Triggering peek again while already in PEEK resets countdown to 20s", () => {
+			const adapter = new CpamcTuiAdapter(null);
+			adapter.triggerPeek(20);
+			// Simulate 5 seconds elapsed
+			(adapter as any).peekRemainingSec = 15;
+			assert.equal(adapter.getPeekRemainingSeconds(), 15);
+
+			// Trigger new event
+			adapter.triggerPeek(20);
+			assert.equal(adapter.getAccordionMode(), "peek");
+			assert.equal(adapter.getPeekRemainingSeconds(), 20);
+
+			adapter.destroy();
+		});
+
+		it("Test 4: Expiration of countdown auto-collapses PEEK to COLLAPSED", () => {
+			const adapter = new CpamcTuiAdapter(null);
+			adapter.triggerPeek(2);
+			assert.equal(adapter.getAccordionMode(), "peek");
+
+			// Simulate timer ticks
+			(adapter as any).tickPeek();
+			assert.equal(adapter.getPeekRemainingSeconds(), 1);
+			assert.equal(adapter.getAccordionMode(), "peek");
+
+			(adapter as any).tickPeek();
+			assert.equal(adapter.getPeekRemainingSeconds(), 0);
+			assert.equal(adapter.getAccordionMode(), "collapsed");
+			assert.equal(adapter.isCardExpanded(), false);
+
+			adapter.destroy();
+		});
+
+		it("Test 5: Manual toggle / shortcut during PEEK freezes and pins to PINNED mode (cancels timer)", () => {
+			const adapter = new CpamcTuiAdapter(null);
+			adapter.triggerPeek(20);
+			assert.equal(adapter.getAccordionMode(), "peek");
+
+			// User hits Ctrl+Alt+X or clicks to freeze/pin
+			const mode = adapter.toggleExpanded();
+			assert.equal(mode, "pinned");
+			assert.equal(adapter.getAccordionMode(), "pinned");
+			assert.equal(adapter.isCardExpanded(), true);
+
+			// Further ticks do not collapse because mode is pinned
+			(adapter as any).tickPeek?.();
+			assert.equal(adapter.getAccordionMode(), "pinned");
+			assert.equal(adapter.isCardExpanded(), true);
+
+			adapter.destroy();
+		});
+
+		it("Test 6: turn_start auto-collapses PEEK but preserves PINNED", () => {
+			const adapter = new CpamcTuiAdapter(null);
+
+			// Case A: in PEEK mode -> turn_start collapses it
+			adapter.triggerPeek(20);
+			assert.equal(adapter.getAccordionMode(), "peek");
+			adapter.onTurnStart();
+			assert.equal(adapter.getAccordionMode(), "collapsed");
+			assert.equal(adapter.isCardExpanded(), false);
+
+			// Case B: in PINNED mode -> turn_start keeps it PINNED
+			adapter.toggleExpanded(); // -> pinned
+			assert.equal(adapter.getAccordionMode(), "pinned");
+			adapter.onTurnStart();
+			assert.equal(adapter.getAccordionMode(), "pinned");
+			assert.equal(adapter.isCardExpanded(), true);
+
+			adapter.destroy();
+		});
+
+		it("Test 7: Renders badges and strict 48-column alignment for COLLAPSED, PEEK, and PINNED", () => {
+			// COLLAPSED
+			const linesCollapsed = formatSidebarQuotaCardLines(mockPoolPair, 48, undefined, undefined, false, undefined, undefined, "collapsed");
+			const textCollapsed = linesCollapsed.map((l: string) => stripAnsi(l)).join("\n");
+			assert.match(textCollapsed, /▶ \[Ver más: Contexto, Historial y Líderes\]/);
+			linesCollapsed.forEach((l: string, idx: number) => {
+				assert.strictEqual(visibleLen(l), 48, `Collapsed line ${idx} must be 48 cols`);
+			});
+
+			// PEEK (20s)
+			const linesPeek20 = formatSidebarQuotaCardLines(mockPoolPair, 48, undefined, undefined, false, undefined, undefined, "peek", 20);
+			const textPeek20 = linesPeek20.map((l: string) => stripAnsi(l)).join("\n");
+			assert.match(textPeek20, /▼ \[Ocultar detalles\] · Cierra en 20s/);
+			assert.match(textPeek20, /📦 CONTEXTO & COMPRESIÓN/);
+			linesPeek20.forEach((l: string, idx: number) => {
+				assert.strictEqual(visibleLen(l), 48, `Peek20 line ${idx} must be 48 cols`);
+			});
+
+			// PEEK (8s - single digit test for width padding consistency)
+			const linesPeek8 = formatSidebarQuotaCardLines(mockPoolPair, 48, undefined, undefined, false, undefined, undefined, "peek", 8);
+			const textPeek8 = linesPeek8.map((l: string) => stripAnsi(l)).join("\n");
+			assert.match(textPeek8, /▼ \[Ocultar detalles\] · Cierra en 8s/);
+			linesPeek8.forEach((l: string, idx: number) => {
+				assert.strictEqual(visibleLen(l), 48, `Peek8 line ${idx} must be 48 cols`);
+			});
+
+			// PINNED
+			const linesPinned = formatSidebarQuotaCardLines(mockPoolPair, 48, undefined, undefined, false, undefined, undefined, "pinned");
+			const textPinned = linesPinned.map((l: string) => stripAnsi(l)).join("\n");
+			assert.match(textPinned, /▼ \[Ocultar detalles extendidos\] · Fijo/);
+			linesPinned.forEach((l: string, idx: number) => {
+				assert.strictEqual(visibleLen(l), 48, `Pinned line ${idx} must be 48 cols`);
+			});
+		});
+
+		it("Test 8: Native standalone model renders appropriate labels across modes", () => {
+			const linesNativePeek = formatSidebarQuotaCardLines(mockNativePair, 48, undefined, undefined, false, undefined, undefined, "peek", 18);
+			const text = linesNativePeek.map((l: string) => stripAnsi(l)).join("\n");
+			assert.match(text, /▼ \[Ocultar detalles\] · Cierra en 18s/);
+			linesNativePeek.forEach((l: string, idx: number) => {
+				assert.strictEqual(visibleLen(l), 48, `Native peek line ${idx} must be 48 cols`);
+			});
 		});
 	});
 });
