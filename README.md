@@ -20,6 +20,7 @@ Combina un **motor CGO de balanceo en RAM** con una **tarjeta interactiva en el 
 | **Ceguera de Cuotas en el Terminal**: No sabes cuánto tiempo falta para que se recargue tu ventana de 5 horas o semanal sin abrir el navegador. | **Sidebar Quota Card**: Doble reloj concéntrico en vivo en el riel derecho con barras de uso, tiempo de reseteo exacto y ritmo predictivo de consumo. |
 | **Bucles Descontrolados de Agentes**: Un agente atrapado en bucle cíclico quema 100k+ tokens en minutos. | **Disyuntor Anti-Bucle (Circuit Breaker)**: Frena el bucle de raíz, calcula los tokens salvados (~85k) y genera un link a la autopsia forense web (`/incident`). |
 | **Pérdida de Prompt Caching (KV Cache)**: Cambiar de cuenta aleatoriamente destruye la caché del proveedor, duplicando latencias y costes. | **Preservación Estricta de Líder**: El líder físico se mantiene caliente mientras esté sano, superando el 90% de Cache Hit Rate. |
+| **Sobrediseño y Código Basura (Overengineering)**: El agente inventa capas abstractas, librerías innecesarias, migraciones no pedidas y código redundante. | **Guardián Anti-Sobrediseño (KISS / YAGNI)**: Skill transversal distribuido universalmente que prohíbe abstracciones prematuras y activa un disyuntor ante complejidad especulativa. |
 
 ---
 
@@ -60,9 +61,24 @@ En **Gentle-Shell**, la tarjeta se monta orgánicamente en el riel lateral derec
 
 ### 🪗 Acordeón Tri-Modal Inteligente
 Interactúa pulsando **`Ctrl+Alt+X`** o haciendo **clic con el ratón** directamente sobre la tarjeta:
-1. 🟢 **Modo Colapsado (`COLLAPSED`)**: Vista compacta que finaliza tras el bloque defensivo. Ideal para sesiones de programación continua.
+1. 🟢 **Modo Colapsado (`COLLAPSED`)**: Vista compacta que finaliza tras el bloque defensivo. Ideal para sesiones de programación continua sin distracciones visuales.
 2. 🟡 **Modo Peek 20s (`PEEK`)**: Se despliega automáticamente ante alertas de disyuntor, rescates 429 o rotaciones, mostrando una cuenta regresiva de 20s. **Inmunidad de foco**: Se auto-colapsa en cuanto el modelo comienza a generar código (`turn_start`) para no obstruir tu lectura.
-3. 🔴 **Modo Pin Fijo (`PINNED`)**: Si haces clic o pulsas `Ctrl+Alt+X` durante una alerta, el acordeón se congela de forma permanente para que puedas inspeccionar los detalles con calma.
+3. 🔴 **Modo Pin Fijo (`PINNED`)**: Si haces clic o pulsas `Ctrl+Alt+X`, el acordeón se expande completamente mostrando:
+   - 🔄 **Liderazgo & Rotaciones**: Rotaciones del día, duración del líder actual, rescates 429, tokens acumulados y turnos continuos.
+   - 📦 **Contexto & Compresión**: Tokens consumidos vs ventana máxima, compactaciones y eventos críticos.
+   - ⚠️ **Causas de Rotación Recientes**: Historial cronológico con causas exactas (HTTP 429, Fatiga >80%, Histéresis).
+   - 🛡️ **Guardián Anti-Sobrediseño**: Certificación visual del estado activo de las políticas de simplicidad suficiente (KISS/YAGNI).
+
+---
+
+## 🛡️ Guardián Anti-Sobrediseño (Anti-Overengineering)
+
+A diferencia de los entornos genéricos donde los agentes agregan capas de abstracción no solicitadas, adaptadores redundantes o limpiezas oportunistas, Auto Switcher Pro incorpora un **estándar estricto de ingeniería de software** (`skills/anti-overengineering/SKILL.md`):
+
+- **Principios Rectores**: Obligatoriedad de **KISS** (*Keep It Simple, Stupid*) y **YAGNI** (*You Aren't Gonna Need It*).
+- **Prohibición de Código Huérfano**: Ningún subagente ni orquestador puede introducir dependencias no aprobadas, migraciones implícitas ni capas de compatibilidad innecesarias.
+- **Circuit Breaker Preventivo**: Si una propuesta altera la arquitectura o añade complejidad especulativa, el agente frena en seco y devuelve `BLOCKED` solicitando una decisión explícita antes de mutar cualquier archivo.
+- **Distribución Universal**: Sincronizado automáticamente en `~/.gentle-shell/agent/skills/`, `~/.pi/agent-wilox/skills/` y `~/.pi/agent/skills/`. Detectable y activo de forma nativa en cualquier arnés.
 
 ---
 
@@ -81,7 +97,7 @@ Ejecuta el instalador universal interactivo:
 
 > **¿Qué hace el instalador?**
 > - Detecta tus entornos activos (**Gentle-Shell**, **Wilox-Pi**, **Pi Vanilla**) y enlaza la extensión.
-> - Sincroniza los subagentes y perfiles de arquitectura.
+> - Sincroniza los subagentes, perfiles de arquitectura y **skills transversales (`anti-overengineering`)**.
 > - Aplica un parcheo idempotente y universal en el layout de Gentle-Shell (anti-updates de npm).
 
 ---
@@ -154,9 +170,9 @@ cd plugins/auto-switcher-pro && go test ./...
 
 ## 👥 Harnesses y Entornos Compatibles
 
-- **Gentle-Shell**: Soporte visual completo en el riel lateral derecho (`cpamc-quota-card`), acordeón 3 modos y captura de mouse.
-- **Wilox-Pi** (`~/.pi/agent-wilox/`): Soporte de orquestación Planned Workflow, integración de subagentes y telemetría en Footer y Sidebar.
-- **Pi Vanilla** (`~/.pi/agent/`): Integración fluida en terminal estándar con telemetría en Footer.
+- **Gentle-Shell**: Soporte visual completo en el riel lateral derecho (`cpamc-quota-card`), acordeón 3 modos, captura de mouse y carga nativa de skills en `~/.gentle-shell/agent/skills/`.
+- **Wilox-Pi** (`~/.pi/agent-wilox/`): Soporte de orquestación Planned Workflow, integración de subagentes, telemetría y sensor anti-sobrediseño.
+- **Pi Vanilla** (`~/.pi/agent/`): Integración fluida en terminal estándar con telemetría en Footer y skills transversales aprovisionados.
 - **CLIProxyAPI Console (CPAMC v8.0.13+)**: Soporte nativo de plugin dinámico para Linux, macOS y Windows.
 
 ---

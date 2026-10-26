@@ -59,6 +59,11 @@ sync_agents_and_subagents() {
       cp -r "${SCRIPT_DIR}/agents"/* "${agent_root}/agents/" 2>/dev/null || true
       echo "👥 Agentes Gentle AI sincronizados en [${label}]: ${agent_root}/agents"
     fi
+    if [ -d "${SCRIPT_DIR}/skills" ]; then
+      mkdir -p "${agent_root}/skills"
+      cp -r "${SCRIPT_DIR}/skills"/* "${agent_root}/skills/" 2>/dev/null || true
+      echo "🛡️ Skills transversales sincronizados en [${label}]: ${agent_root}/skills"
+    fi
   fi
 }
 

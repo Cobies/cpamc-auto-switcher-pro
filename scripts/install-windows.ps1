@@ -37,6 +37,7 @@ $extSource = $null
 $binSource = $null
 $subagentsSource = $null
 $agentsSource = $null
+$skillsSource = $null
 
 if ($MyInvocation.MyCommand.Path -and (Test-Path $MyInvocation.MyCommand.Path)) {
     $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -47,12 +48,14 @@ if ($MyInvocation.MyCommand.Path -and (Test-Path $MyInvocation.MyCommand.Path)) 
     $candidateRepoBin = Join-Path $repoRoot "bin\auto-switcher-pro-windows-amd64.dll"
     $candidateRepoSubagents = Join-Path $repoRoot "subagents"
     $candidateRepoAgents = Join-Path $repoRoot "agents"
+    $candidateRepoSkills = Join-Path $repoRoot "skills"
     
     # 2. ¿Estamos dentro de un release package distribuido?
     $candidatePkgExt = Join-Path $scriptRoot "extensions\cpamc-auto-switcher"
     $candidatePkgBin = Join-Path $scriptRoot "bin\auto-switcher-pro-windows-amd64.dll"
     $candidatePkgSubagents = Join-Path $scriptRoot "subagents"
     $candidatePkgAgents = Join-Path $scriptRoot "agents"
+    $candidatePkgSkills = Join-Path $scriptRoot "skills"
 
     if (Test-Path $candidateRepoExt) {
         $isLocalExecution = $true
@@ -60,12 +63,14 @@ if ($MyInvocation.MyCommand.Path -and (Test-Path $MyInvocation.MyCommand.Path)) 
         if (Test-Path $candidateRepoBin) { $binSource = $candidateRepoBin }
         if (Test-Path $candidateRepoSubagents) { $subagentsSource = $candidateRepoSubagents }
         if (Test-Path $candidateRepoAgents) { $agentsSource = $candidateRepoAgents }
+        if (Test-Path $candidateRepoSkills) { $skillsSource = $candidateRepoSkills }
     } elseif (Test-Path $candidatePkgExt) {
         $isLocalExecution = $true
         $extSource = $candidatePkgExt
         if (Test-Path $candidatePkgBin) { $binSource = $candidatePkgBin }
         if (Test-Path $candidatePkgSubagents) { $subagentsSource = $candidatePkgSubagents }
         if (Test-Path $candidatePkgAgents) { $agentsSource = $candidatePkgAgents }
+        if (Test-Path $candidatePkgSkills) { $skillsSource = $candidatePkgSkills }
     }
 }
 
@@ -83,6 +88,7 @@ if (-not $isLocalExecution) {
         $binSource = Join-Path $tempWorkDir "cpamc-auto-switcher-pro-main\bin\auto-switcher-pro-windows-amd64.dll"
         $subagentsSource = Join-Path $tempWorkDir "cpamc-auto-switcher-pro-main\subagents"
         $agentsSource = Join-Path $tempWorkDir "cpamc-auto-switcher-pro-main\agents"
+        $skillsSource = Join-Path $tempWorkDir "cpamc-auto-switcher-pro-main\skills"
     } catch {
         Write-Error "No se pudo descargar el paquete desde GitHub: $_"
         exit 1
@@ -167,6 +173,14 @@ foreach ($extFolder in $agentTargets) {
             }
             Copy-Item -Recurse -Force -Path (Join-Path $agentsSource "*") -Destination $destAgents
             Write-Host "  ✓ Agentes Gentle AI sincronizados en: $destAgents" -ForegroundColor Green
+        }
+        if ($skillsSource -and (Test-Path $skillsSource)) {
+            $destSkills = Join-Path $agentHome "skills"
+            if (-not (Test-Path $destSkills)) {
+                New-Item -ItemType Directory -Force -Path $destSkills | Out-Null
+            }
+            Copy-Item -Recurse -Force -Path (Join-Path $skillsSource "*") -Destination $destSkills
+            Write-Host "  ✓ Skills transversales sincronizados en: $destSkills" -ForegroundColor Green
         }
     } catch {
         Write-Warning "No se pudo instalar en ${extFolder}: $_"

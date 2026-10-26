@@ -37,9 +37,11 @@ export function resolveHubBaseUrl(): string {
  * 1. Dynamic Provider: Registra el proveedor `cpamc` con catálogo dinámico de CLIProxyAPI.
  * 2. Failover Hook: Detección instantánea de 429 / Rate Limit y rotación forzada automática.
  * 3. Runtime UI & Telemetry:
- *    - Fullscreen Sidebar: QuotaCard reactiva calibrada a 36 cols con barras (▰▰▰▱▱▱).
+ *    - Fullscreen Sidebar: QuotaCard reactiva calibrada a 48 cols con barras (▰▰▰▱▱▱) y guardia Anti-Sobrediseño.
  *    - Regular Mode: Telemetría compacta en Footer.
  *    - Selector interactivo de modelos `/cpamc-model`.
+ * 4. Anti-Overengineering Governance:
+ *    - Distribución universal de skills/anti-overengineering para Gentle-Shell, Wilox-Pi y Pi Vanilla.
  *
  * 100% Autocontenida: lista para clonar o copiar en ~/.gentle-shell/agent/extensions/
  */

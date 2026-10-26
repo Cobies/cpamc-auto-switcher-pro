@@ -842,7 +842,6 @@ export function formatSidebarQuotaCardLines(
 				headerRow2,
 				headerRow3,
 				divider,
-				...rotSectionLines,
 				activeLine,
 				...renderDualConcentricClocks(pair.active, s, innerW, safeW),
 				...nextAccountLines,
@@ -854,6 +853,9 @@ export function formatSidebarQuotaCardLines(
 			];
 			return rawCollapsedLines.map((line) => fitToWidth(line, safeW));
 		}
+
+		// Bloque ROTACIONES & LIDERAZGO integrado como primer nivel del acordeón desplegado
+		const expandedRotLines: string[] = rotSectionLines.length > 0 ? [...rotSectionLines] : [];
 
 		// Bloque CONTEXTO & COMPRESIÓN
 		const compTitle = `${s.amber("📦 CONTEXTO & COMPRESIÓN")}`;
@@ -905,7 +907,10 @@ export function formatSidebarQuotaCardLines(
 			const footRow2Left = `${s.muted("Conexión:")} ${s.text("Directa (sin relevos)")}`;
 			const spFoot2 = Math.max(1, innerW - visibleLen(footRow2Left));
 			const footRow2 = fitToWidth(`${s.border("│")} ${footRow2Left}${" ".repeat(spFoot2)} ${s.border("│")}`, safeW);
-			footSectionLines.push(footRow1, footRow2);
+			const guardInfoLeft = `${s.cyan("🛡️ Anti-Sobrediseño:")} ${s.idle("Activo (KISS/YAGNI)")}`;
+			const spGuard = Math.max(1, innerW - visibleLen(guardInfoLeft));
+			const footRow3 = fitToWidth(`${s.border("│")} ${guardInfoLeft}${" ".repeat(spGuard)} ${s.border("│")}`, safeW);
+			footSectionLines.push(footRow1, footRow2, divider, footRow3);
 		} else {
 			const curLeadState = `${s.muted("Estado actual:")}  ${s.accent("⚡ ")}${s.text(activeAccShort)} ${s.muted(`(Líder hace ${activeLeadSince})`)}`;
 			const footRow1 = fitToWidth(`${s.border("│")} ${curLeadState}${" ".repeat(Math.max(1, innerW - visibleLen(curLeadState)))} ${s.border("│")}`, safeW);
@@ -915,7 +920,10 @@ export function formatSidebarQuotaCardLines(
 			const footRow2Right = `${s.muted("Promedio/cta:")} ${s.text(avgLeadDur)}`;
 			const spFoot2 = Math.max(1, innerW - visibleLen(footRow2Left) - visibleLen(footRow2Right));
 			const footRow2 = fitToWidth(`${s.border("│")} ${footRow2Left}${" ".repeat(spFoot2)}${footRow2Right} ${s.border("│")}`, safeW);
-			footSectionLines.push(footRow1, footRow2);
+			const guardInfoLeft = `${s.cyan("🛡️ Anti-Sobrediseño:")} ${s.idle("Activo (KISS/YAGNI)")}`;
+			const spGuard = Math.max(1, innerW - visibleLen(guardInfoLeft));
+			const footRow3 = fitToWidth(`${s.border("│")} ${guardInfoLeft}${" ".repeat(spGuard)} ${s.border("│")}`, safeW);
+			footSectionLines.push(footRow1, footRow2, divider, footRow3);
 		}
 
 		const rawLines = [
@@ -924,7 +932,6 @@ export function formatSidebarQuotaCardLines(
 			headerRow2,
 			headerRow3,
 			divider,
-			...rotSectionLines,
 			activeLine,
 			...renderDualConcentricClocks(pair.active, s, innerW, safeW),
 			...nextAccountLines,
@@ -933,6 +940,7 @@ export function formatSidebarQuotaCardLines(
 			divider,
 			accordionLine,
 			divider,
+			...expandedRotLines,
 			...compLines,
 			...causesSectionLines,
 			divider,
@@ -1242,7 +1250,9 @@ export class CpamcTuiAdapter {
 			invalidate: () => {},
 			handleMouse: (event: any) => {
 				try {
-					if (event && (event.type === "click" || event.type === "press")) {
+					if (!event) return undefined;
+					// 1. Aceptar únicamente click izquierdo real (elimina doble toggle por press + click)
+					if (event.type === "click" && (!event.button || event.button === "left")) {
 						self.toggleExpanded();
 						return { handled: true, render: true };
 					}
@@ -1340,11 +1350,69 @@ export class CpamcTuiAdapter {
 				},
 				handleMouse: (event: any) => {
 					try {
-						if (event && (event.type === "click" || event.type === "press")) {
-							self.toggleExpanded();
-							return { handled: true, render: true };
+						if (!event) return originalRail.handleMouse?.(event);
+
+						// 1. Filtrar únicamente click izquierdo real (elimina el doble toggle press + click)
+						if (event.type !== "click" || (event.button && event.button !== "left")) {
+							return originalRail.handleMouse?.(event);
 						}
-						return originalRail.handleMouse?.(event);
+
+						// 2. Calcular límites verticales y horizontales para delimitar el área interactiva
+						let baseHeight = 0;
+						try {
+							baseHeight = originalRail.render ? (originalRail.render(event.width || 48) ?? []).length : 0;
+						} catch {
+							baseHeight = 0;
+						}
+
+						const quotaStartY = baseHeight > 0 ? baseHeight + 1 : 0; // +1 por la línea en blanco separadora
+
+						// Si el click fue en la tarjeta de Status original de arriba, delegar
+						if (typeof event.y === "number" && event.y < quotaStartY) {
+							return originalRail.handleMouse?.(event);
+						}
+
+						// Calcular la altura real de la Quota Card
+						const model = self.safeGetModel();
+						const pair = model
+							? (getRotationPairForModelSync(model.id, model.provider) || self.currentPair)
+							: self.currentPair;
+
+						if (!pair) {
+							return originalRail.handleMouse?.(event);
+						}
+
+						let quotaHeight = 14; // Altura colapsada base por defecto
+						try {
+							const sampleLines = formatSidebarQuotaCardLines(
+								pair,
+								event.width || 48,
+								"\x1b[38;2;120;153;166m",
+								self.theme,
+								self.isBusy,
+								undefined,
+								self.getPeriodLabel(),
+								self.accordionMode,
+								self.peekRemainingSec,
+							);
+							quotaHeight = sampleLines.length;
+						} catch {}
+
+						const quotaEndY = quotaStartY + quotaHeight;
+
+						// Si el click cae por debajo de la Quota Card, no capturar
+						if (typeof event.y === "number" && event.y >= quotaEndY) {
+							return originalRail.handleMouse?.(event);
+						}
+
+						// Si el evento trae coordenada horizontal X y excede el ancho útil del sidebar (ej. 48 cols), no capturar
+						if (typeof event.x === "number" && event.x >= (event.width || 48)) {
+							return originalRail.handleMouse?.(event);
+						}
+
+						// 3. Click confirmado dentro de la Quota Card -> Alternar acordeón
+						self.toggleExpanded();
+						return { handled: true, render: true };
 					} catch {
 						return false;
 					}

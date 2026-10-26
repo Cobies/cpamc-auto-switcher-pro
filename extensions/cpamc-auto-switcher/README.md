@@ -26,6 +26,11 @@ Suite oficial todo-en-uno que proporciona integración nativa completa entre **C
    - Iconografía de roles: `👑` Líderes de rotación activos, `⚡` Directos, `💤` Reservas pasivas.
    - **Refresco Proactivo**: Cada apertura de `/cpamc-model` sincroniza el catálogo vivo con CLIProxyAPI en tiempo real.
 
+5. **Guardián Anti-Sobrediseño (`anti-overengineering`)**:
+   - Skill transversal que frena el sobrediseño, dependencias superfluas y código huérfano.
+   - Sincronización automática con la carpeta `skills/` del agente activo (Gentle-Shell, Wilox-Pi, Pi Vanilla).
+   - Reflejo del estado de protección directamente en la tarjeta de cuotas del sidebar.
+
 ---
 
 ## 🔄 Pipeline de Sincronización Dinámica y Purga Atómica

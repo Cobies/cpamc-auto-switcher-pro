@@ -307,9 +307,15 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		assert.match(fullText2, /Status v2/);
 		assert.match(fullText2, /DISYUNTOR|CUIDANDO EL CHAT/);
 
-		// 4. Test cache invalidation and mouse toggle
+		// 4. Test cache invalidation and mouse toggle with strict click and hit-testing
 		const cache = { revision: 1 };
 		let requestedRender = false;
+		let originalRailHandled = false;
+		reRegisteredFooter.handleMouse = (evt: any) => {
+			originalRailHandled = true;
+			return { handled: true };
+		};
+
 		const mockTerminal: any = {
 			[Symbol.for("gentle-pi.experimental-sidebar.cache")]: cache,
 		};
@@ -320,11 +326,39 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		adapter.bindTui(mockTui);
 
 		assert.equal(adapter.getAccordionMode(), "collapsed");
-		const mouseRes = decorated2.handleMouse({ type: "click" });
-		assert.equal(mouseRes?.handled, true);
-		assert.equal(adapter.getAccordionMode(), "pinned");
+
+		// Test A: Evento 'press' es ignorado por completo (evita el parpadeo de doble disparo)
+		const pressRes = decorated2.handleMouse({ type: "press", button: "left" });
+		assert.equal(adapter.getAccordionMode(), "collapsed", "evento press NO debe cambiar el acordeón");
+
+		// Test B: Click en la zona superior (Status Card, y = 1 < quotaStartY = 4) se delega a originalRail
+		const statusClickRes = decorated2.handleMouse({ type: "click", button: "left", y: 1 });
+		assert.equal(originalRailHandled, true, "click en Status Card debe delegarse al originalRail");
+		assert.equal(adapter.getAccordionMode(), "collapsed", "click en Status Card no debe abrir la Quota Card");
+
+		// Test C: Click en la zona intermedia (Quota Card, y = 6 >= quotaStartY = 4) abre el acordeón
+		const quotaClickRes = decorated2.handleMouse({ type: "click", button: "left", y: 6 });
+		assert.equal(quotaClickRes?.handled, true);
+		assert.equal(adapter.getAccordionMode(), "pinned", "click en Quota Card debe alternar a pinned");
 		assert.equal(cache.revision, 2, "sidebar cache revision must be incremented on mouse toggle");
 		assert.equal(requestedRender, true, "requestRender must be called");
+
+		// Test D (Límite Y inferior): Click por debajo de la Quota Card (y = 50 >= quotaEndY) se delega a originalRail
+		originalRailHandled = false;
+		const overflowYClick = decorated2.handleMouse({ type: "click", button: "left", y: 50 });
+		assert.equal(originalRailHandled, true, "click por debajo de la Quota Card debe delegarse a originalRail");
+
+		// Test E (Límite X lateral): Click fuera del ancho de la tarjeta (x = 60 >= width 48) se delega a originalRail
+		originalRailHandled = false;
+		const overflowXClick = decorated2.handleMouse({ type: "click", button: "left", x: 60, y: 6, width: 48 });
+		assert.equal(originalRailHandled, true, "click fuera del ancho útil debe delegarse a originalRail");
+
+		// Test F (Botones secundarios): Click derecho o rueda de ratón (button !== 'left') se delega sin alterar el acordeón
+		originalRailHandled = false;
+		adapter.setExpanded(false);
+		const rightClickRes = decorated2.handleMouse({ type: "click", button: "right", y: 6 });
+		assert.equal(originalRailHandled, true, "click derecho debe delegarse al rail nativo");
+		assert.equal(adapter.getAccordionMode(), "collapsed", "click derecho no debe abrir el acordeón");
 
 		adapter.destroy();
 	});

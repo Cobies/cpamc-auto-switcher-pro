@@ -383,6 +383,7 @@ install_extension() {
     local local_ext_src="${repo_root}/extensions/cpamc-auto-switcher"
     local local_subagents_src="${repo_root}/subagents"
     local local_agents_src="${repo_root}/agents"
+    local local_skills_src="${repo_root}/skills"
     local tmp_dir=""
 
     if [ ! -d "$local_ext_src" ]; then
@@ -393,6 +394,7 @@ install_extension() {
             local_ext_src="$tmp_dir/repo/extensions/cpamc-auto-switcher"
             local_subagents_src="$tmp_dir/repo/subagents"
             local_agents_src="$tmp_dir/repo/agents"
+            local_skills_src="$tmp_dir/repo/skills"
         fi
     fi
 
@@ -421,6 +423,13 @@ install_extension() {
             mkdir -p "${agent_home}/agents"
             cp -r "$local_agents_src"/* "${agent_home}/agents/" 2>/dev/null || true
             echo -e "${GREEN}    [✓] Agentes Gentle AI sincronizados en: ${agent_home}/agents${RESET}"
+        fi
+
+        # Aprovisionar skills transversales (Anti-Overengineering)
+        if [ -d "$local_skills_src" ]; then
+            mkdir -p "${agent_home}/skills"
+            cp -r "$local_skills_src"/* "${agent_home}/skills/" 2>/dev/null || true
+            echo -e "${GREEN}    [✓] Skills transversales sincronizados en: ${agent_home}/skills${RESET}"
         fi
 
         # Persistir configuración en settings.json del agente si la URL no es localhost estándar
