@@ -120,6 +120,13 @@ export default function AutoAuthFiles({
     card: null,
     inheritedModels: [],
   });
+  // Modal de Adopción Rápida con 1 Clic para cuentas Standalone
+  const [adoptModal, setAdoptModal] = useState({
+    isOpen: false,
+    card: null,
+    targetPoolId: '',
+    newPoolName: '',
+  });
   // Pools registrados en el plugin PoolRegistry (auto-switcher-pro-state.json)
   const [registeredPools, setRegisteredPools] = useState([]);
   // Guard so live quota is auto-fetched once per physical master per mount cycle
@@ -280,6 +287,67 @@ export default function AutoAuthFiles({
       }
     },
     [onReloadRequested]
+  );
+
+  const handleExecuteAdopt = useCallback(
+    async () => {
+      const { card, targetPoolId, newPoolName } = adoptModal;
+      if (!card || !card.fileName) return;
+
+      setIsProcessing(true);
+      try {
+        if (targetPoolId) {
+          // Sumar cuenta a un pool existente
+          const pool = registeredPools.find((p) => p.id === targetPoolId || p.base_prefix === targetPoolId);
+          if (!pool) throw new Error('Pool de destino no encontrado');
+          const existingReserves = Array.isArray(pool.reserves) ? pool.reserves : [];
+          if (!existingReserves.includes(card.fileName) && pool.leader_auth !== card.fileName) {
+            existingReserves.push(card.fileName);
+          }
+          await savePool({
+            ...pool,
+            reserves: existingReserves,
+          });
+          setSuccessMessage(`✅ Cuenta ${maskDisplayIdentifier(card.fileName)} añadida exitosamente al pool ${pool.display_name || pool.id}.`);
+        } else {
+          // Crear un nuevo pool con esta cuenta como líder
+          const baseName = newPoolName?.trim() || `Pool-${registeredPools.length + 1}-${card.family}`;
+          const newPool = {
+            id: baseName,
+            display_name: baseName,
+            base_prefix: card.prefix || (card.family === 'gemini' ? 'agy' : card.family === 'claude' ? 'clau' : 'codex'),
+            family: card.family || 'gemini',
+            leader_auth: card.fileName,
+            reserves: [],
+            policy: {
+              disable_isolation: false,
+              target_models: card.family === 'gemini' ? ['gemini-3.8-flash-high'] : card.family === 'claude' ? ['claude-3-7-sonnet'] : ['gpt-5.6-codex'],
+              excluded_models: [],
+            },
+          };
+          await savePool(newPool);
+          setSuccessMessage(`🎉 Nuevo pool ${baseName} creado con ${maskDisplayIdentifier(card.fileName)} como líder.`);
+        }
+
+        setAdoptModal({ isOpen: false, card: null, targetPoolId: '', newPoolName: '' });
+        const poolsRes = await listPools();
+        if (Array.isArray(poolsRes?.pools)) {
+          setRegisteredPools(poolsRes.pools);
+        }
+        if (typeof onReloadRequested === 'function') {
+          await onReloadRequested();
+        }
+      } catch (err) {
+        setErrorMessage(`Error al adoptar cuenta: ${err.message}`);
+      } finally {
+        setIsProcessing(false);
+        setTimeout(() => {
+          setSuccessMessage('');
+          setErrorMessage('');
+        }, 5000);
+      }
+    },
+    [adoptModal, registeredPools, onReloadRequested]
   );
 
   const handleRefreshCardQuota = useCallback(
@@ -1418,7 +1486,7 @@ export default function AutoAuthFiles({
                           </div>
                         </div>
 
-                        <div className="card-state-pill-row">
+                        <div className="card-state-pill-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                           <span
                             className="badge-pool-prefix badge-state-fixed"
                             style={{ background: 'rgba(51, 65, 85, 0.6)', color: '#cbd5e1', border: '1px solid #64748b' }}
@@ -1426,6 +1494,35 @@ export default function AutoAuthFiles({
                           >
                             ⚡ CUENTA FIJA DIRECTA
                           </span>
+                          <button
+                            type="button"
+                            className="btn-card-adopt"
+                            data-testid={`btn-adopt-${scard.fileName}`}
+                            onClick={() =>
+                              setAdoptModal({
+                                isOpen: true,
+                                card: { ...scard, family: isGemini ? 'gemini' : isClaude ? 'claude' : 'codex' },
+                                targetPoolId: registeredPools.length > 0 ? (registeredPools[0].id || registeredPools[0].base_prefix) : '',
+                                newPoolName: '',
+                              })
+                            }
+                            style={{
+                              background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(5, 150, 105, 0.3))',
+                              color: '#34d399',
+                              border: '1px solid rgba(16, 185, 129, 0.4)',
+                              borderRadius: 6,
+                              padding: '3px 8px',
+                              fontSize: 11,
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                            title="Adoptar cuenta en un Pool para otorgarle failover 24/7 y rotación transparente"
+                          >
+                            🛡️ Adoptar en Pool
+                          </button>
                         </div>
                       </div>
 
@@ -1450,6 +1547,147 @@ export default function AutoAuthFiles({
         onSaved={handleSpecialistSaved}
         patchFn={handlePatchSpecialist}
       />
+
+      {/* Modal de Adopción Rápida con 1 Clic */}
+      {adoptModal.isOpen && adoptModal.card && (
+        <div
+          className="modal-backdrop"
+          data-testid="modal-adopt-backdrop"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.75)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+          }}
+        >
+          <div
+            className="modal-card"
+            data-testid="modal-adopt-card"
+            style={{
+              background: '#0f172a',
+              border: '1px solid #334155',
+              borderRadius: 12,
+              padding: 24,
+              maxWidth: 480,
+              width: '90%',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 16, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: 8 }}>
+                🛡️ Adoptar Cuenta en Pool de Failover
+              </h3>
+              <button
+                type="button"
+                onClick={() => setAdoptModal({ isOpen: false, card: null, targetPoolId: '', newPoolName: '' })}
+                style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 18, cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <p style={{ fontSize: 13, color: '#cbd5e1', lineHeight: 1.5, marginBottom: 16 }}>
+              Otorga resiliencia 24/7 y rotación transparente a la cuenta fija{' '}
+              <strong style={{ color: '#38bdf8' }}>{adoptModal.card.maskedEmail || adoptModal.card.fileName}</strong>.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 20 }}>
+              {registeredPools.length > 0 && (
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, color: '#94a3b8', marginBottom: 6 }}>
+                    Sumar a un Pool existente:
+                  </label>
+                  <select
+                    value={adoptModal.targetPoolId}
+                    onChange={(e) => setAdoptModal((prev) => ({ ...prev, targetPoolId: e.target.value }))}
+                    style={{
+                      width: '100%',
+                      background: '#1e293b',
+                      border: '1px solid #475569',
+                      borderRadius: 6,
+                      color: '#f8fafc',
+                      padding: '8px 12px',
+                      fontSize: 13,
+                    }}
+                    data-testid="select-adopt-target-pool"
+                  >
+                    {registeredPools.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.display_name || p.id} ({p.family || 'multipurpose'})
+                      </option>
+                    ))}
+                    <option value="">➕ O crear un nuevo Pool independiente</option>
+                  </select>
+                </div>
+              )}
+
+              {(!registeredPools.length || !adoptModal.targetPoolId) && (
+                <div>
+                  <label style={{ display: 'block', fontSize: 12, color: '#94a3b8', marginBottom: 6 }}>
+                    Nombre del nuevo Pool:
+                  </label>
+                  <input
+                    type="text"
+                    placeholder={`Pool-${registeredPools.length + 1}-${adoptModal.card.family || 'gemini'}`}
+                    value={adoptModal.newPoolName}
+                    onChange={(e) => setAdoptModal((prev) => ({ ...prev, newPoolName: e.target.value }))}
+                    style={{
+                      width: '100%',
+                      background: '#1e293b',
+                      border: '1px solid #475569',
+                      borderRadius: 6,
+                      color: '#f8fafc',
+                      padding: '8px 12px',
+                      fontSize: 13,
+                    }}
+                    data-testid="input-adopt-new-pool-name"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setAdoptModal({ isOpen: false, card: null, targetPoolId: '', newPoolName: '' })}
+                style={{
+                  background: 'transparent',
+                  border: '1px solid #475569',
+                  borderRadius: 6,
+                  color: '#cbd5e1',
+                  padding: '8px 16px',
+                  fontSize: 13,
+                  cursor: 'pointer',
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                data-testid="btn-confirm-adopt"
+                onClick={handleExecuteAdopt}
+                disabled={isProcessing}
+                style={{
+                  background: 'linear-gradient(135deg, #10b981, #059669)',
+                  border: 'none',
+                  borderRadius: 6,
+                  color: '#ffffff',
+                  padding: '8px 16px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: isProcessing ? 'not-allowed' : 'pointer',
+                  opacity: isProcessing ? 0.7 : 1,
+                }}
+              >
+                {isProcessing ? 'Adoptando...' : 'Confirmar Adopción'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

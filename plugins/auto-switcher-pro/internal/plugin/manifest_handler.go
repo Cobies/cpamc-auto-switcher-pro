@@ -32,17 +32,20 @@ type ManifestResponse struct {
 }
 
 type ManifestAccountSummary struct {
-	AccountKey  string  `json:"account_key"`
-	Email       string  `json:"email"`
-	PoolID      string  `json:"pool_id,omitempty"`
-	BasePrefix  string  `json:"base_prefix,omitempty"`
+	AccountKey      string  `json:"account_key"`
+	Email           string  `json:"email"`
+	PoolID          string  `json:"pool_id,omitempty"`
+	BasePrefix      string  `json:"base_prefix,omitempty"`
 	Role            string  `json:"role"` // "leader", "reserve", "unassigned"
 	Window5hPct     float64 `json:"window_5h_pct"`
 	WeeklyPct       float64 `json:"weekly_pct"`
 	Window5hResetIn int64   `json:"window_5h_reset_in"`
 	WeeklyResetIn   int64   `json:"weekly_reset_in"`
 	IsCooling       bool    `json:"is_cooling"`
-	FatiguePct  float64 `json:"fatigue_pct"`
+	FatiguePct      float64 `json:"fatigue_pct"`
+	StabilityScore  float64 `json:"stability_score,omitempty"`
+	HealthRating    string  `json:"health_rating,omitempty"`
+	RecentErrors    int     `json:"recent_errors,omitempty"`
 }
 
 func handleManifestHTTP(req ManagementRequestPayload) ([]byte, error) {
@@ -131,6 +134,8 @@ func handleManifestHTTP(req ManagementRequestPayload) ([]byte, error) {
 				wWeeklyResetIn = q.WeeklyResetIn
 			}
 
+			stab, _ := analytics.QueryAccountStability(email)
+
 			accountSummaries = append(accountSummaries, ManifestAccountSummary{
 				AccountKey:      cleanAuth,
 				Email:           email,
@@ -143,6 +148,9 @@ func handleManifestHTTP(req ManagementRequestPayload) ([]byte, error) {
 				WeeklyResetIn:   wWeeklyResetIn,
 				IsCooling:       isCooling,
 				FatiguePct:      fatigue,
+				StabilityScore:  stab.StabilityScore,
+				HealthRating:    stab.HealthRating,
+				RecentErrors:    stab.RecentErrors,
 			})
 		}
 	}

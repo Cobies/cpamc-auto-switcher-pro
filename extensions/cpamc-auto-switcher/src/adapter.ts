@@ -829,6 +829,23 @@ export function formatSidebarQuotaCardLines(
 		const spL2 = Math.max(1, innerW - visibleLen(line2Left) - visibleLen(line2Right));
 		const headerRow3 = fitToWidth(`${s.border("│")} ${line2Left}${" ".repeat(spL2)}${line2Right} ${s.border("│")}`, safeW);
 
+		// Quick-Rescue Banner proactivo ante fatiga crítica en cuentas Standalone
+		// Si la cuenta fija tiene consumo de 5h >= 85% o reset5hInSec bajo,
+		// inyecta un banner visible sugiriendo el comando /model o migración hacia un pool resiliente
+		const standaloneConsumed5h = parseConsumedNumber(pair.active.consumed5h);
+		const pace5hCheck = calculateQuotaPace(pair.active.consumed5h || "0%", pair.active.reset5hInSec, 300, s);
+		const isStandaloneCritical = pair.isNativeReadOnly && (standaloneConsumed5h >= 85 || pace5hCheck.state === "fast" || pace5hCheck.state === "exhausted");
+		const quickRescueLines: string[] = [];
+		if (isStandaloneCritical) {
+			const rescueWarnTitle = `${s.amber("⚡ RESCATE:")} ${s.live("Cuota crítica (" + standaloneConsumed5h + "%)")}`;
+			const padWarn = Math.max(0, innerW - visibleLen(rescueWarnTitle));
+			const rescueRow1 = fitToWidth(`${s.border("│")} ${rescueWarnTitle}${" ".repeat(padWarn)} ${s.border("│")}`, safeW);
+			const rescueAction = `${s.muted("Sugerencia:")} ${s.accent("/model")} ${s.text("➔ saltar a Pool")}`;
+			const padAct = Math.max(0, innerW - visibleLen(rescueAction));
+			const rescueRow2 = fitToWidth(`${s.border("│")} ${rescueAction}${" ".repeat(padAct)} ${s.border("│")}`, safeW);
+			quickRescueLines.push(divider, rescueRow1, rescueRow2);
+		}
+
 		// Bloque ROTACIONES & LIDERAZGO con Telemetría de Red y Seguridad integrada
 		const rotSectionLines: string[] = [];
 		if (!pair.isNativeReadOnly) {
@@ -952,6 +969,7 @@ export function formatSidebarQuotaCardLines(
 				divider,
 				...renderDualConcentricClocks(pair.active, s, innerW, safeW),
 				...leaderInfoLines,
+				...quickRescueLines,
 				divider,
 				...chatBlockLines,
 				divider,

@@ -53,12 +53,14 @@ type ManagementResponsePayload struct {
 func HandlePluginMethod(method string, request []byte) ([]byte, error) {
 	switch method {
 	case "plugin.shutdown":
+		GetAuthDirectoryWatcher().Stop()
 		GetAutonomousQuotaPoller().Stop()
 		license.FlushUsage()
 		analytics.Shutdown(2 * time.Second)
 		return OKEnvelope([]byte(`{"ok":true}`)), nil
 
 	case "plugin.register", "plugin.reconfigure":
+		GetAuthDirectoryWatcher().Start()
 		GetAutonomousQuotaPoller().Start()
 
 		registration := map[string]any{

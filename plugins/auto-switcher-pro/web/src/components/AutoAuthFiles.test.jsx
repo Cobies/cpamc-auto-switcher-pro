@@ -965,5 +965,65 @@ describe('AutoAuthFiles Component - Dedicated View & Lifecycle Engine', () => {
       expect(screen.getAllByText('85% restante').length).toBeGreaterThanOrEqual(1);
     });
   });
+
+  it('allows 1-click adoption of a standalone account into an existing or new pool', async () => {
+    mockPools([
+      {
+        id: 'Pool-01-gemini',
+        display_name: 'Pool-01-gemini',
+        family: 'gemini',
+        base_prefix: 'agy',
+        leader_auth: 'antigravity-leader@gmail.com.json',
+        reserves: [],
+      },
+    ]);
+
+    const savePoolSpy = vi.spyOn(managementClient, 'savePool').mockResolvedValue({
+      ok: true,
+      pool: { id: 'Pool-01-gemini' },
+      message: 'Pool saved successfully',
+    });
+
+    const standaloneNode = [
+      {
+        id: 'pool-leader-node',
+        data: {
+          fileName: 'antigravity-leader@gmail.com.json',
+          email: 'leader@gmail.com',
+          provider: 'antigravity',
+        },
+      },
+      {
+        id: 'standalone-node',
+        data: {
+          fileName: 'claude-direct-user@anthropic.com.json',
+          email: 'user@anthropic.com',
+          prefix: 'clau-direct',
+          provider: 'claude',
+        },
+      },
+    ];
+
+    render(<AutoAuthFiles nodes={standaloneNode} />);
+
+    // Verificar que aparece el botón de adoptar en la tarjeta standalone
+    const adoptBtn = await screen.findByTestId('btn-adopt-claude-direct-user@anthropic.com.json');
+    expect(adoptBtn).toBeTruthy();
+    expect(adoptBtn.textContent).toContain('Adoptar en Pool');
+
+    // Al hacer clic, abre el modal de adopción
+    fireEvent.click(adoptBtn);
+    expect(screen.getByTestId('modal-adopt-card')).toBeTruthy();
+    expect(screen.getByText(/Adoptar Cuenta en Pool de Failover/i)).toBeTruthy();
+
+    // Confirmar adopción en pool existente
+    const confirmBtn = screen.getByTestId('btn-confirm-adopt');
+    fireEvent.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(savePoolSpy).toHaveBeenCalled();
+    });
+  });
 });
+
 
