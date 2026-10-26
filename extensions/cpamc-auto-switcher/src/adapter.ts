@@ -34,35 +34,50 @@ export function truncateWithAnsi(str: string, maxW: number): string {
 	let vis = 0;
 	let res = "";
 	const token = /^\x1b\[[0-9;]*[a-zA-Z]/;
+	const chars = Array.from(str);
 	let i = 0;
 
-	while (i < str.length && vis < maxW) {
+	while (i < chars.length && vis < maxW) {
 		const match = str.slice(i).match(token);
 		if (match) {
 			res += match[0];
 			i += match[0].length;
 		} else {
-			const cp = str.codePointAt(i) || 0;
-			const charLen = String.fromCodePoint(cp).length;
-			const charVis =
-				cp >= 0xfe00 && cp <= 0xfe0f
-					? 0
-					: cp >= 0x1f6e0 && cp <= 0x1f6ec
-						? 1
-						: (cp >= 0x1f300 && cp <= 0x1faff) ||
-								(cp >= 0x2600 && cp <= 0x27bf) ||
-								(cp >= 0x2b50 && cp <= 0x2b55)
-							? 2
-							: 1;
+			const char = chars[i];
+			const cp = char.codePointAt(0) || 0;
+			const nextChar = chars[i + 1];
+			const nextCp = nextChar ? nextChar.codePointAt(0) : 0;
+
+			let charVis = 1;
+			let advance = 1;
+
+			if (cp >= 0xfe00 && cp <= 0xfe0f) {
+				charVis = 0;
+			} else if (nextCp === 0xfe0f) {
+				charVis = 2;
+				advance = 2;
+			} else if ((cp >= 0x1f6e0 && cp <= 0x1f6ec) || cp === 0x2699 || cp === 0x2794 || cp === 0x2714) {
+				charVis = 1;
+			} else if (
+				(cp >= 0x1f300 && cp <= 0x1faff) ||
+				(cp >= 0x2600 && cp <= 0x27bf) ||
+				(cp >= 0x2b50 && codeRangeCheck(cp))
+			) {
+				charVis = 2;
+			}
 
 			if (vis + charVis > maxW) break;
-			res += str.slice(i, i + charLen);
+			res += advance === 2 ? char + nextChar : char;
 			vis += charVis;
-			i += charLen;
+			i += advance;
 		}
 	}
 
 	return `${res}${RESET}`;
+}
+
+function codeRangeCheck(cp: number): boolean {
+	return cp >= 0x2b50 && cp <= 0x2b55;
 }
 
 export function fitToWidth(str: string, maxW: number): string {
@@ -117,12 +132,26 @@ export function formatFooterRotationBlock(pair: PoolRotationPair | null, isBusy 
 export function visibleLen(str: string): number {
 	const clean = str.replace(/\x1b\[[0-9;]*m/g, "").replace(/\x1b\]8;;[^\x1b]*\x1b\\/g, "");
 	let len = 0;
-	for (const char of clean) {
+	const chars = Array.from(clean);
+	for (let i = 0; i < chars.length; i++) {
+		const char = chars[i];
 		const code = char.codePointAt(0) || 0;
+		const nextChar = chars[i + 1];
+		const nextCode = nextChar ? nextChar.codePointAt(0) : 0;
+
 		if (code >= 0xfe00 && code <= 0xfe0f) {
-			// variation selector, 0 width
-		} else if (code >= 0x1f6e0 && code <= 0x1f6ec) {
-			// Símbolos de transporte/herramientas con presentación texto por defecto (ej: 🛡 U+1F6E1, 🛠 U+1F6E0)
+			continue;
+		}
+
+		if (nextCode === 0xfe0f) {
+			// Símbolo con Selector de Variación Emoji (VS-16) -> 2 columnas en TUI
+			len += 2;
+			i++;
+			continue;
+		}
+
+		if ((code >= 0x1f6e0 && code <= 0x1f6ec) || code === 0x2699 || code === 0x2794 || code === 0x2714) {
+			// Símbolos estándar de texto (escudo texto, flecha ➔, check ✔, tuerca texto) -> 1 columna
 			len += 1;
 		} else if (
 			(code >= 0x1f300 && code <= 0x1faff) ||
