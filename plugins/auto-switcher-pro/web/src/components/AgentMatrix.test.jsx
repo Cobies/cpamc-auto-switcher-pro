@@ -556,4 +556,44 @@ describe('AgentMatrix Component', () => {
     expect(screen.getAllByText(/En espera de ejecuciones/i).length).toBeGreaterThan(0);
     expect(screen.queryByText(/Estrés Crítico de Cuota/i)).toBeNull();
   });
+
+  it('renders auth warning box when management key is not found and allows unlocking via manual entry', async () => {
+    vi.spyOn(managementClient, 'fetchAgentMatrix').mockRejectedValueOnce(
+      new Error('Management key not found. Please log in to CPAMC with "Remember password" enabled.')
+    );
+
+    render(<AgentMatrix />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Autenticación Requerida · Matriz de Agentes/i)).toBeDefined();
+    });
+
+    const input = screen.getByTestId('input-matrix-manual-key');
+    const connectBtn = screen.getByTestId('btn-connect-matrix-key');
+
+    expect(input).toBeDefined();
+    expect(connectBtn).toBeDefined();
+
+    // Prepare success response for retry after key entry
+    vi.spyOn(managementClient, 'fetchAgentMatrix').mockResolvedValueOnce({
+      ok: true,
+      jok3r_detected: false,
+      available_pools: ['Pool-01-gemini'],
+      pool_capabilities: { 'Pool-01-gemini': true },
+      pool_details: {
+        'Pool-01-gemini': { id: 'Pool-01-gemini', target_model: 'gemini-3.8-flash-high', total_members: 2, reserves_count: 1 },
+      },
+      gentle_agents: [],
+      total_requests: 0,
+    });
+
+    fireEvent.change(input, { target: { value: 'ZXiHkzKPx6oGvS9gjSdTu5rR8NMAEqWu5vURQUEL0Xw=' } });
+    fireEvent.click(connectBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('Matriz de Agentes & Orquestación')).toBeDefined();
+    });
+    expect(window.localStorage.getItem('management_key')).toBe('ZXiHkzKPx6oGvS9gjSdTu5rR8NMAEqWu5vURQUEL0Xw=');
+  });
 });
+

@@ -113,6 +113,9 @@ export default function AgentMatrix() {
   const [upstreamModels, setUpstreamModels] = useState([]);
   const [totalRequests, setTotalRequests] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [authRequired, setAuthRequired] = useState(false);
+  const [authError, setAuthError] = useState('');
+  const [manualKeyInput, setManualKeyInput] = useState('');
   const [saving, setSaving] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [warming, setWarming] = useState(false);
@@ -229,10 +232,18 @@ export default function AgentMatrix() {
   const loadMatrix = useCallback(async () => {
     try {
       setLoading(true);
+      setAuthRequired(false);
+      setAuthError('');
       const data = await fetchAgentMatrix();
       processPayload(data);
     } catch (err) {
-      setFeedback({ text: `Error al cargar matriz: ${err.message}`, type: 'error' });
+      const msg = err?.message || '';
+      if (msg.includes('Management key not found')) {
+        setAuthRequired(true);
+        setAuthError(msg);
+      } else {
+        setFeedback({ text: `Error al cargar matriz: ${msg}`, type: 'error' });
+      }
     } finally {
       setLoading(false);
     }
@@ -634,6 +645,152 @@ export default function AgentMatrix() {
       <div className="agent-matrix-container" style={{ textAlign: 'center', paddingTop: 60 }}>
         <div className="loading-spinner" />
         <p style={{ marginTop: 12, color: '#94a3b8' }}>Cargando matriz de orquestación y perfiles...</p>
+      </div>
+    );
+  }
+
+  if (authRequired) {
+    return (
+      <div className="agent-matrix-container" style={{ maxWidth: 760, margin: '40px auto', padding: '0 20px' }}>
+        <div
+          className="auth-warning-box"
+          style={{
+            background: 'linear-gradient(180deg, #161b22 0%, #0d1117 100%)',
+            border: '1px solid rgba(56, 189, 248, 0.35)',
+            borderRadius: '14px',
+            padding: '28px',
+            boxShadow: '0 12px 32px rgba(0, 0, 0, 0.6)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '16px' }}>
+            <span style={{ fontSize: '32px' }}>🔐</span>
+            <div>
+              <h2 style={{ margin: 0, fontSize: '18px', color: '#f0f6fc', fontWeight: 700 }}>
+                Autenticación Requerida · Matriz de Agentes
+              </h2>
+              <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#8b949e' }}>
+                La consola no pudo recuperar tu Management Key de CPAMC desde el navegador.
+              </p>
+            </div>
+          </div>
+
+          <p style={{ fontSize: '13px', color: '#c9d1d9', lineHeight: 1.6, marginBottom: '20px' }}>
+            Para ver y orquestar tus agentes y pools, introduce tu clave de administración de CPAMC o asegúrate de haber iniciado sesión en la consola principal con <strong>"Remember password"</strong> marcado.
+          </p>
+
+          <div
+            style={{
+              padding: '16px',
+              background: 'rgba(56, 189, 248, 0.06)',
+              borderRadius: '10px',
+              border: '1px solid rgba(56, 189, 248, 0.25)',
+              marginBottom: '20px',
+            }}
+          >
+            <label
+              htmlFor="agent-matrix-mgmt-key"
+              style={{
+                display: 'block',
+                fontSize: '12px',
+                fontWeight: 700,
+                color: '#38bdf8',
+                marginBottom: '8px',
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px',
+              }}
+            >
+              ⚡ Conectar Pegando tu Management Key
+            </label>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+              <input
+                id="agent-matrix-mgmt-key"
+                data-testid="input-matrix-manual-key"
+                type="password"
+                placeholder="Pega aquí tu Management Key de CPAMC..."
+                value={manualKeyInput}
+                onChange={(e) => {
+                  setManualKeyInput(e.target.value);
+                  if (authError) setAuthError('');
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const trimmed = manualKeyInput.trim();
+                    if (trimmed) {
+                      try {
+                        localStorage.setItem('management_key', trimmed);
+                      } catch {}
+                      loadMatrix();
+                    }
+                  }
+                }}
+                style={{
+                  flex: 1,
+                  padding: '10px 14px',
+                  borderRadius: '8px',
+                  border: authError ? '1px solid #f85149' : '1px solid #30363d',
+                  background: '#090d13',
+                  color: '#f0f6fc',
+                  fontSize: '13px',
+                  fontFamily: 'monospace',
+                }}
+              />
+              <button
+                type="button"
+                className="btn btn-primary"
+                data-testid="btn-connect-matrix-key"
+                onClick={() => {
+                  const trimmed = manualKeyInput.trim();
+                  if (!trimmed) {
+                    setAuthError('Por favor ingresa una clave válida');
+                    return;
+                  }
+                  try {
+                    localStorage.setItem('management_key', trimmed);
+                  } catch {}
+                  loadMatrix();
+                }}
+                style={{
+                  padding: '10px 18px',
+                  borderRadius: '8px',
+                  background: '#238636',
+                  color: '#ffffff',
+                  fontWeight: 600,
+                  fontSize: '13px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Conectar Matriz
+              </button>
+            </div>
+            {authError && (
+              <div style={{ color: '#f85149', fontSize: '12px', marginTop: '8px' }}>
+                {authError}
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+            <button
+              type="button"
+              className="btn btn-outline"
+              data-testid="btn-retry-matrix-auth"
+              onClick={loadMatrix}
+              style={{
+                padding: '8px 16px',
+                borderRadius: '6px',
+                background: '#21262d',
+                color: '#c9d1d9',
+                border: '1px solid #30363d',
+                cursor: 'pointer',
+                fontSize: '12px',
+              }}
+            >
+              🔄 Reintentar Detección
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
