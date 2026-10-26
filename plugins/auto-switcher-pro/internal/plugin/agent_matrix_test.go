@@ -608,3 +608,43 @@ func TestAgentMatrix_HarnessVersionAudit(t *testing.T) {
 		t.Errorf("expected GitHubVersion to be resolved, got empty")
 	}
 }
+
+func TestAgentMatrix_GenericPiAgentDirectoryDoesNotTriggerWiloxPi(t *testing.T) {
+	// Create an isolated HOME environment with ONLY the standard ~/.pi/agent directory (like a friend's machine)
+	tempHome := t.TempDir()
+	genericPiAgent := filepath.Join(tempHome, ".pi", "agent")
+	if err := os.MkdirAll(genericPiAgent, 0755); err != nil {
+		t.Fatalf("failed to create generic pi agent dir: %v", err)
+	}
+
+	t.Setenv("HOME", tempHome)
+	t.Setenv("PI_CODING_AGENT_DIR", "")
+	t.Setenv("HOST_PI_DIR", "")
+	t.Setenv("FORCE_JOK3R_DETECTED", "")
+
+	// 1. Verify getJok3rRootDir returns empty when only generic ~/.pi/agent exists
+	rootDir := getJok3rRootDir()
+	if rootDir != "" {
+		t.Errorf("expected getJok3rRootDir to be empty for generic ~/.pi/agent, got %q", rootDir)
+	}
+
+	// 2. Verify isJok3rDetected returns false
+	if isJok3rDetected() {
+		t.Errorf("expected isJok3rDetected to be false for generic ~/.pi/agent")
+	}
+
+	// 3. Verify that loadManifestOrDiscover does NOT inject wilox_pi harness
+	harnesses, _, jok3rAgents, detected := loadManifestOrDiscover([]string{"Pool-01-gemini"}, map[string]bool{}, map[string][]string{})
+	if detected {
+		t.Errorf("expected detected=false in loadManifestOrDiscover")
+	}
+	if len(jok3rAgents) != 0 {
+		t.Errorf("expected jok3rAgents to be empty, got %d", len(jok3rAgents))
+	}
+	for _, h := range harnesses {
+		if h.ID == "wilox_pi" || h.ID == "jok3r_pi" {
+			t.Errorf("found unwanted harness %q in discovered harnesses when not installed", h.ID)
+		}
+	}
+}
+

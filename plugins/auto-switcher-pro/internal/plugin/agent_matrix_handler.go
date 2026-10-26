@@ -157,10 +157,11 @@ func getJok3rRootDir() string {
 		return "/host-harnesses/j0k3r"
 	}
 	if home, err := os.UserHomeDir(); err == nil {
+		// Strict check: only genuine Wilox-Pi / j0k3r-pi directories are recognized.
+		// Standard generic ~/.pi/agent (which exists on all normal Pi installations) is strictly NOT Wilox-Pi.
 		for _, cand := range []string{
 			filepath.Join(home, ".pi", "agent-wilox"),
 			filepath.Join(home, ".pi", "agent-j0k3r"),
-			filepath.Join(home, ".pi", "agent"),
 		} {
 			if fi, err := os.Stat(cand); err == nil && fi.IsDir() {
 				return cand
@@ -201,11 +202,11 @@ func isJok3rDetected() bool {
 	}
 
 	// 1. Check if harness was registered in SQLite WAL (via active heartbeat or CLI /agent:matrix)
-	if analytics.IsHarnessDetected("jok3r_pi") {
+	if analytics.IsHarnessDetected("jok3r_pi") || analytics.IsHarnessDetected("wilox_pi") {
 		return true
 	}
 
-	// 2. Check for active marker file in plugins directory (created dynamically when jok3r-pi session starts)
+	// 2. Check for active marker file in plugins directory (created dynamically when jok3r-pi/wilox-pi session starts)
 	candidates := []string{
 		"/CLIProxyAPI/plugins/.jok3r_detected",
 		"/dev/shm/.jok3r_detected",
@@ -217,6 +218,7 @@ func isJok3rDetected() bool {
 	if err == nil {
 		candidates = append(candidates,
 			filepath.Join(home, "services", "cliproxy", "plugins", ".jok3r_detected"),
+			filepath.Join(home, ".pi", "agent-wilox", ".jok3r_detected"),
 			filepath.Join(home, ".pi", "agent-j0k3r", ".jok3r_detected"),
 		)
 	}
@@ -1544,10 +1546,8 @@ func discoverUniverseAgents(universe string, savedMap map[string]analytics.Agent
 			agentDirs = append(agentDirs,
 				filepath.Join(home, ".pi", "agent-wilox", "subagents"),
 				filepath.Join(home, ".pi", "agent-j0k3r", "subagents"),
-				filepath.Join(home, ".pi", "agent", "subagents"),
 			)
 		}
-		agentDirs = append(agentDirs, "subagents", ".pi/subagents")
 	}
 
 	// Start with Orquestador on the Throne
@@ -2074,7 +2074,6 @@ func syncDiskProfiles(jok3rProfiles, gentleProfiles map[string]any) {
 		jok3rTargets = append(jok3rTargets,
 			filepath.Join(home, ".pi", "agent-wilox", "subagents.json"),
 			filepath.Join(home, ".pi", "agent-j0k3r", "subagents.json"),
-			filepath.Join(home, ".pi", "agent", "subagents.json"),
 		)
 	}
 
