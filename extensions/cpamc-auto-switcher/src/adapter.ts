@@ -987,13 +987,6 @@ let sessionAccordionExpanded: boolean | null = null;
 let sessionAccordionMode: AccordionMode | null = null;
 
 export function getSessionAccordionState(): boolean {
-	if (sessionAccordionMode !== null) {
-		return sessionAccordionMode !== "collapsed";
-	}
-	if (sessionAccordionExpanded !== null) {
-		return sessionAccordionExpanded;
-	}
-	// Siempre cerrado (collapsed) por defecto; se expande bajo demanda del usuario (click / peek / pinned)
 	return false;
 }
 
@@ -1013,7 +1006,7 @@ export function setSessionAccordionState(expanded: boolean | AccordionMode): voi
 export class CpamcTuiAdapter {
 	private isFullscreen = false;
 	private isBusy = false;
-	private accordionMode: AccordionMode = getSessionAccordionState() ? "pinned" : "collapsed";
+	private accordionMode: AccordionMode = "collapsed";
 	private peekRemainingSec = 0;
 	private peekTimer: NodeJS.Timeout | null = null;
 	private currentPair: PoolRotationPair | null = null;
@@ -1070,6 +1063,14 @@ export class CpamcTuiAdapter {
 		this.clearPeekTimer();
 		this.accordionMode = expanded ? "pinned" : "collapsed";
 		setSessionAccordionState(this.accordionMode);
+		this.requestRender();
+	}
+
+	resetToCollapsed(): void {
+		this.clearPeekTimer();
+		this.accordionMode = "collapsed";
+		sessionAccordionMode = "collapsed";
+		sessionAccordionExpanded = false;
 		this.requestRender();
 	}
 

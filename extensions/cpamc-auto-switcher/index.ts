@@ -317,6 +317,9 @@ export default function initCpamcUnifiedExtension(pi: ExtensionAPI): void {
 			adapter.setContext(ctx);
 		}
 
+		// Siempre iniciar la tarjeta colapsada por defecto (en startup, /reload o /new)
+		adapter.resetToCollapsed();
+
 		// Rebalanceo proactivo en fronteras de ciclo de vida (/new, /reload, inicio de sesión)
 		const reason = event?.reason;
 		if (reason === "compact" && ctx?.hasUI) {
