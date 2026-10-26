@@ -74,6 +74,7 @@ link_extension() {
 
   if [ -d "${agent_root}" ]; then
     mkdir -p "${target_dir}"
+    rm -rf "${target_dir}/cpamc-auto-switcher"
     ln -sfn "${EXT_DIR}" "${target_dir}/cpamc-auto-switcher"
     echo "🔗 Extensión vinculada con éxito en [${label}]: ${target_dir}/cpamc-auto-switcher"
     sync_agents_and_subagents "${agent_root}" "${label}"
