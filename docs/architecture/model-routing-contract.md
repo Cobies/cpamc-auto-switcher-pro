@@ -58,6 +58,13 @@ Claude tiene dos orígenes técnicos totalmente distintos que **nunca deben mezc
 - Todo prefijo que termine en un sufijo numérico de reserva (`_1`, `_2`, `_3`...) pertenece a la infraestructura interna del banquillo de rotación.
 - **JAMÁS debe aparecer en `/model`**.
 
+### Mandamiento V: Gobernanza Bimodal de Cuentas Libres / Standalone (Solo Lectura Asistida)
+- Toda cuenta física o proveedor conectado a CPAMC que no forme parte de un Pool registrado goza de **Gobernanza Bimodal en Solo Lectura**:
+  1. **Cero Mutación en Disco**: Sus credenciales físicas (`.json`) conservan `excluded_models: []` de fábrica sin alteraciones de prefijos forzadas.
+  2. **Telemetría de Primera Clase**: Recibe monitoreo de cuotas en vivo en la Web UI (`AutoAuthFiles.jsx`) y en la tarjeta TUI de Pi (relojes duales concéntricos de 5H/Semanal, análisis de ritmo, tiempo de reinicio).
+  3. **Blindaje de Sesión Transversal**: La protección de `CUIDANDO EL CHAT` (disyuntor anti-bucle, límite de evasión bash, anti-sobrediseño) opera de manera idéntica para resguardar la cuota finita de la cuenta fija.
+  4. **Aviso de Resiliencia**: La tarjeta alerta explícitamente `[CUENTA FIJA · SIN FAILOVER]` para informar con total transparencia que un error 429 detendría la tarea al no disponer de banquillo de relevo.
+
 ---
 
 ## 3. Matriz Universal de Proyección en `/model`

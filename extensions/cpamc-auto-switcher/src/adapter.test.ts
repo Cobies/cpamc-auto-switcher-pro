@@ -454,14 +454,16 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 	it("renders unified sidebar card for native standalone model collapsed by default with CUIDANDO EL CHAT and no rotations", () => {
 		const lines = formatSidebarQuotaCardLines(mockNativePair, 48, undefined, undefined, false, undefined, undefined, false);
 		const text = lines.map((l: string) => stripAnsi(l)).join("\n");
-		assert.match(text, /⚡ CUENTA DIRECTA:/);
-		assert.match(text, /\[CUENTA FIJA · SIN FAILOVER\]/);
+		assert.match(text, /⚡ CUENTA FIJA:/);
+		assert.match(text, /\[○ Esperando\]/, "La cabecera no debe truncar el badge de estado vivo");
+		assert.match(text, /Modo: Standalone/);
+		assert.match(text, /Conex: Directa/, "El subtítulo no debe truncar Conex: Directa");
 		assert.doesNotMatch(text, /Caché Afinidad/);
 		assert.match(text, /5 HORAS/);
 		assert.match(text, /SEMANAL/);
 		assert.match(text, /\[CUIDANDO EL CHAT\]/);
 		assert.match(text, /Turno en vivo:/);
-		assert.match(text, /▶ \[Ver más: Contexto de Sesión\]/);
+		assert.match(text, /▶ \[Ver más: (Contexto y Sesión|Contexto de Sesión)\]/);
 		assert.match(text, /Ctrl\+Alt\+X/);
 		assert.doesNotMatch(text, /ROTACIONES & LIDERAZGO/);
 		assert.doesNotMatch(text, /Candidato a Líder/);
@@ -498,14 +500,17 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		};
 		const lines = formatSidebarQuotaCardLines(nativeWithReset, 48, undefined, undefined, false, undefined, undefined, true);
 		const text = lines.map((l: string) => stripAnsi(l)).join("\n");
-		assert.match(text, /⚡ CUENTA DIRECTA:/);
+		assert.match(text, /⚡ CUENTA FIJA:/);
 		assert.match(text, /\[CUIDANDO EL CHAT\]/);
-		assert.match(text, /▼ \[Ocultar detalles de contexto\]/);
+		assert.match(text, /▼ \[Ocultar detalles/);
+		assert.match(text, /TELEMETRÍA DE SESIÓN/, "Debe incluir bloque de telemetría de sesión homologado");
+		assert.match(text, /ADVERTENCIA DE RESILIENCIA/, "Debe incluir diagnóstico de resiliencia sin pool");
 		assert.match(text, /📦 CONTEXTO & COMPRESIÓN/);
 		assert.match(text, /Reinicio 5h:\s+en 2h 0m/);
 		assert.doesNotMatch(text, /ROTACIONES & LIDERAZGO/);
 		assert.doesNotMatch(text, /Candidato a Líder/);
 		assert.doesNotMatch(text, /⚠️ CAUSAS DE ROTACIÓN/);
+		assert.doesNotMatch(text, /├[─]+┤\s*\n\s*├[─]+┤/, "No debe tener líneas divisorias dobles consecutivas");
 		lines.forEach((l: string, idx: number) => {
 			const len = visibleLen(l);
 			assert.strictEqual(len, 48, `Fila nativa expandida ${idx} debe tener 48 columnas (actual: ${len})`);
@@ -516,7 +521,8 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		const lines = formatSidebarQuotaCardLines(mockPoolPair, 48, undefined, undefined, false, undefined, undefined, false);
 		const text = lines.map((l: string) => stripAnsi(l)).join("\n");
 		assert.match(text, /\[CUIDANDO EL CHAT\]/);
-		assert.match(text, /▶ \[Ver más: Contexto, Historial y Líderes\]/);
+		assert.match(text, /▶ \[Ver más: (Detalles y Líderes|Contexto, Historial y Líderes)\]/);
+		assert.match(text, /Ctrl\+Alt\+X/);
 		assert.doesNotMatch(text, /📦 CONTEXTO & COMPRESIÓN/);
 		assert.doesNotMatch(text, /⚠️ CAUSAS DE ROTACIÓN/);
 		assert.doesNotMatch(text, /🔄 ROTACIONES & LIDERAZGO/);
@@ -669,7 +675,7 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 			// COLLAPSED
 			const linesCollapsed = formatSidebarQuotaCardLines(mockPoolPair, 48, undefined, undefined, false, undefined, undefined, "collapsed");
 			const textCollapsed = linesCollapsed.map((l: string) => stripAnsi(l)).join("\n");
-			assert.match(textCollapsed, /▶ \[Ver más: Contexto, Historial y Líderes\]/);
+			assert.match(textCollapsed, /▶ \[Ver más: (Detalles y Líderes|Contexto, Historial y Líderes)\]/);
 			linesCollapsed.forEach((l: string, idx: number) => {
 				assert.strictEqual(visibleLen(l), 48, `Collapsed line ${idx} must be 48 cols`);
 			});

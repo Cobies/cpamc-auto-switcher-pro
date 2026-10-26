@@ -398,6 +398,47 @@ describe('AutoAuthFiles Component - Dedicated View & Lifecycle Engine', () => {
     expect(gearButtons.length).toBeGreaterThanOrEqual(8);
   });
 
+  it('renders dedicated section for standalone unassigned accounts with QuotaClock in Solo Lectura mode', async () => {
+    // 1 pool con 2 cuentas + 1 cuenta física standalone libre (no asignada a ningún pool)
+    const customPools = [
+      {
+        family: 'gemini_pure',
+        base_prefix: 'agy',
+        leader_auth: 'antigravity-infosoytec@gmail.com.json',
+        reserves: ['antigravity-maribelluzbonitaaquinocastro@gmail.com.json'],
+      },
+    ];
+    mockPools(customPools);
+
+    const nodesWithStandalone = [
+      sample8Accounts[0], // infosoytec (líder pool agy)
+      sample8Accounts[1], // maribelluz (reserva pool agy)
+      {
+        id: 'standalone_claude',
+        data: {
+          fileName: 'claude-personal-user@anthropic.com.json',
+          email: 'personal-user@anthropic.com',
+          prefix: 'clau-direct',
+          provider: 'claude',
+        },
+      },
+    ];
+
+    render(<AutoAuthFiles nodes={nodesWithStandalone} />);
+
+    await waitFor(() => {
+      // Debe existir la sección de standalone accounts
+      expect(screen.getByTestId('section-standalone-cards')).toBeTruthy();
+      expect(screen.getByText(/Cuentas Directas \/ Standalone/i)).toBeTruthy();
+      expect(screen.getByTestId('standalone-card-0')).toBeTruthy();
+    });
+
+    // La tarjeta standalone debe exhibir badge de cuenta fija y advertencia de solo lectura
+    expect(screen.getAllByText(/CUENTA FIJA · SIN FAILOVER/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/user@anthropic\.com/i)).toBeTruthy();
+    expect(screen.getAllByText(/Solo Lectura/i).length).toBeGreaterThan(0);
+  });
+
   it('renders specialist badges in Specialist Mode vs multipurpose badges in Multipurpose Mode', async () => {
     const catalog = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'];
     mockPools([

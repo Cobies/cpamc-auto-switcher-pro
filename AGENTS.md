@@ -112,6 +112,16 @@ Every subagent, developer, and workflow MUST strictly uphold these 4 rotation pi
   - **Unassigned Free Accounts (Same or Different Provider)**: Any physical account or provider NOT assigned to any pool (e.g. a newly linked 5th Gemini account, or free accounts from OpenAI, Direct Claude, DeepSeek, etc.) **strictly preserves 100% native CPAMC behavior ("Auth Files Management")**. Its credentials from disk, its physical prefix, and its native inclusions/exclusions configured in CPAMC native credential modal pass directly to `/model` without plugin intervention or artificial shadowing.
   - **Continuous Auto-Purge & Zero-Residue Contingency**: Upon creating, editing, adopting, or dissolving pools in Auto Switcher Pro, Pi's dynamic provider automatically reconciles and purges the local models cache (`cpamc-models-cache.json`) without lingering ghost models or manual intervention.
 
+### 8. Bimodal Intelligence & Assisted Read-Only Governance for Standalone Accounts (MANDATORY)
+Every subagent, developer, and workflow MUST strictly uphold these 4 pillars for standalone / unassigned accounts:
+1. **Zero Disk & Config Mutation**: Standalone physical accounts (`.json`) MUST retain `excluded_models: []` intact. Never inject exclusions or mutate `config.yaml` for standalone accounts.
+2. **First-Class Telemetry (Web & TUI)**:
+   - In `AutoAuthFiles.jsx`, standalone accounts are displayed under their dedicated section `⚡ Cuentas Directas / Standalone (Solo Lectura)` with active `QuotaClock` live polling.
+   - In Pi's TUI sidebar, standalone accounts render the symmetrical 48-column card (`⚡ CUENTA FIJA: ...`) with concentric 5H and Weekly clocks, colloquial pace analysis (`● Ritmo holgado`, `🛑 Vas muy rápido`), and reset countdowns.
+3. **Session Telemetry & Resilience Warning**:
+   - In the expanded view (`Ctrl+Alt+X`), standalone cards render `📊 TELEMETRÍA DE SESIÓN` (session tokens, sustained turns, network health) and `⚠️ ADVERTENCIA DE RESILIENCIA (SIN POOL)` warning that HTTP 429 has no failover reserve.
+4. **Universal Runaway Guard Protection**: `CUIDANDO EL CHAT` (circuit breaker, loop detection, bash exploration limits, and KISS/YAGNI anti-overengineering) guards standalone accounts with the exact same rigor as pools to preserve finite quotas.
+
 ## Architectural Deployment & Third-Party Agent Invariant (MANDATORY)
 
 Every AI agent, developer, and automated installer MUST strictly uphold this deployment policy:

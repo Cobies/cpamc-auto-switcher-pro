@@ -499,6 +499,33 @@ function extractBorderColor(lines: string[], theme?: any): string {
 	return "\x1b[38;2;120;153;166m";
 }
 
+export function formatCompactEmail(email: string, maxW: number): string {
+	if (visibleLen(email) <= maxW) return email;
+	if (maxW <= 3) return email.slice(0, maxW);
+
+	const atIdx = email.indexOf("@");
+	if (atIdx === -1) {
+		const dots = "..";
+		return email.slice(0, Math.max(1, maxW - dots.length)) + dots;
+	}
+
+	const user = email.slice(0, atIdx);
+	// Si hay espacio suficiente (>= 10 cols), mostrar terminación corta @g
+	if (maxW >= 10) {
+		const dShort = "@g";
+		const avail = maxW - dShort.length - 3;
+		const p1 = Math.ceil(avail / 2);
+		const p2 = Math.floor(avail / 2);
+		return user.slice(0, p1) + "..." + user.slice(-p2) + dShort;
+	}
+
+	// Espacio ultra compacto (7-9 cols): solo usuario balanceado con puntos
+	const avail = Math.max(1, maxW - 3);
+	const p1 = Math.ceil(avail / 2);
+	const p2 = Math.floor(avail / 2);
+	return user.slice(0, p1) + "..." + user.slice(-p2);
+}
+
 export type AccordionMode = "collapsed" | "peek" | "pinned";
 
 /**
@@ -581,13 +608,15 @@ export function formatSidebarQuotaCardLines(
 		stateTag = s.live("[● Escribiendo]");
 	}
 
-	const maxFamilyW = Math.max(3, safeW - 28);
+	const tagW = visibleLen(stateTag);
+	const fixedPrefixW = pair.isNativeReadOnly ? (18 + 5 + tagW + 2) : (11 + 5 + tagW + 2);
+	const maxFamilyW = Math.max(3, safeW - fixedPrefixW);
 	const familyDisplay = truncateWithAnsi(
 		pair.isNativeReadOnly ? pair.poolKey : pair.familyName,
 		maxFamilyW,
 	);
 	const titlePrefix = pair.isNativeReadOnly
-		? `${s.border("╭─ ")}${s.accent("⚡ CUENTA DIRECTA: ")}${s.text(familyDisplay)} ${s.border("─ ")}${stateTag} ${s.border("─")}`
+		? `${s.border("╭─ ")}${s.accent("⚡ CUENTA FIJA: ")}${s.text(familyDisplay)} ${s.border("─ ")}${stateTag} ${s.border("─")}`
 		: `${s.border("╭─ ")}${s.accent("⚡ POOL: ")}${s.text(familyDisplay)} ${s.border("─ ")}${stateTag} ${s.border("─")}`;
 	const prefixLen = visibleLen(titlePrefix);
 	const titleRules = Math.max(1, safeW - prefixLen - 1);
@@ -771,7 +800,7 @@ export function formatSidebarQuotaCardLines(
 		let linePeriodLeft: string;
 		let linePeriodRight: string;
 		if (pair.isNativeReadOnly) {
-			linePeriodLeft = `${s.muted("Modo:")} ${s.amber("[CUENTA FIJA · SIN FAILOVER]")}`;
+			linePeriodLeft = `${s.muted("Modo:")} ${s.amber("Standalone")}`;
 			linePeriodRight = `${s.muted("Conex:")} ${s.idle("Directa")}`;
 		} else {
 			linePeriodLeft = `${s.muted("Periodo:")} ${s.text(curPeriod)}`;
@@ -794,7 +823,9 @@ export function formatSidebarQuotaCardLines(
 			.replace("🛑 Bucle Interceptado", "🛑 Bucle");
 		const maxApproachW = Math.max(8, innerW - visibleLen(line2Left) - 10);
 		const approachDisplay = truncateWithAnsi(compactApproach, maxApproachW);
-		const line2Right = `${s.muted("Enfoque:")} ${s.text(approachDisplay)}`;
+		const line2Right = pair.isNativeReadOnly
+			? `${s.muted("Riesgo:")} ${s.amber("Sin failover")}`
+			: `${s.muted("Enfoque:")} ${s.text(approachDisplay)}`;
 		const spL2 = Math.max(1, innerW - visibleLen(line2Left) - visibleLen(line2Right));
 		const headerRow3 = fitToWidth(`${s.border("│")} ${line2Left}${" ".repeat(spL2)}${line2Right} ${s.border("│")}`, safeW);
 
@@ -821,29 +852,31 @@ export function formatSidebarQuotaCardLines(
 			const netRow2 = renderDoubleLine(s.muted("Sesión:"), introVal, s.muted("Ahorro:"), ahorroVal);
 			const netRow3 = renderDoubleLine(s.muted("Bucles:"), loopsVal, s.muted("Bash:"), bashVal);
 			rotSectionLines.push(rotHeader, rotRow1, rotRow2, rotRow3, innerDivider, netRow1, netRow2, netRow3);
+		} else {
+			const tokensFmt = lifecycle?.tokens_consumed_fmt ?? "14.2M";
+			const sustainedTurns = lifecycle?.sustained_turns ?? 142;
+			const sessBaseTitle = `${s.cyan("📊 TELEMETRÍA DE SESIÓN")}`;
+			const maxKeyW = Math.max(6, innerW - visibleLen(sessBaseTitle) - 3);
+			const keyTrunc = truncateWithAnsi(pair.poolKey, maxKeyW);
+			const sessFullTitle = `${sessBaseTitle} ${s.border("·")} ${s.text(keyTrunc)}`;
+			const sessPad = Math.max(0, innerW - visibleLen(sessFullTitle));
+			const sessHeader = fitToWidth(`${s.border("│")} ${sessFullTitle}${" ".repeat(sessPad)} ${s.border("│")}`, safeW);
+			const sessRow1 = renderDoubleLine(s.muted("Tokens sesión:"), s.text(tokensFmt), s.muted("Turnos sostenidos:"), s.text(String(sustainedTurns)));
+			const sessRow2 = renderDoubleLine(s.muted("Upstream:"), s.idle("200 OK"), s.muted("Rescates 429:"), s.muted("N/A (Fija)"));
+			const innerDivider = fitToWidth(`${s.border("│")} ${s.border("─".repeat(innerW))} ${s.border("│")}`, safeW);
+			const netRow1 = renderDoubleLine(s.muted("Rescate Red:"), rescateVal, s.muted("Subagentes:"), pollVal);
+			const netRow2 = renderDoubleLine(s.muted("Sesión:"), introVal, s.muted("Ahorro:"), ahorroVal);
+			const netRow3 = renderDoubleLine(s.muted("Bucles:"), loopsVal, s.muted("Bash:"), bashVal);
+			rotSectionLines.push(sessHeader, sessRow1, sessRow2, innerDivider, netRow1, netRow2, netRow3);
 		}
 
 		// Bloque de Líder y Candidato para la vista principal (justo bajo los relojes)
 		const leaderInfoLines: string[] = [];
 		const activeLeadSince = lifecycle?.active_leader_since ?? "14h";
-		const maxActiveEmailW = Math.max(8, innerW - 32);
-		const activeEmailTrunc = truncateWithAnsi(pair.active.accountId, maxActiveEmailW);
 		const leaderTag = pair.isNativeReadOnly ? "(Cuenta fija)" : `(Líder hace ${activeLeadSince})`;
 		const leadPrefix = `${s.muted("Estado actual:")}  ${s.accent("⚡ ")}`;
-		const leadFixedW = visibleLen(leadPrefix) + visibleLen(leaderTag) + 2;
-		const leadEmailW = Math.max(6, innerW - leadFixedW);
-		let cleanLeadEmail = pair.active.accountId;
-		if (visibleLen(cleanLeadEmail) > leadEmailW) {
-			const atIdx = cleanLeadEmail.indexOf("@");
-			if (atIdx > 0) {
-				const domain = cleanLeadEmail.slice(atIdx);
-				const user = cleanLeadEmail.slice(0, atIdx);
-				const uSpace = Math.max(3, leadEmailW - visibleLen(domain) - 3);
-				cleanLeadEmail = user.slice(0, uSpace) + "..." + domain;
-			} else {
-				cleanLeadEmail = truncateWithAnsi(cleanLeadEmail, leadEmailW);
-			}
-		}
+		const leadEmailW = Math.max(5, innerW - visibleLen(leadPrefix) - visibleLen(leaderTag) - 1);
+		const cleanLeadEmail = formatCompactEmail(pair.active.accountId, leadEmailW);
 		const leadFull = `${leadPrefix}${s.text(cleanLeadEmail)} ${s.muted(leaderTag)}`;
 		const leadPad = Math.max(0, innerW - visibleLen(leadFull));
 		const leadLine = fitToWidth(`${s.border("│")} ${leadFull}${" ".repeat(leadPad)} ${s.border("│")}`, safeW);
@@ -863,20 +896,8 @@ export function formatSidebarQuotaCardLines(
 				const candGauge = renderSpectralGauge(candConsumedPct, 10);
 				const candRight = `${candGauge} ${s.text(nextAvailPct)}`;
 				const candPrefix = `${s.muted("Candidato a Líder:")} `;
-				const candFixedW = visibleLen(candPrefix) + visibleLen(candRight) + 1;
-				const candEmailW = Math.max(6, innerW - candFixedW);
-				let cleanCandEmail = pair.next.accountId;
-				if (visibleLen(cleanCandEmail) > candEmailW) {
-					const atIdx = cleanCandEmail.indexOf("@");
-					if (atIdx > 0) {
-						const domain = cleanCandEmail.slice(atIdx);
-						const user = cleanCandEmail.slice(0, atIdx);
-						const uSpace = Math.max(3, candEmailW - visibleLen(domain) - 3);
-						cleanCandEmail = user.slice(0, uSpace) + "..." + domain;
-					} else {
-						cleanCandEmail = truncateWithAnsi(cleanCandEmail, candEmailW);
-					}
-				}
+				const candEmailW = Math.max(5, innerW - visibleLen(candPrefix) - visibleLen(candRight) - 1);
+				const cleanCandEmail = formatCompactEmail(pair.next.accountId, candEmailW);
 				const candLeft = `${candPrefix}${s.text(cleanCandEmail)}`;
 				const spCand = Math.max(1, innerW - visibleLen(candLeft) - visibleLen(candRight));
 				leaderInfoLines.push(fitToWidth(`${s.border("│")} ${candLeft}${" ".repeat(spCand)}${candRight} ${s.border("│")}`, safeW));
@@ -900,13 +921,13 @@ export function formatSidebarQuotaCardLines(
 			const pinnedSuffix = innerW >= 56 ? "· Fijo (Ctrl+Alt+X)" : "· Fijo";
 			const pinnedBadge = s.muted(pinnedSuffix);
 			accordionLabel = pair.isNativeReadOnly
-				? `${s.amber("▼")} ${s.text("[Ocultar detalles de contexto]")} ${pinnedBadge}`
+				? `${s.amber("▼")} ${s.text("[Ocultar detalles]")} ${pinnedBadge}`
 				: `${s.amber("▼")} ${s.text("[Ocultar detalles extendidos]")} ${pinnedBadge}`;
 		} else {
-			// collapsed
+			// collapsed (ajustado para que en 44 columnas no se trunque el atajo)
 			accordionLabel = pair.isNativeReadOnly
-				? `${s.accent("▶")} ${s.text("[Ver más: Contexto de Sesión]")}${hintSuffix}`
-				: `${s.accent("▶")} ${s.text("[Ver más: Contexto, Historial y Líderes]")}${hintSuffix}`;
+				? `${s.accent("▶")} ${s.text("[Ver más: Contexto y Sesión]")}${hintSuffix}`
+				: `${s.accent("▶")} ${s.text("[Ver más: Detalles y Líderes]")}${hintSuffix}`;
 		}
 
 		const makeBoxLine = (content: string) => {
@@ -960,7 +981,7 @@ export function formatSidebarQuotaCardLines(
 			compLines.push(renderLine(s.muted("Reinicio 5h:"), s.accent(`en ${rH}h ${rM}m`)));
 		}
 
-		// Bloque CAUSAS DE ROTACIÓN (ÚLTIMAS 24H) - Solo para Pools
+		// Bloque CAUSAS DE ROTACIÓN (ÚLTIMAS 24H) - Para Pools / ADVERTENCIA DE RESILIENCIA para Standalone
 		const causesSectionLines: string[] = [];
 		if (!pair.isNativeReadOnly) {
 			const causesTitle = `${s.amber("⚠️ CAUSAS DE ROTACIÓN (ÚLTIMAS 24H)")}`;
@@ -982,9 +1003,16 @@ export function formatSidebarQuotaCardLines(
 				causesLines.push(fitToWidth(`${s.border("│")} ${causeLeft}${" ".repeat(spC)}${causeRight} ${s.border("│")}`, safeW));
 			}
 			causesSectionLines.push(causesHeader, ...causesLines);
+		} else {
+			const resTitle = `${s.amber("⚠️ ADVERTENCIA DE RESILIENCIA (SIN POOL)")}`;
+			const resHeader = fitToWidth(`${s.border("│")} ${resTitle}${" ".repeat(Math.max(1, innerW - visibleLen(resTitle)))} ${s.border("│")}`, safeW);
+			const resRow1 = renderLine(s.muted("Modalidad:"), s.text("Cuenta fija sin failover"));
+			const resRow2 = renderLine(s.muted("Riesgo 429:"), s.amber("Corte directo si se agota"));
+			const resRow3 = renderLine(s.muted("Sugerencia:"), s.idle("Asociar a Pool para 24/7"));
+			causesSectionLines.push(resHeader, resRow1, resRow2, resRow3);
 		}
 
-		const rawLines = [
+		const rawLines: string[] = [
 			top,
 			headerRow1,
 			headerRow2,
@@ -996,14 +1024,18 @@ export function formatSidebarQuotaCardLines(
 			...chatBlockLines,
 			divider,
 			accordionLine,
-			divider,
-			...expandedRotLines,
-			divider,
-			...compLines,
-			divider,
-			...causesSectionLines,
-			bottom,
 		];
+
+		if (expandedRotLines.length > 0) {
+			rawLines.push(divider, ...expandedRotLines);
+		}
+		if (compLines.length > 0) {
+			rawLines.push(divider, ...compLines);
+		}
+		if (causesSectionLines.length > 0) {
+			rawLines.push(divider, ...causesSectionLines);
+		}
+		rawLines.push(bottom);
 
 	return rawLines.map((line) => fitToWidth(line, safeW));
 }

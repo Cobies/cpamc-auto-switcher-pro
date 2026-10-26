@@ -629,6 +629,35 @@ export default function AutoAuthFiles({
     [nodes, registeredPools]
   );
 
+  // 1c. Cuentas Directas / Standalone (Nativas de CPAMC no asignadas a ningún pool registrado)
+  const standaloneCards = useMemo(() => {
+    if (!Array.isArray(nodes) || nodes.length === 0) return [];
+
+    const poolMasterFiles = new Set(
+      managedCards.map((c) => c.masterFileName).filter(Boolean)
+    );
+
+    const standaloneList = [];
+    nodes.forEach((node) => {
+      if (!node) return;
+      const classification = classifyAuthAccount(node);
+      if (classification.isMaster && !poolMasterFiles.has(classification.fileName)) {
+        standaloneList.push({
+          node,
+          classification,
+          fileName: classification.fileName,
+          prefix: classification.prefix || '',
+          maskedEmail: classification.maskedEmail,
+          provider: node.data?.provider || classification.provider || 'direct',
+          exclusionBadges: classification.exclusionBadges || [],
+          excludedModels: classification.excludedModels || [],
+        });
+      }
+    });
+
+    return standaloneList;
+  }, [nodes, managedCards]);
+
   // Scalable N -> 2N Managed Pool Cards agrupadas por Pool
   const poolGroups = useMemo(() => {
     const groups = new Map();
@@ -652,17 +681,34 @@ export default function AutoAuthFiles({
     const antigravityCards = managedCards.filter(
       (c) => (c.familyRole === 'gemini' || c.familyRole === 'claude') && c.masterFileName
     );
-    antigravityCards.forEach((card) => {
-      const key = card.masterFileName;
-      if (autoFetchedMastersRef.current.has(key)) return;
+    const allTargets = [
+      ...antigravityCards.map((c) => ({
+        key: c.masterFileName,
+        authIndex: c.authIndex || '',
+        projectId: c.projectId || '',
+        prefix: c.prefix || '',
+        familyRole: c.familyRole || '',
+      })),
+      ...standaloneCards.map((sc) => ({
+        key: sc.fileName,
+        authIndex: sc.node.data?.authIndex || '',
+        projectId: sc.node.data?.projectId || '',
+        prefix: sc.prefix || '',
+        familyRole: sc.provider === 'claude' ? 'claude' : 'gemini',
+      })),
+    ];
+
+    allTargets.forEach((target) => {
+      const key = target.key;
+      if (!key || autoFetchedMastersRef.current.has(key)) return;
       autoFetchedMastersRef.current.add(key);
       setLoadingQuotaKeys((prev) => new Set(prev).add(key));
       fetchCardQuota({
         fileName: key,
-        auth_index: card.authIndex || '',
-        project_id: card.projectId || '',
-        prefix: card.prefix || '',
-        familyRole: card.familyRole || '',
+        auth_index: target.authIndex,
+        project_id: target.projectId,
+        prefix: target.prefix,
+        familyRole: target.familyRole,
       })
         .then((result) => {
           if (isMountedRef.current) {
@@ -683,7 +729,7 @@ export default function AutoAuthFiles({
           }
         });
     });
-  }, [managedCards]);
+  }, [managedCards, standaloneCards]);
 
   // 2. Classify accounts and identify physical masters vs virtual accounts on disk
   const { masterAccounts, virtualAccounts, orphanAccounts } = useMemo(() => {
@@ -1263,6 +1309,136 @@ export default function AutoAuthFiles({
           </div>
         )}
       </div>
+
+      {/* Cuentas Directas / Standalone (Solo Lectura) Section */}
+      {standaloneCards.length > 0 && (
+        <div
+          className="auto-auth-section"
+          data-testid="section-standalone-cards"
+          style={{ marginTop: 24 }}
+        >
+          <div className="auto-auth-section-header">
+            <h3 className="auto-auth-section-title">
+              <span>⚡</span>
+              <span>Cuentas Directas / Standalone (Solo Lectura)</span>
+            </h3>
+            <span className="auto-auth-section-count" data-testid="metric-standalone-count">
+              {standaloneCards.length} cuenta(s) fija(s)
+            </span>
+          </div>
+
+          <div className="auto-auth-section-groups" data-testid="section-standalones">
+            <div className="auto-auth-pool-group" style={{ borderColor: 'rgba(100, 116, 139, 0.4)' }}>
+              <div className="auto-auth-pool-header" style={{ background: 'rgba(30, 41, 59, 0.5)' }}>
+                <div className="auto-auth-pool-info">
+                  <span className="auto-auth-pool-title" style={{ color: '#94a3b8' }}>
+                    🔒 MODO SOLO LECTURA · ASISTIDO
+                  </span>
+                  <span className="auto-auth-pool-badge" style={{ background: 'rgba(234, 179, 8, 0.2)', color: '#facc15', border: '1px solid rgba(234, 179, 8, 0.4)' }}>
+                    [CUENTA FIJA · SIN FAILOVER]
+                  </span>
+                  <span className="auto-auth-pool-target" style={{ color: '#cbd5e1' }}>
+                    🛡️ Telemetría en vivo activa · Credenciales en disco intactas
+                  </span>
+                </div>
+                <span className="auto-auth-section-count" style={{ color: '#94a3b8' }}>
+                  {standaloneCards.length} disponible(s) en /model
+                </span>
+              </div>
+
+              <div className="auto-auth-grid">
+                {standaloneCards.map((scard, sIdx) => {
+                  const isClaude = scard.provider === 'claude' || scard.fileName.includes('claude');
+                  const isCodex = scard.provider === 'codex' || scard.provider === 'openai';
+                  const isGemini = !isClaude && !isCodex;
+                  const familyTitle = isGemini ? '💎 Google Directo' : isCodex ? '🧩 OpenAI Directo' : '🎭 Claude Directo';
+                  const roleBadgeClass = isGemini ? 'master' : isCodex ? 'codex' : 'virtual';
+
+                  return (
+                    <div
+                      key={scard.fileName || sIdx}
+                      className={`auto-auth-card standalone ${roleBadgeClass}`}
+                      style={{
+                        borderColor: 'rgba(100, 116, 139, 0.4)',
+                        background: 'rgba(15, 23, 42, 0.65)',
+                      }}
+                      data-testid={`standalone-card-${sIdx}`}
+                    >
+                      <div className="auto-auth-card-top">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span
+                            className="badge-prefix-hero"
+                            style={{
+                              background: '#475569',
+                              color: '#ffffff',
+                            }}
+                          >
+                            🏷️ [{scard.prefix || 'directo'}]
+                          </span>
+                          <span className={`badge-role ${roleBadgeClass}`}>
+                            {familyTitle}
+                          </span>
+                        </div>
+                        <span
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 600,
+                            padding: '2px 8px',
+                            borderRadius: 6,
+                            background: 'rgba(234, 179, 8, 0.15)',
+                            color: '#facc15',
+                            border: '1px solid rgba(234, 179, 8, 0.3)',
+                          }}
+                        >
+                          CUENTA FIJA · SIN FAILOVER
+                        </span>
+                      </div>
+
+                      <div className="auto-auth-card-body">
+                        <div className="card-email-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span className="card-email" title={scard.fileName}>
+                            {scard.maskedEmail || scard.fileName}
+                          </span>
+                          <span style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>
+                            Solo Lectura
+                          </span>
+                        </div>
+
+                        <div className="hero-model-banner multipurpose" style={{ borderColor: 'rgba(100, 116, 139, 0.3)' }}>
+                          <div className="hero-model-badge-row">
+                            <span className="badge-multipurpose-default" style={{ background: 'rgba(100, 116, 139, 0.2)', color: '#94a3b8' }}>
+                              ⚡ ENRUTAMIENTO DIRECTO NATIVO
+                            </span>
+                          </div>
+                          <div className="hero-model-name" style={{ fontSize: 13, color: '#f1f5f9' }}>
+                            {scard.prefix ? `${scard.prefix}/*` : 'Modelos nativos CPAMC'}
+                          </div>
+                          <div className="hero-model-helper" style={{ color: '#94a3b8' }}>
+                            Sin rotación de pool · Conexión fija a cuenta física
+                          </div>
+                        </div>
+
+                        <div className="card-state-pill-row">
+                          <span
+                            className="badge-pool-prefix badge-state-fixed"
+                            style={{ background: 'rgba(51, 65, 85, 0.6)', color: '#cbd5e1', border: '1px solid #64748b' }}
+                            title="Cuenta física fija sin conmutación"
+                          >
+                            ⚡ CUENTA FIJA DIRECTA
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Quota Telemetry */}
+                      {renderQuotaTelemetry(scard.fileName, scard.node, isGemini ? 'gemini' : isClaude ? 'claude' : 'codex')}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Specialist Configuration Modal */}
       <SpecialistModal
