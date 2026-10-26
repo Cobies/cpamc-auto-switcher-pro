@@ -27,6 +27,50 @@ const (
 	defaultAuthDir = "/root/.cli-proxy-api"
 )
 
+// readConfigAuthDir inspects config.yaml to discover custom auth-dir settings (e.g. configured via EasyCLIProxyAPI).
+func readConfigAuthDir(configPath string) string {
+	if configPath == "" {
+		configPath = resolveConfigPath()
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(string(data), "\n")
+	re := regexp.MustCompile(`^\s*(?:-\s*)?auth-dir\s*:\s*["']?([^"'\r\n#]+)["']?`)
+	for _, line := range lines {
+		m := re.FindStringSubmatch(line)
+		if len(m) > 1 {
+			val := strings.TrimSpace(m[1])
+			if val == "" {
+				continue
+			}
+			// Expand home prefix "~" or "~/"
+			if strings.HasPrefix(val, "~") {
+				if uHome, err := os.UserHomeDir(); err == nil && uHome != "" {
+					if val == "~" {
+						val = uHome
+					} else if strings.HasPrefix(val, "~/") || strings.HasPrefix(val, "~\\") {
+						val = filepath.Join(uHome, val[2:])
+					}
+				}
+			}
+			// If relative path, resolve relative to config directory
+			if !filepath.IsAbs(val) {
+				configDir := filepath.Dir(configPath)
+				candidate := filepath.Join(configDir, val)
+				if fi, err := os.Stat(candidate); err == nil && fi.IsDir() {
+					return candidate
+				}
+			}
+			if fi, err := os.Stat(val); err == nil && fi.IsDir() {
+				return val
+			}
+		}
+	}
+	return ""
+}
+
 // resolveAuthDir locates the native CPAMC credentials directory agnostically across platforms (Docker, Linux, Windows, macOS).
 func resolveAuthDir() string {
 	if env := os.Getenv("AUTO_SWITCHER_AUTH_DIR"); env != "" {
@@ -36,12 +80,17 @@ func resolveAuthDir() string {
 		return env
 	}
 
-	// 1. Check container directory if running inside official Linux Docker
+	// 1. Check if config.yaml specifies a custom auth-dir (e.g. customized via EasyCLIProxyAPI GUI)
+	if cfgAuth := readConfigAuthDir(""); cfgAuth != "" {
+		return cfgAuth
+	}
+
+	// 2. Check container directory if running inside official Linux Docker
 	if fi, err := os.Stat(defaultAuthDir); err == nil && fi.IsDir() {
 		return defaultAuthDir
 	}
 
-	// 2. Multiplatform host fallback: inspect user home ~/.cli-proxy-api (Windows, Linux, macOS)
+	// 3. Multiplatform host fallback: inspect user home ~/.cli-proxy-api (Windows, Linux, macOS)
 	if uHome, err := os.UserHomeDir(); err == nil && uHome != "" {
 		hostCandidate := filepath.Join(uHome, ".cli-proxy-api")
 		if fi, err := os.Stat(hostCandidate); err == nil && fi.IsDir() {
@@ -49,7 +98,7 @@ func resolveAuthDir() string {
 		}
 	}
 
-	// 3. Check relative to working directory
+	// 4. Check relative to working directory
 	if fi, err := os.Stat(".cli-proxy-api"); err == nil && fi.IsDir() {
 		return ".cli-proxy-api"
 	}

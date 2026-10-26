@@ -31,6 +31,10 @@ func TestPluginMetadataAndRegistration(t *testing.T) {
 			Version          string `json:"Version"`
 			Author           string `json:"Author"`
 			GitHubRepository string `json:"GitHubRepository"`
+			NameLower        string `json:"name"`
+			VersionLower     string `json:"version"`
+			AuthorLower      string `json:"author"`
+			GitHubRepoSnake  string `json:"github_repository"`
 		} `json:"metadata"`
 	}
 	if err := json.Unmarshal(env.Result, &payload); err != nil {
@@ -40,17 +44,17 @@ func TestPluginMetadataAndRegistration(t *testing.T) {
 	if payload.SchemaVersion != 6 {
 		t.Errorf("expected schema version 6, got %d", payload.SchemaVersion)
 	}
-	if payload.Metadata.Name != "Auto switcher pro" {
-		t.Errorf("expected plugin name 'Auto switcher pro', got %q", payload.Metadata.Name)
+	if payload.Metadata.Name != "Auto switcher pro" || payload.Metadata.NameLower != "Auto switcher pro" {
+		t.Errorf("expected plugin name 'Auto switcher pro', got Pascal=%q, lower=%q", payload.Metadata.Name, payload.Metadata.NameLower)
 	}
-	if payload.Metadata.Version != version.Version {
-		t.Errorf("expected plugin version %q, got %q", version.Version, payload.Metadata.Version)
+	if payload.Metadata.Version != version.Version || payload.Metadata.VersionLower != version.Version {
+		t.Errorf("expected plugin version %q, got Pascal=%q, lower=%q", version.Version, payload.Metadata.Version, payload.Metadata.VersionLower)
 	}
-	if payload.Metadata.Author != "WiloxDev" {
-		t.Errorf("expected author 'WiloxDev', got %q", payload.Metadata.Author)
+	if payload.Metadata.Author != "WiloxDev" || payload.Metadata.AuthorLower != "WiloxDev" {
+		t.Errorf("expected author 'WiloxDev', got Pascal=%q, lower=%q", payload.Metadata.Author, payload.Metadata.AuthorLower)
 	}
-	if payload.Metadata.GitHubRepository != "https://github.com/WiloxDev/cpamc-auto-switcher-pro" {
-		t.Errorf("expected GitHubRepository 'https://github.com/WiloxDev/cpamc-auto-switcher-pro', got %q", payload.Metadata.GitHubRepository)
+	if payload.Metadata.GitHubRepository != "https://github.com/WiloxDev/cpamc-auto-switcher-pro" || payload.Metadata.GitHubRepoSnake != "https://github.com/WiloxDev/cpamc-auto-switcher-pro" {
+		t.Errorf("expected GitHubRepository 'https://github.com/WiloxDev/cpamc-auto-switcher-pro', got Pascal=%q, snake=%q", payload.Metadata.GitHubRepository, payload.Metadata.GitHubRepoSnake)
 	}
 }
 

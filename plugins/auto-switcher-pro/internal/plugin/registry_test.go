@@ -591,3 +591,49 @@ func TestPoolRegistry_DeterministicOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestReadConfigAuthDir_CustomAndFallback(t *testing.T) {
+	tempDir := t.TempDir()
+	customAuthDir := filepath.Join(tempDir, "custom-oauth")
+	if err := os.MkdirAll(customAuthDir, 0755); err != nil {
+		t.Fatalf("failed to create custom auth dir: %v", err)
+	}
+
+	// 1. Valid config with explicit auth-dir
+	configPath := filepath.Join(tempDir, "config.yaml")
+	configContent := "port: 8317\nauth-dir: \"" + customAuthDir + "\"\n"
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	found := readConfigAuthDir(configPath)
+	if found != customAuthDir {
+		t.Errorf("expected readConfigAuthDir to find %q, got %q", customAuthDir, found)
+	}
+
+	// 2. Relative auth-dir inside config directory
+	relDir := filepath.Join(tempDir, "oauth_rel")
+	if err := os.MkdirAll(relDir, 0755); err != nil {
+		t.Fatalf("failed to create rel auth dir: %v", err)
+	}
+	configRelPath := filepath.Join(tempDir, "config_rel.yaml")
+	configRelContent := "port: 8317\nauth-dir: 'oauth_rel'\n"
+	if err := os.WriteFile(configRelPath, []byte(configRelContent), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	foundRel := readConfigAuthDir(configRelPath)
+	if foundRel != relDir {
+		t.Errorf("expected readConfigAuthDir to resolve relative dir %q, got %q", relDir, foundRel)
+	}
+
+	// 3. Non-existent path returns empty string
+	configMissingPath := filepath.Join(tempDir, "config_missing.yaml")
+	if err := os.WriteFile(configMissingPath, []byte("port: 8317\nauth-dir: '/non/existent/path'\n"), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+	if foundMissing := readConfigAuthDir(configMissingPath); foundMissing != "" {
+		t.Errorf("expected empty string for non-existent auth-dir, got %q", foundMissing)
+	}
+}
+
