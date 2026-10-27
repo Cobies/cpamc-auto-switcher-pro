@@ -2123,8 +2123,19 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
                   </div>
                 )}
 
-                {/* Estructuración de Grupo & Pool en 2 columnas: Cuentas (Izquierda) y Modelo Especialista (Derecha) */}
-                <div className="group-structuring-grid">
+                {/* Si no se ha elegido familia/proveedor, mostrar recuadro prominente de selección */}
+                {!family ? (
+                  <div className="group-family-prompt-box" data-testid="family-prompt-box">
+                    <div className="group-prompt-icon">👆</div>
+                    <h3 className="group-prompt-title">Selecciona un Proveedor de Modelos Arriba</h3>
+                    <p className="group-prompt-desc">
+                      Elige una familia (Google Gemini, Anthropic Claude, OpenAI Codex u otros) para comenzar a estructurar el pool soberano, asignar la cuenta titular en RAM y configurar su modelo especialista aislado.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    {/* Estructuración de Grupo & Pool en 2 columnas: Cuentas (Izquierda) y Modelo Especialista (Derecha) */}
+                    <div className="group-structuring-grid">
                   {/* Columna Izquierda: Titular y Banco de Suplentes */}
                   <div className="group-col-accounts">
                     <div className="group-field group-field-account">
@@ -2354,6 +2365,8 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
                     <span>{isSubmitting ? 'Guardando...' : 'Armar y Guardar Pool'}</span>
                   </button>
                 </div>
+                  </>
+                )}
               </div>
             )}
           </div>

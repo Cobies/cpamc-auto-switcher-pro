@@ -158,7 +158,7 @@ describe('GroupManager Component - Dedicated Full Screen Pool & Group Engine', (
     });
   });
 
-  it('keeps account selector disabled until a family is chosen and lists swap dynamically when the leader changes', () => {
+  it('displays prominent prompt box until a family is chosen and reveals structuring controls dynamically', () => {
     const dynNodes = [
       { id: 'free1', data: { fileName: 'free1.json', email: 'free1@test.com', prefix: '', provider: 'antigravity' } },
       { id: 'free2', data: { fileName: 'free2.json', email: 'free2@test.com', prefix: '', provider: 'antigravity' } },
@@ -166,14 +166,16 @@ describe('GroupManager Component - Dedicated Full Screen Pool & Group Engine', (
     ];
     render(<GroupManager nodes={dynNodes} />);
 
-    // ② is disabled on load with a guiding placeholder
-    const selectActive = screen.getByTestId('select-active-account');
-    expect(selectActive.disabled).toBe(true);
-    expect(selectActive.textContent).toContain('Elige primero la familia');
+    // Prompt box is visible asking to choose a provider above, controls are not mounted yet
+    expect(screen.getByTestId('family-prompt-box')).toBeTruthy();
+    expect(screen.queryByTestId('select-active-account')).toBeNull();
 
-    // Reserves section also stays empty without family
+    // Selecting a provider dismisses the prompt box and mounts structuring controls
     fireEvent.click(screen.getByTestId('family-gemini'));
-    expect(selectActive.disabled).toBe(false);
+    expect(screen.queryByTestId('family-prompt-box')).toBeNull();
+
+    const selectActive = screen.getByTestId('select-active-account');
+    expect(selectActive).toBeTruthy();
 
     // Gemini family: only antigravity accounts, codex hidden
     fireEvent.change(selectActive, { target: { value: 'free1' } });

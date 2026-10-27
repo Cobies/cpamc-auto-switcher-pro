@@ -365,6 +365,48 @@
 }
 
 /* Empty Alert */
+/* Recuadro prominente cuando no hay proveedor seleccionado */
+.group-family-prompt-box {
+  margin: 16px 0;
+  padding: 40px 24px;
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px dashed rgba(56, 189, 248, 0.4);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 12px;
+  animation: fadeInPrompt 0.2s ease-out;
+}
+
+@keyframes fadeInPrompt {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.group-prompt-icon {
+  font-size: 36px;
+  line-height: 1;
+}
+
+.group-prompt-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: #38bdf8;
+  letter-spacing: -0.01em;
+}
+
+.group-prompt-desc {
+  margin: 0;
+  font-size: 13px;
+  color: #94a3b8;
+  max-width: 520px;
+  line-height: 1.5;
+}
+
 .group-empty-alert {
   text-align: center;
   padding: 36px 24px;
