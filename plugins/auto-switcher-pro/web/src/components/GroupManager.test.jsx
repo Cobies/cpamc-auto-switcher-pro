@@ -1306,6 +1306,69 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
     });
   });
 
+  it('excludes single-account standalone entries from disk (0 reserves) from existing pools list', async () => {
+    vi.spyOn(managementClient, 'listPools').mockResolvedValue({
+      ok: true,
+      pools: [],
+      count: 0,
+    });
+
+    const standaloneAndPoolNodes = [
+      // Cuenta standalone / fija con prefijo "nan" en CPAMC pero 0 reservas -> NO es pool
+      { id: 'nan1', data: { fileName: 'nan-4332.json', email: 'nan@test.com', prefix: 'nan', provider: 'nan' } },
+      // Pool legítimo legacy con 1 líder y 1 reserva -> SI es pool
+      { id: 'nim1', data: { fileName: 'nvidia-1.json', email: 'nim1@test.com', prefix: 'nim', provider: 'nvidia' } },
+      { id: 'nim2', data: { fileName: 'nvidia-2.json', email: 'nim2@test.com', prefix: 'nim_1', provider: 'nvidia' } },
+    ];
+
+    render(<GroupManager nodes={standaloneAndPoolNodes} />);
+
+    fireEvent.click(screen.getByTestId('tab-disolver-pools'));
+
+    await waitFor(() => {
+      // El pool legítimo de 2 cuentas sí aparece
+      expect(screen.getByTestId('pool-card-nim')).toBeTruthy();
+      // La cuenta suelta de 1 sola cuenta (nan) queda totalmente excluida porque no es pool
+      expect(screen.queryByTestId('pool-card-nan')).toBeNull();
+    });
+  });
+
+  it('isolates card adopt to matching provider and hides adopt section when no compatible accounts exist', async () => {
+    vi.spyOn(managementClient, 'listPools').mockResolvedValue({
+      ok: true,
+      pools: [
+        {
+          id: 'Pool-01-nan',
+          family: 'nan',
+          base_prefix: 'nan',
+          leader_auth: 'nan-leader.json',
+          reserves: ['nan-res1.json'],
+          members: ['nan-leader.json', 'nan-res1.json'],
+        },
+      ],
+      count: 1,
+    });
+
+    const crossProviderNodes = [
+      // Miembros del pool NaN
+      { id: 'nan-leader.json', data: { fileName: 'nan-leader.json', email: 'nan1@test.com', prefix: 'nan', provider: 'nan' } },
+      { id: 'nan-res1.json', data: { fileName: 'nan-res1.json', email: 'nan2@test.com', prefix: 'nan_1', provider: 'nan' } },
+      // Cuenta libre pero de GOOGLE (antigravity), NO de NaN
+      { id: 'free-google.json', data: { fileName: 'antigravity-free@gmail.com.json', email: 'free@gmail.com', prefix: '', provider: 'antigravity' } },
+    ];
+
+    render(<GroupManager nodes={crossProviderNodes} />);
+
+    fireEvent.click(screen.getByTestId('tab-disolver-pools'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('pool-card-nan')).toBeTruthy();
+    });
+
+    // Como la única cuenta libre es de Google, el pool de NaN NO debe mostrar la sección de sumar reserva
+    expect(screen.queryByTestId('card-adopt-section-nan')).toBeNull();
+  });
+
   it('allows releasing the leader account and promotes first reserve to leader', async () => {
     const existingPoolsData = [
       {

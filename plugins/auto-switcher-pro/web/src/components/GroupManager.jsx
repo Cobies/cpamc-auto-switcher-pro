@@ -238,6 +238,62 @@ function matchesFamilyModel(base, modelId, exclude55 = false) {
   return true;
 }
 
+// Obtiene el identificador de proveedor canónico de un nodo de forma agnóstica
+export function getNodeProvider(node) {
+  if (!node) return '';
+  const prov = (node.data?.provider || node.data?.accountType || '').toLowerCase().trim();
+  const fn = (node.data?.fileName || node.name || node.id || '').toLowerCase().trim();
+  const p = (node.data?.prefix || '').toLowerCase().trim();
+
+  if (prov === 'antigravity' || fn.startsWith('antigravity') || fn.includes('@gmail.com') || (node.data?.email && node.data.email.includes('@gmail.com'))) {
+    return 'antigravity';
+  }
+  if (prov === 'claude' || fn.startsWith('claude') || fn.startsWith('clau-') || p.startsWith('clau')) {
+    return 'claude';
+  }
+  if (prov === 'codex' || fn.startsWith('codex') || p.startsWith('codex')) {
+    return 'codex';
+  }
+
+  for (const [provKey, meta] of Object.entries(OMNIAUTH_PROVIDER_META)) {
+    if (
+      prov === provKey ||
+      prov.includes(provKey) ||
+      fn.startsWith(`${meta.hintPrefix}-`) ||
+      fn.startsWith(`${provKey}-`) ||
+      p.startsWith(meta.hintPrefix)
+    ) {
+      return provKey;
+    }
+  }
+
+  return prov || 'unknown';
+}
+
+// Obtiene el identificador de proveedor canónico de un pool a partir de su familia o nodos miembros
+export function getPoolProvider(pool) {
+  if (!pool) return '';
+  if (pool.family) {
+    const fam = pool.family.toLowerCase();
+    if (fam.startsWith('gemini')) return 'antigravity';
+    if (fam === 'claude') return 'claude';
+    if (fam === 'codex') return 'codex';
+    if (OMNIAUTH_PROVIDER_META[fam]) return fam;
+  }
+  const sampleNode = pool.root || (pool.reserves && pool.reserves[0]?.node);
+  if (sampleNode) {
+    return getNodeProvider(sampleNode);
+  }
+  const bp = (pool.basePrefix || '').toLowerCase();
+  if (bp.startsWith('agy') || bp.startsWith('g')) return 'antigravity';
+  if (bp.startsWith('clau')) return 'claude';
+  if (bp.startsWith('codex')) return 'codex';
+  for (const [provKey, meta] of Object.entries(OMNIAUTH_PROVIDER_META)) {
+    if (bp.startsWith(meta.hintPrefix)) return provKey;
+  }
+  return 'unknown';
+}
+
 // Sugiere el siguiente prefijo base libre sin colisiones para N grupos:
 // agy -> si agy existe, sugiere agy2, agy3...
 // agy_clau -> si agy_clau existe, sugiere agy_clau2, agy_clau3...
@@ -907,6 +963,7 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
         activeLeaderAuth,
         targetModel,
         memberModels,
+        family: pool.family,
       });
     });
 
@@ -959,8 +1016,17 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
       }
     });
 
+    // Filtrar pools: los pools de disco DEBEN tener rotación (al menos 1 reserva).
+    // Cuentas sueltas con prefijo individual (0 reservas) son cuentas fijas / standalone, NO pools.
+    const validPools = Array.from(poolsMap.values()).filter((p) => {
+      if (registryCovered.has(p.basePrefix)) {
+        return Boolean(p.root || (p.reserves && p.reserves.length > 0));
+      }
+      return Boolean(p.root && p.reserves && p.reserves.length >= 1);
+    });
+
     // Ordenar pools por índice numérico soberano determinista y reservas por cascada
-    const sortedPools = sortPoolsByNumber(Array.from(poolsMap.values()));
+    const sortedPools = sortPoolsByNumber(validPools);
     return sortedPools.map((p) => {
       p.reserves.sort((a, b) => a.reserveIndex - b.reserveIndex);
       return p;
@@ -2508,6 +2574,8 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
               const leaderFile = pool.root?.data?.fileName || pool.root?.name || pool.root?.id || '';
               const leaderModel = (pool.memberModels && pool.memberModels[leaderFile]) || pool.targetModel || 'gemini-3.8-flash-high';
               const leaderPref = pool.root?.data?.prefix || pool.basePrefix;
+              const poolProv = getPoolProvider(pool);
+              const compatibleFreeNodes = freeNodes.filter((fn) => getNodeProvider(fn) === poolProv);
 
               return (
               <div key={pool.id || pool.basePrefix} className="group-pool-card" data-testid={`pool-card-${pool.basePrefix}`}>
@@ -2669,8 +2737,8 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
                   );
                   })}
 
-                  {/* Fila Final: Adoptar / Sumar Reservas directamente en la lista de miembros */}
-                  {freeNodes.length > 0 && (
+                  {/* Fila Final: Adoptar / Sumar Reservas directamente en la lista de miembros (solo cuentas compatibles del mismo proveedor) */}
+                  {compatibleFreeNodes.length > 0 && (
                     <div
                       className="group-pool-member-row"
                       data-testid={`card-adopt-section-${pool.basePrefix}`}
@@ -2722,7 +2790,7 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
                               color: '#f8fafc',
                               borderRadius: 6,
                             }}
-                            value={cardAdoptSelections[pool.basePrefix] || freeNodes[0]?.id || ''}
+                            value={cardAdoptSelections[pool.basePrefix] || compatibleFreeNodes[0]?.id || ''}
                             onChange={(e) =>
                               setCardAdoptSelections((prev) => ({
                                 ...prev,
@@ -2731,7 +2799,7 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
                             }
                             data-testid={`select-card-adopt-${pool.basePrefix}`}
                           >
-                            {freeNodes.map((fn) => (
+                            {compatibleFreeNodes.map((fn) => (
                               <option key={fn.id} value={fn.id}>
                                 🔑 {fn.data?.email || fn.data?.fileName || fn.id}
                               </option>
@@ -2777,8 +2845,8 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
                           type="button"
                           disabled={isSubmitting}
                           onClick={() => {
-                            const selId = cardAdoptSelections[pool.basePrefix] || freeNodes[0]?.id;
-                            const targetNode = freeNodes.find((fn) => fn.id === selId) || freeNodes[0];
+                            const selId = cardAdoptSelections[pool.basePrefix] || compatibleFreeNodes[0]?.id;
+                            const targetNode = compatibleFreeNodes.find((fn) => fn.id === selId) || compatibleFreeNodes[0];
                             if (targetNode) {
                               handleAdoptAccountIntoPool(pool.basePrefix, targetNode);
                             }
