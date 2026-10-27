@@ -102,6 +102,11 @@ let cachedAccounts: SwitcherAccount[] = [];
 let lastFetchTime = 0;
 let isFetching = false;
 
+export function setCachedAccountsForTesting(accounts: SwitcherAccount[]): void {
+	cachedAccounts = accounts;
+	lastFetchTime = Date.now();
+}
+
 interface StoredPool {
 	id: string;
 	base_prefix: string;
@@ -254,9 +259,10 @@ export async function querySwitcherAccounts(force = false): Promise<SwitcherAcco
 							const reserveIndexByPool = new Map<string, number>();
 							const list: SwitcherAccount[] = mData.accounts.map((a: any) => {
 								const isLeader = a.role === "leader";
-								const basePref = a.base_prefix || "default";
+								const isUnassigned = a.role === "unassigned";
+								const basePref = a.base_prefix || (isUnassigned ? "-" : "default");
 								let prefix = basePref;
-								if (!isLeader) {
+								if (!isLeader && !isUnassigned) {
 									const nextIdx = (reserveIndexByPool.get(basePref) || 0) + 1;
 									reserveIndexByPool.set(basePref, nextIdx);
 									prefix = `${basePref}_${nextIdx}`;
@@ -271,7 +277,7 @@ export async function querySwitcherAccounts(force = false): Promise<SwitcherAcco
 								const resetWk = typeof a.weekly_reset_in === "number" ? a.weekly_reset_in : undefined;
 
 								return {
-									status: isLeader ? "[ACTIVE]" : "[RESERVE]",
+									status: isLeader ? "[ACTIVE]" : isUnassigned ? "[OTHER]" : "[RESERVE]",
 									provider: "antigravity",
 									profile: basePref,
 									accountId: maskEmailFromAuth(a.account_key || a.email),
@@ -626,7 +632,28 @@ export function getRotationPairForModelSync(modelId: string, provider: string): 
 		return false;
 	});
 
-	if (poolAccounts.length === 0) return null;
+	if (poolAccounts.length === 0) {
+		// ¿Es una cuenta standalone / directa identificada por prefijo o email?
+		const standalone = accounts.find((a) => {
+			const p = (a.prefix || "").trim().toLowerCase();
+			const accId = (a.accountId || "").trim().toLowerCase();
+			const target = matchedBase.toLowerCase();
+			return p === target || accId.includes(target) || target.includes(p);
+		});
+
+		if (standalone) {
+			return {
+				poolKey: standalone.prefix && standalone.prefix !== "-" ? standalone.prefix : info.canonicalModelId,
+				familyName: "CPAMC Directo",
+				familyIcon: "⚡ ",
+				active: standalone,
+				totalAccounts: 1,
+				isNativeReadOnly: true,
+			};
+		}
+
+		return null;
+	}
 
 	// Cuenta activa:
 	// Prioridad 1: Coincidencia con activeLeaderEmail de RAM

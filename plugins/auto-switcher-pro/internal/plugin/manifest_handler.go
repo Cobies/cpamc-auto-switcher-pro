@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"auto-switcher-pro/internal/analytics"
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -142,6 +143,70 @@ func handleManifestHTTP(req ManagementRequestPayload) ([]byte, error) {
 				PoolID:          p.ID,
 				BasePrefix:      p.BasePrefix,
 				Role:            role,
+				Window5hPct:     w5h,
+				WeeklyPct:       wWeekly,
+				Window5hResetIn: w5hResetIn,
+				WeeklyResetIn:   wWeeklyResetIn,
+				IsCooling:       isCooling,
+				FatiguePct:      fatigue,
+				StabilityScore:  stab.StabilityScore,
+				HealthRating:    stab.HealthRating,
+				RecentErrors:    stab.RecentErrors,
+			})
+		}
+	}
+
+	// Incluir cuentas standalone / unassigned (sin pool)
+	authDir := resolveAuthDir()
+	if entries, err := os.ReadDir(authDir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || !strings.HasPrefix(e.Name(), "antigravity-") {
+				continue
+			}
+			cleanAuth := e.Name()
+			if seenAccounts[cleanAuth] {
+				continue
+			}
+			seenAccounts[cleanAuth] = true
+
+			email := strings.TrimSuffix(strings.TrimPrefix(cleanAuth, "antigravity-"), ".json")
+			normKey := normalizeAccountKey(email)
+			q := quotaMap[normKey]
+			fatigue, isCooling, _ := pe.GetAccountStatus(email)
+
+			w5h := 95.0
+			wWeekly := 95.0
+			var w5hResetIn int64
+			var wWeeklyResetIn int64
+			if !q.UpdatedAt.IsZero() {
+				w5h = q.Window5hPct
+				wWeekly = q.WeeklyPct
+				w5hResetIn = q.Window5hResetIn
+				wWeeklyResetIn = q.WeeklyResetIn
+			}
+
+			prefix := ""
+			if data, err := os.ReadFile(filepath.Join(authDir, cleanAuth)); err == nil {
+				var cred struct {
+					Prefix string `json:"prefix"`
+					Note   string `json:"note"`
+				}
+				if json.Unmarshal(data, &cred) == nil {
+					prefix = strings.TrimSpace(cred.Prefix)
+					if prefix == "" {
+						prefix = strings.TrimSpace(cred.Note)
+					}
+				}
+			}
+
+			stab, _ := analytics.QueryAccountStability(email)
+
+			accountSummaries = append(accountSummaries, ManifestAccountSummary{
+				AccountKey:      cleanAuth,
+				Email:           email,
+				PoolID:          "",
+				BasePrefix:      prefix,
+				Role:            "unassigned",
 				Window5hPct:     w5h,
 				WeeklyPct:       wWeekly,
 				Window5hResetIn: w5hResetIn,

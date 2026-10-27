@@ -135,6 +135,21 @@ func (p *AutonomousQuotaPoller) PollAllPoolAccounts(ctx context.Context) {
 		}
 	}
 
+	// También incluir cuentas de autenticación que no pertenezcan a ningún pool (standalone/unassigned)
+	if entries, err := os.ReadDir(p.authDir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || !strings.HasPrefix(e.Name(), "antigravity-") {
+				continue
+			}
+			cleanMember := e.Name()
+			if _, exists := seenAccounts[cleanMember]; exists {
+				continue
+			}
+			seenAccounts[cleanMember] = struct{}{}
+			tasks = append(tasks, pollTask{memberFile: cleanMember, pool: PoolDefinition{ID: "standalone", Family: "all"}})
+		}
+	}
+
 	if len(tasks) == 0 {
 		return
 	}
@@ -254,6 +269,7 @@ func (p *AutonomousQuotaPoller) ingestQuotaPayload(payload []byte, memberFile, e
 	fam := strings.ToLower(familyCanonicalShortName(pool.Family, pool.BasePrefix))
 	isClaude := fam == "claude"
 	isGemini := fam == "gemini"
+	isStandalone := pool.ID == "standalone" || pool.Family == "all"
 
 	var worst5h *float64
 	var worstWeekly *float64
@@ -268,11 +284,13 @@ func (p *AutonomousQuotaPoller) ingestQuotaPayload(payload []byte, memberFile, e
 			grpName = strings.ToLower(g.Name)
 		}
 
-		if isGemini && !strings.Contains(grpName, "gemini") {
-			continue
-		}
-		if isClaude && !strings.Contains(grpName, "claude") && !strings.Contains(grpName, "gpt") {
-			continue
+		if !isStandalone {
+			if isGemini && !strings.Contains(grpName, "gemini") {
+				continue
+			}
+			if isClaude && !strings.Contains(grpName, "claude") && !strings.Contains(grpName, "gpt") {
+				continue
+			}
 		}
 
 		for _, b := range g.Buckets {
