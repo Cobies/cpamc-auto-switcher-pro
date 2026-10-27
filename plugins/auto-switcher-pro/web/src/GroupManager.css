@@ -749,6 +749,37 @@
   flex-wrap: wrap;
 }
 
+/* Estructuración de Grupo & Pool en 2 columnas equilibradas (Captura 2026-10-27) */
+.group-structuring-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 20px;
+  align-items: flex-start;
+  margin-top: 16px;
+}
+
+@media (max-width: 900px) {
+  .group-structuring-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+}
+
+.group-col-accounts {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.group-col-specialist {
+  display: flex;
+  flex-direction: column;
+}
+
+.group-col-specialist .bento-specialist-card {
+  margin-top: 0;
+}
+
 .group-field-account { flex: 1.25 1 260px; min-width: 240px; }
 .group-field-prefix { flex: 1 1 200px; min-width: 180px; }
 
