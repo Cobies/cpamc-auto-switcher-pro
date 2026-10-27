@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import './HomeCenter.css';
 import logoImg from '../assets/auto-switcher-pro-logo.png';
+import { Icons } from './Icons';
+import { HelpTooltip } from './HelpTooltip';
 import {
   fetchPluginVersion,
   fetchPluginHealth,
@@ -60,7 +62,7 @@ export default function HomeCenter({ onNavigateTab, onOpenLicenseModal }) {
   const PILLARS_CATALOG = [
     {
       id: 1,
-      title: '1. 🛡️ Resiliencia, Failover Zero-Downtime & Flota OmniAuth Pro',
+      title: '1. Resiliencia, Failover Zero-Downtime & Flota OmniAuth Pro',
       badge: 'Núcleo Estrella',
       badgeClass: 'badge-emerald',
       sourceFile: 'modelprovider.go & GroupManager.jsx',
@@ -351,21 +353,21 @@ export default function HomeCenter({ onNavigateTab, onOpenLicenseModal }) {
     },
     {
       id: 'tokens',
-      icon: '🏷️',
+      icon: <Icons.Layers size={22} />,
       title: 'Pulse Tokens',
       desc: 'Telemetría de consumo: gráficas de uso de tokens, latencias por modelo y horas de demanda.',
       badge: 'Métricas',
     },
     {
       id: 'create-prefixes',
-      icon: '📋',
+      icon: <Icons.Tag size={22} />,
       title: 'Directorio Cuentas',
       desc: 'Inventario general de credenciales, pertenencia a pools soberanos y prefijos (agy, agy_son, agy_opus, clau, codex).',
       badge: 'Directorio',
     },
     {
       id: 'maintenance',
-      icon: '🩺',
+      icon: <Icons.Wrench size={22} />,
       title: 'Salud & Mantenimiento',
       desc: 'Autodiagnóstico del sistema, limpieza de modelos obsoletos y verificación honesta de versiones.',
       badge: 'Diagnóstico',
@@ -379,7 +381,7 @@ export default function HomeCenter({ onNavigateTab, onOpenLicenseModal }) {
     },
     {
       id: 'audit-log',
-      icon: '📜',
+      icon: <Icons.FileText size={22} />,
       title: 'Bitácora & Caja Negra',
       desc: 'Historial forense de rotaciones, rescates 429 e incidentes en disco (SQLite WAL).',
       badge: 'Forense',
@@ -473,7 +475,7 @@ export default function HomeCenter({ onNavigateTab, onOpenLicenseModal }) {
         <div className="home-anatomy-box" data-testid="home-anatomy-box">
           <div className="anatomy-box-header">
             <div className="anatomy-header-left">
-              <span className="anatomy-header-icon">🔬</span>
+              <span className="anatomy-header-icon"><Icons.Cpu size={16} /></span>
               <span className="anatomy-header-title">ANATOMÍA TÉCNICA DEL CÓDIGO</span>
             </div>
             <div className="anatomy-header-badges">
@@ -626,7 +628,7 @@ export default function HomeCenter({ onNavigateTab, onOpenLicenseModal }) {
       {/* DIRECTORIO DE MENÚS (¿QUÉ TRAE CADA MENÚ?) */}
       <div className="home-menus-section">
         <div className="home-section-header">
-          <h2 className="home-section-title">🧭 ¿Qué encuentras en cada menú?</h2>
+          <h2 className="home-section-title"><Icons.Compass size={20} style={{ marginRight: 8, verticalAlign: "middle" }} /> Directorio de Menús</h2>
           <span className="home-section-subtitle">
             Haz clic en cualquiera de ellos para ingresar directamente
           </span>

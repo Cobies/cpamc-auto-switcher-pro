@@ -452,7 +452,7 @@ export async function apiFetch(endpoint, options = {}) {
       if (errJson && typeof errJson === 'object') {
         errorDetail = errJson.error || errJson.message || '';
       }
-    } catch (_) {
+    } catch {
       // ignore json parse failure on non-json error responses
     }
     if (errorDetail) {
@@ -709,7 +709,7 @@ export async function getAuthFileModels(fileName, options = {}) {
           return data.models.map((m) => m?.id || m?.name || String(m)).filter(Boolean);
         }
       }
-    } catch (_err) {
+    } catch {
       // fallback al siguiente endpoint
     }
   }
@@ -2828,14 +2828,279 @@ export function parseAntigravityQuotaPayload(payload, serverTimeOffsetMs = 0) {
   });
 }
 
+// TTL para caché de cuotas en cliente: 5 minutos (evita saturación a Google en recargas y cambios de solapa)
+export const QUOTA_CACHE_TTL_MS = 5 * 60 * 1000;
+const quotaMemoryCache = new Map();
+
+/**
+ * Acceso seguro a localStorage o sessionStorage con fallback a memoria
+ */
+function getStorage(type = 'local') {
+  try {
+    if (typeof window !== 'undefined') {
+      const storage = type === 'local' ? window.localStorage : window.sessionStorage;
+      if (storage) return storage;
+    }
+  } catch {
+    // Modo restringido o SSR
+  }
+  return null;
+}
+
+/**
+ * Obtiene la clave de almacenamiento para el caché de cuota de una tarjeta o nodo.
+ */
+function getQuotaCacheKey(cardOrNode) {
+  const rawKey =
+    cardOrNode?.fileName ||
+    cardOrNode?.name ||
+    cardOrNode?.auth_index ||
+    cardOrNode?.authIndex ||
+    cardOrNode?.masterFileName ||
+    '0';
+  return `cpamc_quota_${String(rawKey).toLowerCase()}`;
+}
+
+/**
+ * Limpia el caché en memoria y en localStorage de cuotas (útil para pruebas y resets).
+ */
+export function clearQuotaCache() {
+  quotaMemoryCache.clear();
+  const storage = getStorage('local') || getStorage('session');
+  if (storage) {
+    try {
+      const keysToRemove = [];
+      for (let i = 0; i < storage.length; i++) {
+        const k = storage.key(i);
+        if (k && k.startsWith('cpamc_quota_')) {
+          keysToRemove.push(k);
+        }
+      }
+      keysToRemove.forEach((k) => storage.removeItem(k));
+    } catch {
+      // ignore storage access errors
+    }
+  }
+}
+
+/**
+ * Recupera un resultado de cuota en caché si aún no ha expirado su TTL (5 minutos).
+ */
+function getCachedQuota(cacheKey) {
+  const now = Date.now();
+
+  // 1. Verificar primero en memoria
+  if (quotaMemoryCache.has(cacheKey)) {
+    const entry = quotaMemoryCache.get(cacheKey);
+    if (entry && now - entry.timestamp < QUOTA_CACHE_TTL_MS) {
+      return entry.data;
+    }
+    quotaMemoryCache.delete(cacheKey);
+  }
+
+  // 2. Verificar en localStorage (persiste entre recargas F5, nuevas pestañas y cambios de vista)
+  const storage = getStorage('local') || getStorage('session');
+  if (storage) {
+    try {
+      const stored = storage.getItem(cacheKey);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && typeof parsed.timestamp === 'number' && now - parsed.timestamp < QUOTA_CACHE_TTL_MS) {
+          quotaMemoryCache.set(cacheKey, parsed);
+          return parsed.data;
+        }
+        storage.removeItem(cacheKey);
+      }
+    } catch {
+      // Manejo seguro ante restricciones de storage
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Guarda un resultado de cuota válido en el caché en memoria y en localStorage.
+ */
+function setCachedQuota(cacheKey, data) {
+  if (!data) return;
+  const entry = {
+    timestamp: Date.now(),
+    data,
+  };
+  quotaMemoryCache.set(cacheKey, entry);
+  const storage = getStorage('local') || getStorage('session');
+  if (storage) {
+    try {
+      storage.setItem(cacheKey, JSON.stringify(entry));
+    } catch {
+      // Storage lleno o deshabilitado
+    }
+  }
+}
+
+/**
+ * Intenta recuperar cuotas existentes en RAM desde el backend Go (manifest o telemetry)
+ * evitando peticiones costosas a Google vía /v0/management/api-call.
+ */
+async function fetchQuotaFromBackendTelemetry(cardOrNode, options = {}) {
+  try {
+    const rawKey = String(
+      cardOrNode?.fileName ||
+      cardOrNode?.name ||
+      cardOrNode?.masterFileName ||
+      ''
+    ).toLowerCase();
+    const cleanEmail = rawKey.replace(/^antigravity-/, '').replace(/\.json$/, '');
+
+    const res = await apiFetch('/v0/management/auto-switcher-pro/manifest', {
+      ...options,
+      method: 'GET',
+    });
+    if (!res.ok) return null;
+    const manifest = await res.json();
+    if (!manifest || !manifest.ok) return null;
+
+    if (
+      (!Array.isArray(manifest.accounts) || manifest.accounts.length === 0) &&
+      (!Array.isArray(manifest.telemetry) || manifest.telemetry.length === 0)
+    ) {
+      return null;
+    }
+
+    // Buscar coincidencia en accounts o telemetry
+    let matchedAcc = null;
+    if (Array.isArray(manifest.accounts)) {
+      matchedAcc = manifest.accounts.find((a) => {
+        const aKey = String(a.account_key || a.accountKey || '').toLowerCase();
+        const aEmail = String(a.email || '').toLowerCase();
+        return (
+          (rawKey && aKey.includes(rawKey)) ||
+          (cleanEmail && (aEmail.includes(cleanEmail) || aKey.includes(cleanEmail)))
+        );
+      });
+    }
+
+    if (!matchedAcc && Array.isArray(manifest.telemetry)) {
+      const t = manifest.telemetry.find((item) => {
+        const tKey = String(item.account_key || item.accountKey || '').toLowerCase();
+        return (rawKey && tKey.includes(rawKey)) || (cleanEmail && tKey.includes(cleanEmail));
+      });
+      if (t) {
+        matchedAcc = {
+          window_5h_pct: t.window_5h_pct ?? t.Window5hPct,
+          weekly_pct: t.weekly_pct ?? t.WeeklyPct,
+          window_5h_reset_in: t.window_5h_reset_in ?? t.Window5hResetIn,
+          weekly_reset_in: t.weekly_reset_in ?? t.WeeklyResetIn,
+          plan: t.plan || 'Antigravity Pro',
+        };
+      }
+    }
+
+    if (matchedAcc) {
+      const w5h = typeof matchedAcc.window_5h_pct === 'number' ? matchedAcc.window_5h_pct : (matchedAcc.Window5hPct ?? 100);
+      const wWeekly = typeof matchedAcc.weekly_pct === 'number' ? matchedAcc.weekly_pct : (matchedAcc.WeeklyPct ?? 100);
+      const w5hReset = matchedAcc.window_5h_reset_in || matchedAcc.Window5hResetIn || 0;
+      const wWeeklyReset = matchedAcc.weekly_reset_in || matchedAcc.WeeklyResetIn || 0;
+      const plan = matchedAcc.plan || 'Antigravity Pro';
+
+      const geminiRows = [
+        {
+          label: 'Five Hour Limit',
+          percent: Math.round(w5h),
+          percentLabel: `${Math.round(w5h)}% remaining`,
+          resetLabel: w5hReset > 0 ? `Refreshes in ${Math.round(w5hReset / 60)}m` : 'Refreshes in 5h 0m',
+          warning: w5h < 20,
+        },
+        {
+          label: 'Weekly Limit',
+          percent: Math.round(wWeekly),
+          percentLabel: `${Math.round(wWeekly)}% remaining`,
+          resetLabel: wWeeklyReset > 0 ? `Refreshes in ${Math.round(wWeeklyReset / 3600)}h` : 'Refreshes in 6d 23h',
+          warning: wWeekly < 20,
+        },
+      ];
+
+      const claudeRows = [
+        {
+          label: 'Five Hour Limit',
+          percent: Math.round(w5h),
+          percentLabel: `${Math.round(w5h)}% remaining`,
+          resetLabel: w5hReset > 0 ? `Refreshes in ${Math.round(w5hReset / 60)}m` : 'Refreshes in 5h 0m',
+          warning: w5h < 20,
+        },
+        {
+          label: 'Weekly Limit',
+          percent: Math.round(wWeekly),
+          percentLabel: `${Math.round(wWeekly)}% remaining`,
+          resetLabel: wWeeklyReset > 0 ? `Refreshes in ${Math.round(wWeeklyReset / 3600)}h` : 'Refreshes in 6d 23h',
+          warning: wWeekly < 20,
+        },
+      ];
+
+      const groups = [
+        {
+          title: 'GEMINI MODELS',
+          models: 'gemini-2.5-pro, gemini-2.5-flash',
+          rows: geminiRows,
+        },
+        {
+          title: 'CLAUDE AND GPT MODELS',
+          models: 'claude-3-7-sonnet, claude-3-opus',
+          rows: claudeRows,
+        },
+      ];
+
+      return {
+        plan,
+        groups,
+        live: true,
+        loading: false,
+        error: null,
+      };
+    }
+  } catch {
+    // Si falla manifest, se procede con la lógica normal
+  }
+  return null;
+}
+
 /**
  * Fetches Antigravity quota and subscription plan via POST /v0/management/api-call proxy.
+ * Sometido a caché con TTL de 5 minutos: si se consultó recientemente, retorna
+ * los datos almacenados instantáneamente sin emitir peticiones a Google, a menos
+ * que options.force === true.
  *
  * @param {Object} cardOrNode
  * @param {Object} [options]
- * @returns {Promise<{ plan: string, groups: Array<Object>, loading: boolean, error: string|null }>}
+ * @param {boolean} [options.force=false]
+ * @returns {Promise<{ plan: string, groups: Array<Object>, loading: boolean, error: string|null, cached?: boolean }>}
  */
 export async function fetchCardQuota(cardOrNode, options = {}) {
+  const cacheKey = getQuotaCacheKey(cardOrNode);
+  const force = options.force === true;
+
+  if (!force) {
+    const cached = getCachedQuota(cacheKey);
+    if (cached) {
+      return {
+        ...cached,
+        cached: true,
+      };
+    }
+
+    // 2. Si no está en caché, intentar leer primero telemetría en RAM del backend Go
+    // (el AutonomousQuotaPoller ya mantiene las cuotas actualizadas en background)
+    const backendQuota = await fetchQuotaFromBackendTelemetry(cardOrNode, options);
+    if (backendQuota) {
+      setCachedQuota(cacheKey, backendQuota);
+      return {
+        ...backendQuota,
+        cached: true,
+      };
+    }
+  }
+
   const authIndex =
     cardOrNode?.auth_index ||
     cardOrNode?.authIndex ||
@@ -2988,13 +3253,20 @@ export async function fetchCardQuota(cardOrNode, options = {}) {
     }
   }
 
-  return {
+  const result = {
     plan,
     groups,
     live: groups.length > 0,
     loading: false,
     error,
   };
+
+  // Solo almacenar en caché si obtuvimos información coherente (plan o grupos)
+  if (result.plan || (result.groups && result.groups.length > 0)) {
+    setCachedQuota(cacheKey, result);
+  }
+
+  return result;
 }
 
 /**

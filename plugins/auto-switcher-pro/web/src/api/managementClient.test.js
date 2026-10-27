@@ -29,6 +29,8 @@ import {
   formatQuotaDuration,
   parseAntigravityQuotaPayload,
   fetchCardQuota,
+  clearQuotaCache,
+  QUOTA_CACHE_TTL_MS,
   computeAccountTelemetry,
   classifyCooldowns,
   formatRemainingDuration,
@@ -2008,8 +2010,9 @@ describe('Specialist Engine - computeSpecialistExclusions, resolveInheritedCardM
     });
 
     it('fetchCardQuota propagates real auth_index to api-call requests', async () => {
+      clearQuotaCache();
       const calls = [];
-      const mockFetch = vi.fn().mockImplementation((url, opts) => {
+      const mockFetch = vi.fn().mockImplementation((_url, opts) => {
         calls.push(JSON.parse(opts.body));
         return Promise.resolve({
           ok: true,
@@ -2028,6 +2031,65 @@ describe('Specialist Engine - computeSpecialistExclusions, resolveInheritedCardM
       calls.forEach((c) => {
         expect(c.authIndex).toBe('deadbeef01');
       });
+    });
+
+    it('caches successful quota results for 5 minutes and skips external network calls unless force is true', async () => {
+      clearQuotaCache();
+      let callCount = 0;
+      const mockFetch = vi.fn().mockImplementation((_url, opts) => {
+        callCount++;
+        const body = JSON.parse(opts.body);
+        if (body.url.includes('loadCodeAssist')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              statusCode: 200,
+              body: { currentTier: { id: 'g1-pro-tier' } },
+            }),
+          });
+        }
+        if (body.url.includes('retrieveUserQuotaSummary')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              statusCode: 200,
+              body: {
+                groups: [
+                  {
+                    displayName: 'Gemini Models',
+                    buckets: [{ displayName: '5h', remainingFraction: 0.85 }],
+                  },
+                ],
+              },
+            }),
+          });
+        }
+        return Promise.reject(new Error('Unknown url'));
+      });
+
+      const card = { fileName: 'cache-test-card.json', auth_index: 'idx-123' };
+
+      // 1. Primera consulta: debe disparar llamadas en vivo
+      const res1 = await fetchCardQuota(card, { key: 'test-key', fetchFn: mockFetch });
+      expect(res1.plan).toBe('Pro');
+      expect(res1.groups[0].rows[0].percent).toBe(85);
+      expect(res1.cached).toBeUndefined();
+      const initialCalls = callCount;
+      expect(initialCalls).toBeGreaterThan(0);
+
+      // 2. Segunda consulta antes de 5 minutos: debe devolver del caché al instante (0 llamadas nuevas)
+      const res2 = await fetchCardQuota(card, { key: 'test-key', fetchFn: mockFetch });
+      expect(res2.plan).toBe('Pro');
+      expect(res2.cached).toBe(true);
+      expect(callCount).toBe(initialCalls); // Cero llamadas adicionales
+
+      // 3. Consulta con force: true: debe saltarse el caché y consultar en vivo
+      const res3 = await fetchCardQuota(card, { key: 'test-key', fetchFn: mockFetch, force: true });
+      expect(res3.plan).toBe('Pro');
+      expect(res3.cached).toBeUndefined();
+      expect(callCount).toBeGreaterThan(initialCalls);
     });
   });
 

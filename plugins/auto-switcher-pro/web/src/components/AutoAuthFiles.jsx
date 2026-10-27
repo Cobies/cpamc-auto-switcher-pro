@@ -19,6 +19,8 @@ import {
 } from '../api/managementClient';
 import SpecialistModal from './SpecialistModal';
 import QuotaClock from './QuotaClock';
+import { Icons } from './Icons';
+import { HelpTooltip } from './HelpTooltip';
 import './AutoAuthFiles.css';
 
 // Computes deterministic pool group colors: unassigned cards stay neutral (no color glow),
@@ -52,20 +54,20 @@ const getPoolGroupStyle = (assignedPrefix) => {
   const poolBase = match ? match[1] : assignedPrefix;
 
   const poolColors = {
-    agy: { primary: '#38bdf8', bg: 'rgba(56, 189, 248, 0.18)', border: 'rgba(56, 189, 248, 0.5)', color: '#7dd3fc' },
-    agy2: { primary: '#a855f7', bg: 'rgba(168, 85, 247, 0.18)', border: 'rgba(168, 85, 247, 0.5)', color: '#e9d5ff' },
-    agy_son: { primary: '#f59e0b', bg: 'rgba(245, 158, 11, 0.18)', border: 'rgba(245, 158, 11, 0.5)', color: '#fef08a' },
-    agy_opus: { primary: '#ec4899', bg: 'rgba(236, 72, 153, 0.18)', border: 'rgba(236, 72, 153, 0.5)', color: '#fbcfe8' },
-    agy_clau: { primary: '#10b981', bg: 'rgba(16, 185, 129, 0.18)', border: 'rgba(16, 185, 129, 0.5)', color: '#6ee7b7' },
-    clau: { primary: '#10b981', bg: 'rgba(16, 185, 129, 0.18)', border: 'rgba(16, 185, 129, 0.5)', color: '#67e8f9' },
-    codex: { primary: '#6366f1', bg: 'rgba(99, 102, 241, 0.18)', border: 'rgba(99, 102, 241, 0.5)', color: '#c7d2fe' },
+    agy: { primary: '#0ea5e9', bg: 'rgba(14, 165, 233, 0.08)', border: '#0284c7', color: '#38bdf8' },
+    agy2: { primary: '#9333ea', bg: 'rgba(147, 51, 234, 0.08)', border: '#7e22ce', color: '#c084fc' },
+    agy_son: { primary: '#d97706', bg: 'rgba(217, 119, 6, 0.08)', border: '#b45309', color: '#f59e0b' },
+    agy_opus: { primary: '#db2777', bg: 'rgba(219, 39, 119, 0.08)', border: '#be185d', color: '#f472b6' },
+    agy_clau: { primary: '#059669', bg: 'rgba(5, 150, 105, 0.08)', border: '#047857', color: '#10b981' },
+    clau: { primary: '#059669', bg: 'rgba(5, 150, 105, 0.08)', border: '#047857', color: '#10b981' },
+    codex: { primary: '#4f46e5', bg: 'rgba(79, 70, 229, 0.08)', border: '#4338ca', color: '#818cf8' },
   };
 
   const scheme = poolColors[poolBase] || {
-    primary: '#818cf8',
-    bg: 'rgba(129, 140, 248, 0.18)',
-    border: 'rgba(129, 140, 248, 0.5)',
-    color: '#c7d2fe',
+    primary: '#64748b',
+    bg: 'rgba(100, 116, 139, 0.08)',
+    border: '#475569',
+    color: '#94a3b8',
   };
 
   return {
@@ -115,6 +117,8 @@ export default function AutoAuthFiles({
   const [quotasMap, setQuotasMap] = useState(initialQuotas || {});
   const [refreshingQuotaKeys, setRefreshingQuotaKeys] = useState(new Set());
   const [loadingQuotaKeys, setLoadingQuotaKeys] = useState(new Set());
+  const [cardScale, setCardScale] = useState(1.0);
+  const [detailModal, setDetailModal] = useState({ isOpen: false, card: null, telemetry: null, quota: null });
   const [specialistModal, setSpecialistModal] = useState({
     isOpen: false,
     card: null,
@@ -355,13 +359,16 @@ export default function AutoAuthFiles({
       setRefreshingQuotaKeys((prev) => new Set(prev).add(masterKey));
       setLoadingQuotaKeys((prev) => new Set(prev).add(masterKey));
       try {
-        const result = await fetchCardQuota({
-          fileName: masterKey,
-          auth_index: telemetry.authIndex || '',
-          project_id: telemetry.projectId || '',
-          prefix: telemetry.prefix || '',
-          familyRole: telemetry.familyRole || '',
-        });
+        const result = await fetchCardQuota(
+          {
+            fileName: masterKey,
+            auth_index: telemetry.authIndex || '',
+            project_id: telemetry.projectId || '',
+            prefix: telemetry.prefix || '',
+            familyRole: telemetry.familyRole || '',
+          },
+          { force: true }
+        );
         if (isMountedRef.current) {
           setQuotasMap((prev) => ({
             ...prev,
@@ -491,12 +498,10 @@ export default function AutoAuthFiles({
     const bannerStyle = poolStyle ? {
       borderColor: poolStyle.border,
       background: poolStyle.bg,
-      boxShadow: `0 0 12px ${poolStyle.bg}`,
     } : {};
 
     const activeModelNameStyle = poolStyle ? {
-      color: '#fbbf24',
-      textShadow: `0 0 8px ${poolStyle.border}`,
+      color: '#f6f4f1',
     } : {};
 
     if (specState.isSpecialist) {
@@ -526,7 +531,10 @@ export default function AutoAuthFiles({
             {specState.activeSpecialistModel}
           </div>
           <div className="hero-model-helper">
-            Ruteo virtual activo · 🛡️ Aislamiento en RAM (Disco intacto)
+            <span>Ruteo virtual activo en RAM</span>
+            <HelpTooltip title="Aislamiento en RAM">
+              El ruteo y las exclusiones se gobiernan 100% en memoria RAM por el plugin. Las credenciales físicas en disco permanecen intactas.
+            </HelpTooltip>
           </div>
         </div>
       );
@@ -584,7 +592,7 @@ export default function AutoAuthFiles({
         {/* Real cooldown state from CPAMC native (429 quota exhaustion) */}
         {earliestCooldown && (
           <div className="card-cooldown-banner" data-testid="card-cooldown-banner">
-            <span className="cooldown-icon">🧊</span>
+            <span className="cooldown-icon"><Icons.Clock size={14} className="text-amber-500" /></span>
             <span className="cooldown-text">
               En cooldown (429): {earliestCooldown.modelKey}
               {earliestCooldown.retryAt ?
@@ -683,7 +691,11 @@ export default function AutoAuthFiles({
             data-testid={`btn-refresh-quota-${masterKey}`}
             title="Actualizar telemetría de cuota en vivo"
           >
-            <span className={isRefreshing ? 'spinning' : ''}>🔄</span>
+            {isRefreshing ? (
+              <Icons.Refresh size={13} className="spinning" style={{ marginRight: 4 }} />
+            ) : (
+              <Icons.Refresh size={13} style={{ marginRight: 4 }} />
+            )}
             <span>Actualizar Cuota</span>
           </button>
         </div>
@@ -1080,14 +1092,51 @@ export default function AutoAuthFiles({
       >
         <div className="auto-auth-section-header">
           <h3 className="auto-auth-section-title">
-            <span>🔀</span>
+            <Icons.Layers size={18} />
             <span>
               {claudeCards.length > 0
                 ? 'Cards Gestionadas en Pools (Modelo 2N: Gemini + Claude)'
                 : 'Cards Gestionadas en Pools (Cuentas Activas)'}
             </span>
           </h3>
-          <span className="auto-auth-section-count">{managedCards.length} cards</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div className="auto-auth-scale-controls" style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'var(--bg-card, #262320)', padding: '2px 8px', borderRadius: 6, border: '1px solid var(--border-color, #3a3530)' }}>
+              <span style={{ fontSize: 11, color: 'var(--text-tertiary, #9c958d)', fontWeight: 600 }}>Escala:</span>
+              <button
+                type="button"
+                className="btn-scale-adjust"
+                onClick={() => setCardScale((prev) => Math.max(0.75, Number((prev - 0.1).toFixed(2))))}
+                title="Reducir tamaño de tarjetas (-)"
+                style={{ padding: '2px 7px', borderRadius: 4, background: 'var(--bg-surface, #1d1b18)', border: '1px solid var(--border-color, #3a3530)', color: 'var(--text-primary, #f6f4f1)', cursor: 'pointer', fontSize: 12, fontWeight: 700, lineHeight: 1 }}
+              >
+                -
+              </button>
+              <span style={{ fontSize: 11, color: 'var(--text-secondary, #c9c3bb)', minWidth: 36, textAlign: 'center', fontFamily: 'monospace', fontWeight: 600 }}>
+                {Math.round(cardScale * 100)}%
+              </span>
+              <button
+                type="button"
+                className="btn-scale-adjust"
+                onClick={() => setCardScale((prev) => Math.min(1.4, Number((prev + 0.1).toFixed(2))))}
+                title="Aumentar tamaño de tarjetas (+)"
+                style={{ padding: '2px 7px', borderRadius: 4, background: 'var(--bg-surface, #1d1b18)', border: '1px solid var(--border-color, #3a3530)', color: 'var(--text-primary, #f6f4f1)', cursor: 'pointer', fontSize: 12, fontWeight: 700, lineHeight: 1 }}
+              >
+                +
+              </button>
+              {cardScale !== 1.0 && (
+                <button
+                  type="button"
+                  className="btn-scale-reset"
+                  onClick={() => setCardScale(1.0)}
+                  title="Restablecer escala al 100%"
+                  style={{ padding: '2px 5px', borderRadius: 4, background: 'transparent', border: 'none', color: 'var(--text-tertiary, #9c958d)', cursor: 'pointer', fontSize: 10, textDecoration: 'underline' }}
+                >
+                  100%
+                </button>
+              )}
+            </div>
+            <span className="auto-auth-section-count">{managedCards.length} cards</span>
+          </div>
         </div>
 
         {managedCards.length === 0 ? (
@@ -1129,7 +1178,8 @@ export default function AutoAuthFiles({
                   <div className="auto-auth-pool-header">
                     <div className="auto-auth-pool-info">
                       <span className="auto-auth-pool-title">
-                        📦 {groupPoolId}
+                        <Icons.Box size={16} style={{ marginRight: 6, verticalAlign: 'middle' }} />
+                        {groupPoolId}
                       </span>
                       {group.activePoolBase && (
                         <span className="auto-auth-pool-badge">
@@ -1137,7 +1187,8 @@ export default function AutoAuthFiles({
                         </span>
                       )}
                       <span className="auto-auth-pool-target">
-                        🎯 Objetivo: <strong>{groupTargetModel}</strong>
+                        <Icons.Target size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+                        Objetivo: <strong>{groupTargetModel}</strong>
                       </span>
                     </div>
                     <span className="auto-auth-section-count">
@@ -1145,12 +1196,12 @@ export default function AutoAuthFiles({
                     </span>
                   </div>
 
-                  <div className="auto-auth-grid">
+                  <div className="auto-auth-grid" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${Math.round(350 * cardScale)}px, 1fr))` }}>
                     {group.cards.map(({ card, originalIdx: idx }) => {
                       const isGemini = card.familyRole === 'gemini';
                       const isCodex = card.familyRole === 'codex';
                       const roleBadgeClass = isGemini ? 'master' : isCodex ? 'codex' : 'virtual';
-                      const familyTitle = isGemini ? '💎 Gemini' : isCodex ? '🧩 Codex' : '🎭 Claude';
+                      const familyTitle = isGemini ? 'Gemini' : isCodex ? 'Codex' : 'Claude';
 
                       const excludes55 = (card.exclusionBadges || []).includes('Excluye 5.5');
                       const virtualFileToDelete = card.virtualFileName;
@@ -1210,6 +1261,21 @@ export default function AutoAuthFiles({
                               </span>
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <button
+                                type="button"
+                                className="btn-card-inspect"
+                                onClick={() => {
+                                  const masterKey = card.masterFileName || card.fileName;
+                                  const telem = extractAccountTelemetry(card);
+                                  const q = getCardQuota(masterKey, telem);
+                                  setDetailModal({ isOpen: true, card, telemetry: telem, quota: q });
+                                }}
+                                aria-label="Inspeccionar Cuenta"
+                                title="Ver detalles y telemetría completa"
+                                style={{ background: 'transparent', border: '1px solid var(--border-color, #3a3530)', borderRadius: 5, padding: '3px 6px', color: 'var(--text-secondary, #c9c3bb)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                              >
+                                <Icons.Info size={13} />
+                              </button>
                               <button
                                 type="button"
                                 className="btn-card-gear"
@@ -1328,7 +1394,7 @@ export default function AutoAuthFiles({
                                     className="badge-isolation-tag"
                                     data-testid={`badge-specialist-excluded-${idx}`}
                                   >
-                                    🛡️ Aislamiento Virtual Puro (🚫 Excluidos: {specState.excludedCount} modelos)
+                                    Aislamiento Virtual en RAM (🚫 Excluidos: {specState.excludedCount} modelos)
                                   </span>
                                 </>
                               ) : (
@@ -1414,12 +1480,12 @@ export default function AutoAuthFiles({
                 </span>
               </div>
 
-              <div className="auto-auth-grid">
+              <div className="auto-auth-grid" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${Math.round(350 * cardScale)}px, 1fr))` }}>
                 {standaloneCards.map((scard, sIdx) => {
                   const isClaude = scard.provider === 'claude' || scard.fileName.includes('claude');
                   const isCodex = scard.provider === 'codex' || scard.provider === 'openai';
                   const isGemini = !isClaude && !isCodex;
-                  const familyTitle = isGemini ? '💎 Google Directo' : isCodex ? '🧩 OpenAI Directo' : '🎭 Claude Directo';
+                  const familyTitle = isGemini ? 'Google Directo' : isCodex ? 'OpenAI Directo' : 'Claude Directo';
                   const roleBadgeClass = isGemini ? 'master' : isCodex ? 'codex' : 'virtual';
 
                   return (
@@ -1688,6 +1754,115 @@ export default function AutoAuthFiles({
           </div>
         </div>
       )}
+
+      {/* Modal de Inspección Detallada de Cuenta */}
+      {detailModal.isOpen && detailModal.card && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.75)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: 16,
+          }}
+          onClick={() => setDetailModal({ isOpen: false, card: null, telemetry: null, quota: null })}
+        >
+          <div
+            style={{
+              background: 'var(--bg-surface, #1d1b18)',
+              border: '1px solid var(--border-color, #3a3530)',
+              borderRadius: 12,
+              width: '100%',
+              maxWidth: 620,
+              padding: 24,
+              color: 'var(--text-primary, #f6f4f1)',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.6)',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color, #3a3530)', paddingBottom: 12, marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Icons.Layers size={18} />
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>
+                  Detalles de Cuenta: {detailModal.card.email || detailModal.card.maskedEmail}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDetailModal({ isOpen: false, card: null, telemetry: null, quota: null })}
+                style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary, #c9c3bb)', cursor: 'pointer', padding: 4 }}
+              >
+                <Icons.X size={18} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ background: 'var(--bg-card, #262320)', padding: 12, borderRadius: 8, border: '1px solid var(--border-color, #3a3530)' }}>
+                <div style={{ fontSize: 11, color: 'var(--text-tertiary, #9c958d)', textTransform: 'uppercase', marginBottom: 4 }}>Archivo Físico / Virtual</div>
+                <div style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--text-secondary, #c9c3bb)' }}>
+                  {detailModal.card.virtualFileName || detailModal.card.masterFileName || detailModal.card.fileName}
+                </div>
+              </div>
+
+              <div style={{ background: 'var(--bg-card, #262320)', padding: 12, borderRadius: 8, border: '1px solid var(--border-color, #3a3530)' }}>
+                <div style={{ fontSize: 11, color: 'var(--text-tertiary, #9c958d)', textTransform: 'uppercase', marginBottom: 4 }}>Modelo Asignado en RAM</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#f6f4f1' }}>
+                  {detailModal.card.specialistModel || 'Predeterminado'}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-secondary, #c9c3bb)', marginTop: 4 }}>
+                  Prefijo: <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{detailModal.card.assignedPrefix || 'sin-prefijo'}</span> · Estado: {detailModal.card.isDynamicRAMLeader ? 'Líder en caliente' : 'En reserva'}
+                </div>
+              </div>
+
+              {detailModal.quota && (
+                <div style={{ background: 'var(--bg-card, #262320)', padding: 12, borderRadius: 8, border: '1px solid var(--border-color, #3a3530)' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-tertiary, #9c958d)', textTransform: 'uppercase', marginBottom: 6 }}>Cuotas y Ventanas Activas</div>
+                  <div style={{ display: 'flex', gap: 16 }}>
+                    <div>Plan: <strong style={{ color: '#10b981' }}>{detailModal.quota.plan || 'Estándar'}</strong></div>
+                    <div>Estado: <strong>{detailModal.quota.loading ? 'Actualizando...' : 'Sincronizado'}</strong></div>
+                  </div>
+                </div>
+              )}
+
+              {detailModal.telemetry && detailModal.telemetry.recentRequests && (
+                <div style={{ background: 'var(--bg-card, #262320)', padding: 12, borderRadius: 8, border: '1px solid var(--border-color, #3a3530)' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-tertiary, #9c958d)', textTransform: 'uppercase', marginBottom: 6 }}>Actividad Reciente (~3.3h)</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary, #c9c3bb)' }}>
+                    Peticiones registradas: <strong>{detailModal.telemetry.recentRequests.length}</strong>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
+              <button
+                type="button"
+                onClick={() => setDetailModal({ isOpen: false, card: null, telemetry: null, quota: null })}
+                style={{
+                  background: 'var(--bg-card, #262320)',
+                  border: '1px solid var(--border-color, #3a3530)',
+                  color: 'var(--text-primary, #f6f4f1)',
+                  padding: '8px 16px',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: 13,
+                }}
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

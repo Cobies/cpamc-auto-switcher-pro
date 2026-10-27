@@ -9,9 +9,9 @@
   --pt-card-hover: #1c212c;
   --pt-border: #232936;
   --pt-border-accent: rgba(168, 85, 247, 0.4);
-  --pt-text: #f0f6fc;
-  --pt-muted: #8b949e;
-  --pt-subtext: #64748b;
+  --pt-text: var(--text-primary, #f6f4f1);
+  --pt-muted: var(--text-secondary, #c9c3bb);
+  --pt-subtext: var(--text-tertiary, #9c958d);
   --pt-blue: #38bdf8;
   --pt-purple: #a855f7;
   --pt-purple-light: #d8b4fe;
@@ -45,7 +45,7 @@
   border: 1px solid rgba(168, 85, 247, 0.3);
   border-radius: 12px;
   font-size: 13px;
-  color: #f1f5f9;
+  color: var(--text-primary, #f6f4f1);
   backdrop-filter: blur(12px);
 }
 .pt-insight-icon {
@@ -109,7 +109,7 @@
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  background: #0d1117;
+  background: var(--bg-app, #151412);
   border: 1px solid var(--pt-border);
   color: var(--pt-muted);
   transition: all 0.15s ease;
@@ -144,7 +144,7 @@
   right: 0;
   margin-top: 6px;
   width: 210px;
-  background: #161b22;
+  background: var(--bg-surface, #1d1b18);
   border: 1px solid var(--pt-border-accent);
   border-radius: 8px;
   padding: 6px 0;
@@ -484,7 +484,7 @@
   padding: 20px;
 }
 .pt-modal-box {
-  background: #161b22;
+  background: var(--bg-surface, #1d1b18);
   border: 1px solid var(--pt-border-accent);
   border-radius: 14px;
   width: 100%;

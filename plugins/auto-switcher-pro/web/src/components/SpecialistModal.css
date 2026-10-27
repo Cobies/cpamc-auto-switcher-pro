@@ -22,7 +22,7 @@
 }
 
 .specialist-modal-card {
-  background: #1e293b;
+  background: var(--bg-card, #262320);
   border: 1px solid rgba(71, 85, 105, 0.8);
   border-radius: 16px;
   width: 100%;
@@ -31,7 +31,7 @@
   flex-direction: column;
   gap: 16px;
   padding: 24px;
-  color: #f8fafc;
+  color: var(--text-primary, #f6f4f1);
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
   animation: specialistSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -69,20 +69,20 @@
   margin: 0 0 4px 0;
   font-size: 18px;
   font-weight: 700;
-  color: #f8fafc;
+  color: var(--text-primary, #f6f4f1);
 }
 
 .specialist-subtitle {
   margin: 0;
   font-size: 12.5px;
-  color: #94a3b8;
+  color: var(--text-secondary, #c9c3bb);
   line-height: 1.4;
 }
 
 .specialist-close-btn {
   background: transparent;
   border: none;
-  color: #94a3b8;
+  color: var(--text-secondary, #c9c3bb);
   font-size: 18px;
   cursor: pointer;
   padding: 4px;
@@ -94,7 +94,7 @@
 }
 
 .specialist-close-btn:hover {
-  color: #f8fafc;
+  color: var(--text-primary, #f6f4f1);
   background: rgba(51, 65, 85, 0.6);
 }
 
@@ -121,20 +121,20 @@
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
-  color: #64748b;
+  color: var(--text-tertiary, #9c958d);
   letter-spacing: 0.04em;
 }
 
 .specialist-meta-value {
   font-size: 12.5px;
   font-weight: 600;
-  color: #e2e8f0;
+  color: var(--text-primary, #f6f4f1);
 }
 
 .specialist-meta-value.code {
   font-family: monospace;
   font-size: 12px;
-  color: #cbd5e1;
+  color: var(--text-secondary, #c9c3bb);
 }
 
 .specialist-meta-badge {
@@ -194,13 +194,13 @@
 .specialist-section-label {
   font-size: 12px;
   font-weight: 600;
-  color: #cbd5e1;
+  color: var(--text-secondary, #c9c3bb);
 }
 
 .specialist-family-count {
   font-size: 11px;
   font-weight: 600;
-  color: #94a3b8;
+  color: var(--text-secondary, #c9c3bb);
   background: rgba(15, 23, 42, 0.6);
   padding: 2px 8px;
   border-radius: 12px;
@@ -209,7 +209,7 @@
 
 .specialist-empty-notice {
   font-size: 13px;
-  color: #94a3b8;
+  color: var(--text-secondary, #c9c3bb);
   padding: 16px;
   text-align: center;
   background: rgba(15, 23, 42, 0.4);
@@ -298,7 +298,7 @@
 
 .model-radio-name {
   font-size: 13px;
-  color: #f8fafc;
+  color: var(--text-primary, #f6f4f1);
   font-weight: 600;
 }
 
@@ -308,12 +308,12 @@
 
 .model-radio-name.mono {
   font-family: monospace;
-  color: #e2e8f0;
+  color: var(--text-primary, #f6f4f1);
 }
 
 .model-desc-hint {
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--text-secondary, #c9c3bb);
   line-height: 1.3;
 }
 
@@ -360,7 +360,7 @@
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.05em;
-  color: #94a3b8;
+  color: var(--text-secondary, #c9c3bb);
   border-bottom: 1px solid rgba(51, 65, 85, 0.5);
 }
 
@@ -389,7 +389,7 @@
 
 .preview-sub {
   font-size: 11px;
-  color: #cbd5e1;
+  color: var(--text-secondary, #c9c3bb);
   margin-top: 2px;
 }
 
@@ -406,7 +406,7 @@
 .btn-modal-cancel {
   background: rgba(51, 65, 85, 0.6);
   border: 1px solid rgba(71, 85, 105, 0.8);
-  color: #cbd5e1;
+  color: var(--text-secondary, #c9c3bb);
   padding: 8px 16px;
   border-radius: 8px;
   font-size: 13px;
@@ -417,7 +417,7 @@
 
 .btn-modal-cancel:hover {
   background: rgba(71, 85, 105, 0.8);
-  color: #f8fafc;
+  color: var(--text-primary, #f6f4f1);
 }
 
 .btn-modal-save {
