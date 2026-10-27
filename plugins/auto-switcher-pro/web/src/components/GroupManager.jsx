@@ -43,7 +43,7 @@ const MODEL_FAMILIES = {
         hintPrefix: 'agy',
         quota: 'Gemini Models',
         targetPatterns: ['gemini'],
-        note: 'Vigila cuota de "Gemini Models" (3.7 y 3.8 comparten el mismo balde).',
+        note: 'Cuentas de Google Gemini.',
       },
       sonnet: {
         key: 'sonnet',
@@ -1994,7 +1994,11 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
                           <span className="group-family-icon">{fam.icon}</span>
                           <span className="group-family-label">{fam.label}</span>
                           <span className="group-family-hint">
-                            {key === 'gemini' ? 'Gemini: agy* · Claude: agy_son*, agy_opus*, agy_clau*' : `prefijo ${fam.hintPrefix}*`}
+                            {key === 'gemini'
+                              ? 'Modelos Gemini & Claude'
+                              : key === 'codex'
+                                ? 'Modelos GPT & Codex'
+                                : (fam.quota || fam.label)}
                           </span>
                         </button>
                       );
@@ -2016,7 +2020,7 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
                           data-testid="subfamily-gemini-pure"
                         >
                           <span className="group-subfamily-label">🔷 Gemini Puro</span>
-                          <span className="group-subfamily-hint">Prefijo: agy, agy2... · Cuota: Gemini Models</span>
+                          <span className="group-subfamily-hint">Cuota: Gemini Models</span>
                         </button>
                         {hasClaudeInAntigravity && (
                           <>
@@ -2027,7 +2031,7 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
                               data-testid="subfamily-gemini-sonnet"
                             >
                               <span className="group-subfamily-label">🔶 Claude Sonnet</span>
-                              <span className="group-subfamily-hint">Prefijo: agy_son... · claude-sonnet 4.6 & 5.5</span>
+                              <span className="group-subfamily-hint">claude-sonnet 4.6 & 5.5</span>
                             </button>
                             <button
                               type="button"
@@ -2036,7 +2040,7 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
                               data-testid="subfamily-gemini-opus"
                             >
                               <span className="group-subfamily-label">🟣 Claude Opus</span>
-                              <span className="group-subfamily-hint">Prefijo: agy_opus... · claude-opus 4.6 & 5.5 High</span>
+                              <span className="group-subfamily-hint">claude-opus 4.6 & 5.5 High</span>
                             </button>
                             <button
                               type="button"
@@ -2045,7 +2049,7 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
                               data-testid="subfamily-gemini-claude"
                             >
                               <span className="group-subfamily-label">🎭 Antigravity Dual</span>
-                              <span className="group-subfamily-hint">Prefijo: agy_clau... · Cuota: Claude & GPT</span>
+                              <span className="group-subfamily-hint">Cuota: Claude & GPT</span>
                             </button>
                           </>
                         )}
@@ -2098,7 +2102,7 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
                         </>
                       )}
                       {totalEligible === 0 && (
-                        <span>ℹ️ <strong>0 cuentas libres</strong> · Todas tus cuentas ya están en pools activos o necesitas vincular una nueva.</span>
+                        <span><strong>0 cuentas libres</strong> · Todas tus cuentas ya están en pools activos o necesitas vincular una nueva.</span>
                       )}
                       {totalEligible === 1 && (
                         <span>⚠️ <strong>Tienes 1 cuenta libre</strong> · Necesitas al menos 1 Titular + 1 Suplente para activar rotación.</span>

@@ -1482,7 +1482,7 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
       const deepseekChip = screen.getByTestId('family-deepseek');
       expect(deepseekChip).toBeTruthy();
       expect(deepseekChip.textContent).toContain('DeepSeek');
-      expect(deepseekChip.textContent).toContain('prefijo deepseek*');
+      expect(deepseekChip.textContent).toContain('DeepSeek Chat & Reasoner');
 
       // Unused providers (e.g. Groq, Cerebras) must NOT pollute the UI
       expect(screen.queryByTestId('family-groq')).toBeNull();
