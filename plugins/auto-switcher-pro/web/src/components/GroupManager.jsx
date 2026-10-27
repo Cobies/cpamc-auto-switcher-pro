@@ -2053,39 +2053,59 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
                     </div>
                   )}
 
-                  {effectiveFamily && effectiveFamily.note && (
-                    <p className="group-family-note" data-testid="group-family-note">
-                      ℹ️ {excludeVersion55 && (effectiveFamily.key.includes('claude') || effectiveFamily.key.includes('sonnet') || effectiveFamily.key.includes('opus'))
-                        ? effectiveFamily.note.replace(/(claude-[a-z]+-5-5[a-z-]*)/gi, '$1 (versión 5.5 excluida)')
-                        : effectiveFamily.note}
-                    </p>
-                  )}
                 </div>
 
-                {/* Badge de Capacidad en Tiempo Real (Contextual y Amigable) */}
+                {/* Badge de Capacidad e Información en Tiempo Real (Unificado en una sola línea) */}
                 {family && (() => {
                   const totalEligible = leaderCandidates.length;
                   const maxGroups = Math.floor(totalEligible / 2);
+                  const noteText = effectiveFamily?.note ? (
+                    excludeVersion55 && (effectiveFamily.key.includes('claude') || effectiveFamily.key.includes('sonnet') || effectiveFamily.key.includes('opus'))
+                      ? effectiveFamily.note.replace(/(claude-[a-z]+-5-5[a-z-]*)/gi, '$1 (versión 5.5 excluida)')
+                      : effectiveFamily.note
+                  ) : '';
 
-                  if (totalEligible === 0) {
-                    return (
-                      <div className="group-capacity-badge" data-testid="capacity-badge" style={{ borderColor: 'rgba(148, 163, 184, 0.4)' }}>
-                        <span>ℹ️ <strong>0 cuentas libres</strong> · Todas tus cuentas ya están en pools activos o necesitas vincular una nueva.</span>
-                      </div>
-                    );
-                  }
-
-                  if (totalEligible === 1) {
-                    return (
-                      <div className="group-capacity-badge" data-testid="capacity-badge" style={{ borderColor: 'rgba(234, 179, 8, 0.4)', background: 'rgba(234, 179, 8, 0.08)' }}>
-                        <span>⚠️ <strong>Tienes 1 cuenta libre</strong> · Necesitas al menos 1 Titular + 1 Suplente para activar rotación.</span>
-                      </div>
-                    );
-                  }
+                  const badgeBorder = totalEligible === 0
+                    ? 'rgba(148, 163, 184, 0.4)'
+                    : totalEligible === 1
+                      ? 'rgba(234, 179, 8, 0.4)'
+                      : 'rgba(16, 185, 129, 0.4)';
+                  const badgeBg = totalEligible === 0
+                    ? 'rgba(15, 23, 42, 0.6)'
+                    : totalEligible === 1
+                      ? 'rgba(234, 179, 8, 0.08)'
+                      : 'rgba(16, 185, 129, 0.08)';
 
                   return (
-                    <div className="group-capacity-badge" data-testid="capacity-badge" style={{ borderColor: 'rgba(16, 185, 129, 0.4)', background: 'rgba(16, 185, 129, 0.08)' }}>
-                      <span>✅ <strong>{totalEligible} cuentas listas</strong> · Puedes armar hasta <strong>{maxGroups}</strong> {maxGroups === 1 ? 'pool' : 'pools'} de rotación (o 1 pool con {totalEligible - 1} {totalEligible - 1 === 1 ? 'reserva' : 'reservas'}).</span>
+                    <div
+                      className="group-capacity-badge"
+                      data-testid="capacity-badge"
+                      style={{
+                        borderColor: badgeBorder,
+                        background: badgeBg,
+                        display: 'flex',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: 8,
+                      }}
+                    >
+                      {noteText && (
+                        <>
+                          <span className="group-family-note" data-testid="group-family-note" style={{ margin: 0, color: '#94a3b8' }}>
+                            ℹ️ {noteText}
+                          </span>
+                          <span style={{ color: '#475569' }}>·</span>
+                        </>
+                      )}
+                      {totalEligible === 0 && (
+                        <span>ℹ️ <strong>0 cuentas libres</strong> · Todas tus cuentas ya están en pools activos o necesitas vincular una nueva.</span>
+                      )}
+                      {totalEligible === 1 && (
+                        <span>⚠️ <strong>Tienes 1 cuenta libre</strong> · Necesitas al menos 1 Titular + 1 Suplente para activar rotación.</span>
+                      )}
+                      {totalEligible >= 2 && (
+                        <span>✅ <strong>{totalEligible} cuentas listas</strong> · Puedes armar hasta <strong>{maxGroups}</strong> {maxGroups === 1 ? 'pool' : 'pools'} de rotación (o 1 pool con {totalEligible - 1} {totalEligible - 1 === 1 ? 'reserva' : 'reservas'}).</span>
+                      )}
                     </div>
                   );
                 })()}
