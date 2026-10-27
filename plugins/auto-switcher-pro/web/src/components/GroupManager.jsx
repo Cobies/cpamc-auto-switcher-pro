@@ -2193,55 +2193,60 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
                       </div>
                     </div>
 
-                    {/* Cuentas de Reserva */}
+                    {/* Cuentas de Respaldo */}
                     <div className="group-field">
                       <label className="group-label">
                         <span>🛡️</span>
-                        <span>Banco de Suplentes (Reservas en RAM · Failover transparente):</span>
+                        <span>Cuentas de Respaldo (Rotación automática):</span>
                       </label>
                       {reserveCandidates.length === 0 ? (
                         <div style={{ color: '#64748b', fontSize: 12, padding: 8 }}>
                           {selectedActiveNodeId
-                            ? 'No hay más cuentas libres compatibles con esta familia para agregar como reservas.'
+                            ? 'No hay más cuentas libres compatibles con esta familia para rotación.'
                             : family
                               ? 'Selecciona primero una cuenta principal.'
                               : 'Elige primero la familia de modelos.'}
                         </div>
                       ) : (
-                        <div className="group-reserves-container" data-testid="reserves-container">
-                          {reserveCandidates.map(({ node: n, virtual }) => {
-                            const isChecked = selectedReserveNodeIds.includes(n.id);
-                            const email = n.data?.email || n.data?.fileName || n.id;
-                            const file = n.data?.fileName || '';
-                            const reserveIdx = selectedReserveNodeIds.indexOf(n.id);
-                            return (
-                              <div
-                                key={n.id}
-                                className={`group-reserve-item ${isChecked ? 'selected' : ''}`}
-                                onClick={() => handleToggleReserve(n.id)}
-                                data-testid={`reserve-item-${n.id}`}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={isChecked}
-                                  onChange={() => {}}
-                                  style={{ cursor: 'pointer' }}
-                                />
-                                <div className="group-reserve-label">
-                                  <span className="group-reserve-email">
-                                    {virtual ? '🔀 ' : ''}{email}
-                                  </span>
-                                  <span className="group-reserve-sub">{file}</span>
+                        <>
+                          <p className="group-field-hint" style={{ marginTop: 2, marginBottom: 8 }}>
+                            Selecciona las cuentas que tomarán el relevo si la principal agota su cuota:
+                          </p>
+                          <div className="group-reserves-container" data-testid="reserves-container">
+                            {reserveCandidates.map(({ node: n, virtual }) => {
+                              const isChecked = selectedReserveNodeIds.includes(n.id);
+                              const email = n.data?.email || n.data?.fileName || n.id;
+                              const file = n.data?.fileName || '';
+                              const reserveIdx = selectedReserveNodeIds.indexOf(n.id);
+                              return (
+                                <div
+                                  key={n.id}
+                                  className={`group-reserve-item ${isChecked ? 'selected' : ''}`}
+                                  onClick={() => handleToggleReserve(n.id)}
+                                  data-testid={`reserve-item-${n.id}`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={() => {}}
+                                    style={{ cursor: 'pointer' }}
+                                  />
+                                  <div className="group-reserve-label">
+                                    <span className="group-reserve-email">
+                                      {virtual ? '🔀 ' : ''}{email}
+                                    </span>
+                                    <span className="group-reserve-sub">{file}</span>
+                                  </div>
+                                  {isChecked && (
+                                    <span className="bento-reserve-order-badge">
+                                      🛡️ #{reserveIdx + 1} Respaldo
+                                    </span>
+                                  )}
                                 </div>
-                                {isChecked && (
-                                  <span className="bento-reserve-order-badge">
-                                    🛡️ {reserveIdx + 1}º Suplente
-                                  </span>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
+                              );
+                            })}
+                          </div>
+                        </>
                       )}
                     </div>
                   </div>
