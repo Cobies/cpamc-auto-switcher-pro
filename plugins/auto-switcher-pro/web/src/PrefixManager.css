@@ -13,7 +13,7 @@
   padding: 16px 20px 48px;
   box-sizing: border-box;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  color: #f0f6fc;
+  color: var(--text-primary, #f6f4f1);
 }
 
 /* Header & Guía Rápida */
@@ -42,7 +42,7 @@
 
 .pm-hero-desc {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--text-secondary, #c9c3bb);
   margin: 3px 0 0;
 }
 
@@ -52,7 +52,7 @@
   border-radius: 10px;
   padding: 10px 16px;
   font-size: 11px;
-  color: #cbd5e1;
+  color: var(--text-secondary, #c9c3bb);
   line-height: 1.5;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
@@ -93,7 +93,7 @@
   top: 50%;
   transform: translateY(-50%);
   font-size: 13px;
-  color: #64748b;
+  color: var(--text-tertiary, #9c958d);
 }
 
 .pm-search-input {
@@ -101,8 +101,8 @@
   box-sizing: border-box;
   padding: 8px 12px 8px 34px;
   background: #0b0f17;
-  border: 1px solid #30363d;
-  color: #f0f6fc;
+  border: 1px solid var(--border-color, #3a3530);
+  color: var(--text-primary, #f6f4f1);
   border-radius: 6px;
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -129,13 +129,13 @@
   font-weight: 700;
   cursor: pointer;
   background: transparent;
-  border: 1px solid #30363d;
-  color: #94a3b8;
+  border: 1px solid var(--border-color, #3a3530);
+  color: var(--text-secondary, #c9c3bb);
   transition: all 0.15s ease;
 }
 
 .pm-filter-chip:hover {
-  color: #f0f6fc;
+  color: var(--text-primary, #f6f4f1);
   border-color: #484f58;
 }
 
@@ -163,9 +163,9 @@
 
 .pm-table th {
   padding: 12px 14px;
-  background: #0d1117;
+  background: var(--bg-app, #151412);
   border-bottom: 1px solid #232936;
-  color: #94a3b8;
+  color: var(--text-secondary, #c9c3bb);
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
@@ -185,13 +185,13 @@
 
 .pm-email-cell {
   font-weight: 700;
-  color: #f0f6fc;
+  color: var(--text-primary, #f6f4f1);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 .pm-filename-cell {
   font-size: 11px;
-  color: #64748b;
+  color: var(--text-tertiary, #9c958d);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
@@ -220,7 +220,7 @@
 
 .pm-role-free {
   background: rgba(148, 163, 184, 0.15);
-  color: #cbd5e1;
+  color: var(--text-secondary, #c9c3bb);
   border: 1px solid rgba(148, 163, 184, 0.3);
 }
 
@@ -240,8 +240,8 @@
 .pm-prefix-input {
   padding: 6px 10px;
   background: #0b0f17;
-  border: 1px solid #30363d;
-  color: #f0f6fc;
+  border: 1px solid var(--border-color, #3a3530);
+  color: var(--text-primary, #f6f4f1);
   border-radius: 6px;
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -293,18 +293,18 @@
   justify-content: space-between;
   align-items: center;
   padding: 12px 20px;
-  background: #0d1117;
+  background: var(--bg-app, #151412);
   border: 1px solid #232936;
   border-radius: 12px;
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  color: #94a3b8;
+  color: var(--text-secondary, #c9c3bb);
   flex-wrap: wrap;
   gap: 12px;
 }
 
 .pm-footer-stats strong {
-  color: #f0f6fc;
+  color: var(--text-primary, #f6f4f1);
 }
 
 .pm-btn-batch-save {

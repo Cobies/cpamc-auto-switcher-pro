@@ -21,7 +21,7 @@
   display: flex;
   flex-direction: column;
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 30px rgba(56, 189, 248, 0.15);
-  color: #f1f5f9;
+  color: var(--text-primary, #f6f4f1);
   font-family: system-ui, -apple-system, sans-serif;
   overflow: hidden;
 }
@@ -35,7 +35,7 @@
   display: flex;
   flex-direction: column;
   box-shadow: none;
-  color: #f1f5f9;
+  color: var(--text-primary, #f6f4f1);
   font-family: system-ui, -apple-system, sans-serif;
   overflow: hidden;
 }
@@ -71,7 +71,7 @@
 
 .quick-guide-flow-lead {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--text-secondary, #c9c3bb);
   line-height: 1.5;
   margin-bottom: 4px;
 }
@@ -79,7 +79,7 @@
 .quick-guide-step-header {
   font-size: 13px;
   font-weight: 700;
-  color: #f8fafc;
+  color: var(--text-primary, #f6f4f1);
   margin-bottom: 3px;
 }
 
@@ -101,7 +101,7 @@
 .quick-guide-protip-box p {
   margin: 0;
   font-size: 11px;
-  color: #cbd5e1;
+  color: var(--text-secondary, #c9c3bb);
   line-height: 1.5;
 }
 
@@ -138,12 +138,12 @@
 
 .installer-subtitle {
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--text-secondary, #c9c3bb);
 }
 
 .installer-desc {
   font-size: 11px;
-  color: #cbd5e1;
+  color: var(--text-secondary, #c9c3bb);
   line-height: 1.4;
   margin: 0;
 }
@@ -190,7 +190,7 @@
 .target-name {
   font-size: 12px;
   font-weight: 600;
-  color: #f8fafc;
+  color: var(--text-primary, #f6f4f1);
 }
 
 .target-badge {
@@ -208,7 +208,7 @@
 
 .badge-absent {
   background: rgba(148, 163, 184, 0.1);
-  color: #94a3b8;
+  color: var(--text-secondary, #c9c3bb);
 }
 
 .btn-target-install {
@@ -243,7 +243,7 @@
 
 .fallback-label {
   font-size: 10px;
-  color: #94a3b8;
+  color: var(--text-secondary, #c9c3bb);
 }
 
 .fallback-code-row {
@@ -267,8 +267,8 @@
 }
 
 .btn-copy-cmd {
-  background: #334155;
-  color: #f8fafc;
+  background: var(--border-color, #3a3530);
+  color: var(--text-primary, #f6f4f1);
   border: none;
   border-radius: 4px;
   padding: 3px 8px;
@@ -278,7 +278,7 @@
 }
 
 .btn-copy-cmd:hover {
-  background: #475569;
+  background: var(--border-primary, #4a453f);
 }
 
 /* ==========================================================================
@@ -314,18 +314,18 @@
 
 .multiproject-subtitle {
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--text-secondary, #c9c3bb);
 }
 
 .multiproject-desc {
   font-size: 11px;
-  color: #cbd5e1;
+  color: var(--text-secondary, #c9c3bb);
   line-height: 1.45;
   margin: 0;
 }
 
 .multiproject-desc strong {
-  color: #f8fafc;
+  color: var(--text-primary, #f6f4f1);
 }
 
 .multiproject-recipe-box {
@@ -402,13 +402,13 @@
   margin: 0;
   font-size: 18px;
   font-weight: 800;
-  color: #f8fafc;
+  color: var(--text-primary, #f6f4f1);
 }
 
 .quick-guide-close {
   background: transparent;
   border: 1px solid rgba(148, 163, 184, 0.2);
-  color: #94a3b8;
+  color: var(--text-secondary, #c9c3bb);
   width: 32px;
   height: 32px;
   border-radius: 8px;
@@ -449,7 +449,7 @@
 .quick-guide-section-title {
   font-size: 15px;
   font-weight: 800;
-  color: #f8fafc;
+  color: var(--text-primary, #f6f4f1);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -490,7 +490,7 @@
 .quick-guide-card-name {
   font-size: 13px;
   font-weight: 700;
-  color: #e2e8f0;
+  color: var(--text-primary, #f6f4f1);
 }
 
 .quick-guide-card-tag {
@@ -505,7 +505,7 @@
 
 .quick-guide-card-desc {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--text-secondary, #c9c3bb);
   margin: 0;
   line-height: 1.4;
 }
@@ -516,7 +516,7 @@
   padding: 6px 10px;
   border-radius: 0 6px 6px 0;
   font-size: 11px;
-  color: #cbd5e1;
+  color: var(--text-secondary, #c9c3bb);
   margin-top: 4px;
 }
 
@@ -538,7 +538,7 @@
 
 .quick-guide-step-num {
   background: #38bdf8;
-  color: #0f172a;
+  color: var(--bg-surface, #1d1b18);
   width: 22px;
   height: 22px;
   border-radius: 50%;
@@ -553,12 +553,12 @@
 
 .quick-guide-step-content {
   font-size: 12px;
-  color: #cbd5e1;
+  color: var(--text-secondary, #c9c3bb);
   line-height: 1.5;
 }
 
 .quick-guide-step-content strong {
-  color: #f8fafc;
+  color: var(--text-primary, #f6f4f1);
 }
 
 .quick-guide-footer {

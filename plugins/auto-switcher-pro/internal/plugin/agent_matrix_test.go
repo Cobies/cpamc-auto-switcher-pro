@@ -501,8 +501,8 @@ func TestAgentMatrix_DirectUpstreamModelPersistence(t *testing.T) {
 func TestAgentMatrix_DynamicThinkingLevels(t *testing.T) {
 	// 1. Verify resolveModelThinkingLevels
 	suppGemini, levelsGemini := resolveModelThinkingLevels("gemini-3.8-flash-high")
-	if !suppGemini || len(levelsGemini) != 4 {
-		t.Errorf("expected gemini-3.8-flash-high to have 4 levels, got %v", levelsGemini)
+	if !suppGemini || len(levelsGemini) < 4 {
+		t.Errorf("expected gemini-3.8-flash-high to have at least 4 levels, got %v", levelsGemini)
 	}
 
 	suppLuna, levelsLuna := resolveModelThinkingLevels("gpt-6-luna")

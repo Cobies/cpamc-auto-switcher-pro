@@ -38,6 +38,7 @@ const {
 	parseConsumedNumber,
 	stripAnsi,
 	visibleLen,
+	truncateWithAnsi,
 	setSessionAccordionState,
 } = await import("./adapter.js");
 const { runawayGuard } = await import("./guards.js");
@@ -209,6 +210,31 @@ describe("Adapter Footer Formatting & Origin Indicator", () => {
 		// Verificar que el formato OSC 8 esté presente en las líneas sin stripAnsi con URL dinámica
 		const rawText = lines.join("\n");
 		assert.match(rawText, /\x1b\]8;;https?:\/\/[^\/]+\/management\.html#\/plugin-pages\/auto-switcher-pro-[^\/]+\/2#incident-cb_test123\x1b\\/);
+
+		// Issue #24 regression guard: cada línea con OSC 8 debe medir exactamente 48 cols en TUI
+		lines.forEach((l: string, idx: number) => {
+			assert.strictEqual(visibleLen(l), 48, `Tripped circuit breaker line ${idx} must be 48 cols (got ${visibleLen(l)})`);
+		});
+	});
+
+	it("satisfies Issue #24: truncateWithAnsi recognizes OSC 8 hyperlink sequences and avoids sidebar collapse (>48 cols)", () => {
+		const longUrl = "http://127.0.0.1:8317/management.html#/plugin-pages/auto-switcher-pro-linux-amd64/2#incident-cb_test123";
+		const link = `\x1b]8;;${longUrl}\x1b\\Diagnóstico de Incidente en Panel Web\x1b]8;;\x1b\\`;
+
+		// 1. Truncating when text with OSC 8 exceeds maxW
+		const truncated = truncateWithAnsi(link, 15);
+		assert.ok(visibleLen(truncated) <= 15);
+		assert.match(truncated, /\x1b\]8;;\x1b\\/);
+
+		// 2. Preserves OSC 8 when it fits within maxW
+		const fits = truncateWithAnsi(link, 50);
+		assert.strictEqual(visibleLen(fits), visibleLen(link));
+		assert.ok(fits.includes(longUrl));
+
+		// 3. Line with label + OSC 8 fits strictly inside safeW = 48 columns
+		const line = `│ Diagnóstico: ${link} │`;
+		const fitted = truncateWithAnsi(line, 48);
+		assert.ok(visibleLen(fitted) <= 48);
 	});
 
 	it("handles malformed pair with missing active account safely without throwing", () => {

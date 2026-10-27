@@ -153,7 +153,8 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested, onNavig
   }, [nodes, rawFiles]);
 
   // Carga las cuentas y sus cuotas en tiempo real
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (options = {}) => {
+    const isForce = options?.force === true;
     setLoading(true);
     setActionError('');
     try {
@@ -202,18 +203,21 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested, onNavig
               // Antigravity: consultar cuotas respetando tanto fetchCardQuota como raw envelopes
               let qResult = null;
               try {
-                qResult = await fetchCardQuota({
-                  fileName: f.name,
-                  authIndex: f.auth_index ?? f.name,
-                  projectId: f.project_id || '',
-                  prefix,
-                });
+                qResult = await fetchCardQuota(
+                  {
+                    fileName: f.name,
+                    authIndex: f.auth_index ?? f.name,
+                    projectId: f.project_id || '',
+                    prefix,
+                  },
+                  { force: isForce }
+                );
               } catch {
                 // fallback a api-call directo si fetchCardQuota fallara
               }
 
               // Si fetchCardQuota retornó grupos válidos, adaptamos
-              if (qResult && Array.isArray(qResult.groups) && qResult.groups.length > 0) {
+              if (qResult && qResult.groups && qResult.groups.length > 0) {
                 const adapted = adaptCardQuotaResult(qResult, f.provider, prefix);
                 newQuotas[f.name] = adapted;
                 if (f.id) newQuotas[f.id] = adapted;
@@ -816,12 +820,12 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested, onNavig
           const leader = (rotRes.new_leader || '').replace(/^antigravity-/, '').replace(/\.json$/, '');
           rotateMsg = ` · Rotado hacia ${leader || rotRes.new_leader}`;
         }
-      } catch (rotErr) {
+      } catch {
         // Si no hay pools o no requirió rotación, continuar normalmente
       }
 
       // 2. Recargar datos frescos de la vista
-      await loadData();
+      await loadData({ force: true });
       setCheckOutput(`⚡ Chequeo forzado evaluado en servidor con éxito${rotateMsg}.`);
     } catch (err) {
       setActionError(`Error en chequeo forzado: ${err.message}`);
@@ -955,7 +959,7 @@ export default function ControlSwitcher({ nodes = [], onReloadRequested, onNavig
 
           <button
             type="button"
-            onClick={loadData}
+            onClick={() => loadData({ force: true })}
             disabled={loading}
             className="cs-btn-refresh"
             title="Refrescar métricas en vivo"

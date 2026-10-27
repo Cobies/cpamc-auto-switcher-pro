@@ -2,7 +2,7 @@
   padding: 24px;
   max-width: 1440px;
   margin: 0 auto;
-  color: #f1f5f9;
+  color: var(--text-primary, #f6f4f1);
   font-family: system-ui, -apple-system, sans-serif;
 }
 
@@ -30,13 +30,13 @@
   margin: 0;
   font-size: 22px;
   font-weight: 700;
-  color: #f8fafc;
+  color: var(--text-primary, #f6f4f1);
 }
 
 .audit-log-desc {
   margin: 0;
   font-size: 13px;
-  color: #94a3b8;
+  color: var(--text-secondary, #c9c3bb);
   max-width: 800px;
   line-height: 1.5;
 }
@@ -118,14 +118,14 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: #94a3b8;
+  color: var(--text-secondary, #c9c3bb);
   margin-bottom: 6px;
 }
 
 .audit-kpi-value {
   font-size: 24px;
   font-weight: 700;
-  color: #f8fafc;
+  color: var(--text-primary, #f6f4f1);
   display: flex;
   align-items: baseline;
   gap: 6px;
@@ -133,7 +133,7 @@
 
 .audit-kpi-sub {
   font-size: 11px;
-  color: #64748b;
+  color: var(--text-tertiary, #9c958d);
   font-weight: 400;
 }
 
@@ -165,7 +165,7 @@
   margin: 0;
   font-size: 16px;
   font-weight: 700;
-  color: #f8fafc;
+  color: var(--text-primary, #f6f4f1);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -180,7 +180,7 @@
 .audit-filter-pill {
   background: rgba(30, 41, 59, 0.8);
   border: 1px solid rgba(51, 65, 85, 0.6);
-  color: #94a3b8;
+  color: var(--text-secondary, #c9c3bb);
   padding: 4px 10px;
   border-radius: 6px;
   font-size: 11px;
@@ -212,7 +212,7 @@
 .audit-table th {
   background: rgba(30, 41, 59, 0.9);
   padding: 10px 14px;
-  color: #94a3b8;
+  color: var(--text-secondary, #c9c3bb);
   font-weight: 600;
   border-bottom: 1px solid rgba(51, 65, 85, 0.6);
   white-space: nowrap;
@@ -221,7 +221,7 @@
 .audit-table td {
   padding: 11px 14px;
   border-bottom: 1px solid rgba(51, 65, 85, 0.3);
-  color: #cbd5e1;
+  color: var(--text-secondary, #c9c3bb);
   vertical-align: middle;
 }
 
@@ -272,7 +272,7 @@
 }
 
 .audit-prev-leader {
-  color: #94a3b8;
+  color: var(--text-secondary, #c9c3bb);
 }
 
 .audit-arrow {
@@ -291,7 +291,7 @@
   border-radius: 4px;
   font-family: monospace;
   font-size: 11px;
-  color: #e2e8f0;
+  color: var(--text-primary, #f6f4f1);
 }
 
 /* Flight Recorder Incident Cards */
@@ -337,7 +337,7 @@
 
 .flight-card-msg {
   font-size: 12px;
-  color: #e2e8f0;
+  color: var(--text-primary, #f6f4f1);
   font-family: monospace;
   word-break: break-word;
   background: rgba(15, 23, 42, 0.7);
@@ -349,12 +349,12 @@
   display: flex;
   justify-content: space-between;
   font-size: 11px;
-  color: #64748b;
+  color: var(--text-tertiary, #9c958d);
 }
 
 .audit-empty-state {
   text-align: center;
   padding: 36px 20px;
-  color: #64748b;
+  color: var(--text-tertiary, #9c958d);
   font-size: 13px;
 }

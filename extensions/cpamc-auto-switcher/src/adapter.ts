@@ -33,44 +33,63 @@ export function truncateWithAnsi(str: string, maxW: number): string {
 
 	let vis = 0;
 	let res = "";
-	const token = /^\x1b\[[0-9;]*[a-zA-Z]/;
-	const chars = Array.from(str);
+	const ANSI_TOKEN = /^\x1b\[[0-9;]*[a-zA-Z]/;
+	const OSC8_TOKEN = /^\x1b\]8;;[^\x1b]*\x1b\\/;
+	let hasOpenOsc8 = false;
 	let i = 0;
 
-	while (i < chars.length && vis < maxW) {
-		const match = str.slice(i).match(token);
-		if (match) {
-			res += match[0];
-			i += match[0].length;
-		} else {
-			const char = chars[i];
-			const cp = char.codePointAt(0) || 0;
-			const nextChar = chars[i + 1];
-			const nextCp = nextChar ? nextChar.codePointAt(0) : 0;
-
-			let charVis = 1;
-			let advance = 1;
-
-			if (cp >= 0xfe00 && cp <= 0xfe0f) {
-				charVis = 0;
-			} else if (nextCp === 0xfe0f) {
-				charVis = 2;
-				advance = 2;
-			} else if ((cp >= 0x1f6e0 && cp <= 0x1f6ec) || cp === 0x2699 || cp === 0x2794 || cp === 0x2714) {
-				charVis = 1;
-			} else if (
-				(cp >= 0x1f300 && cp <= 0x1faff) ||
-				(cp >= 0x2600 && cp <= 0x27bf) ||
-				(cp >= 0x2b50 && codeRangeCheck(cp))
-			) {
-				charVis = 2;
-			}
-
-			if (vis + charVis > maxW) break;
-			res += advance === 2 ? char + nextChar : char;
-			vis += charVis;
-			i += advance;
+	while (i < str.length && vis < maxW) {
+		const ansiMatch = str.slice(i).match(ANSI_TOKEN);
+		if (ansiMatch) {
+			res += ansiMatch[0];
+			i += ansiMatch[0].length;
+			continue;
 		}
+
+		const oscMatch = str.slice(i).match(OSC8_TOKEN);
+		if (oscMatch) {
+			res += oscMatch[0];
+			i += oscMatch[0].length;
+			if (oscMatch[0] === "\x1b]8;;\x1b\\") {
+				hasOpenOsc8 = false;
+			} else {
+				hasOpenOsc8 = true;
+			}
+			continue;
+		}
+
+		const cp = str.codePointAt(i) || 0;
+		const char = String.fromCodePoint(cp);
+		const advance = char.length;
+
+		const nextCp = str.codePointAt(i + advance) || 0;
+
+		let charVis = 1;
+		let extraAdvance = 0;
+
+		if (cp >= 0xfe00 && cp <= 0xfe0f) {
+			charVis = 0;
+		} else if (nextCp === 0xfe0f) {
+			charVis = 2;
+			extraAdvance = 1;
+		} else if ((cp >= 0x1f6e0 && cp <= 0x1f6ec) || cp === 0x2699 || cp === 0x2794 || cp === 0x2714) {
+			charVis = 1;
+		} else if (
+			(cp >= 0x1f300 && cp <= 0x1faff) ||
+			(cp >= 0x2600 && cp <= 0x27bf) ||
+			(cp >= 0x2b50 && codeRangeCheck(cp))
+		) {
+			charVis = 2;
+		}
+
+		if (vis + charVis > maxW) break;
+		res += extraAdvance > 0 ? char + String.fromCodePoint(nextCp) : char;
+		vis += charVis;
+		i += advance + extraAdvance;
+	}
+
+	if (hasOpenOsc8) {
+		res += "\x1b]8;;\x1b\\";
 	}
 
 	return `${res}${RESET}`;

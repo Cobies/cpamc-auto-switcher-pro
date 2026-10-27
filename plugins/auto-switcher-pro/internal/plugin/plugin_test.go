@@ -117,14 +117,14 @@ func TestHandlePluginMethod_ManagementRegister(t *testing.T) {
 		}
 		if res.Path == "/create-prefixes" {
 			foundCreateRoute = true
-			if res.Menu != "📋 Directorio de Cuentas" {
-				t.Errorf("expected Menu '📋 Directorio de Cuentas', got %q", res.Menu)
+			if res.Menu != "📋 Directorio Cuentas" {
+				t.Errorf("expected Menu '📋 Directorio Cuentas', got %q", res.Menu)
 			}
 		}
 		if res.Path == "/create-groups" {
 			foundGroupRoute = true
-			if res.Menu != "🛠️ Crear Group/Pefiles" {
-				t.Errorf("expected Menu '🛠️ Crear Group/Pefiles', got %q", res.Menu)
+			if res.Menu != "🛠️ Armar Pools & Grupos" {
+				t.Errorf("expected Menu '🛠️ Armar Pools & Grupos', got %q", res.Menu)
 			}
 		}
 		if res.Path == "/auto-auth-files" {
@@ -135,8 +135,8 @@ func TestHandlePluginMethod_ManagementRegister(t *testing.T) {
 		}
 		if res.Path == "/audit-log" {
 			foundAuditLogRoute = true
-			if res.Menu != "📜 Bitácora · Caja Negra" {
-				t.Errorf("expected Menu '📜 Bitácora · Caja Negra', got %q", res.Menu)
+			if res.Menu != "📜 Bitácora & Caja Negra" {
+				t.Errorf("expected Menu '📜 Bitácora & Caja Negra', got %q", res.Menu)
 			}
 		}
 	}

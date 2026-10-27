@@ -21,7 +21,7 @@
   max-height: 90vh;
   display: flex;
   flex-direction: column;
-  color: #f1f5f9;
+  color: var(--text-primary, #f6f4f1);
 }
 
 .incident-modal-header {
@@ -53,13 +53,13 @@
 .incident-subtitle {
   margin: 2px 0 0 0;
   font-size: 0.8rem;
-  color: #94a3b8;
+  color: var(--text-secondary, #c9c3bb);
 }
 
 .incident-close-btn {
   background: none;
   border: none;
-  color: #94a3b8;
+  color: var(--text-secondary, #c9c3bb);
   font-size: 1.2rem;
   cursor: pointer;
   padding: 4px 8px;
@@ -89,7 +89,7 @@
 }
 
 .incident-loading-state {
-  color: #94a3b8;
+  color: var(--text-secondary, #c9c3bb);
   background: rgba(255, 255, 255, 0.03);
 }
 
@@ -118,14 +118,14 @@
 .meta-label {
   font-size: 0.75rem;
   text-transform: uppercase;
-  color: #64748b;
+  color: var(--text-tertiary, #9c958d);
   font-weight: 600;
   letter-spacing: 0.05em;
 }
 
 .meta-val {
   font-size: 0.9rem;
-  color: #e2e8f0;
+  color: var(--text-primary, #f6f4f1);
   font-weight: 500;
 }
 
@@ -185,7 +185,7 @@
 .section-title {
   font-size: 0.85rem;
   font-weight: 600;
-  color: #cbd5e1;
+  color: var(--text-secondary, #c9c3bb);
 }
 
 .incident-code-box {
@@ -197,7 +197,7 @@
   overflow-x: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.82rem;
-  color: #e2e8f0;
+  color: var(--text-primary, #f6f4f1);
 }
 
 .trigger-box {
@@ -228,7 +228,7 @@
 
 .trace-idx {
   font-size: 0.72rem;
-  color: #64748b;
+  color: var(--text-tertiary, #9c958d);
   font-weight: 700;
   min-width: 24px;
 }
@@ -236,7 +236,7 @@
 .trace-cmd {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.8rem;
-  color: #94a3b8;
+  color: var(--text-secondary, #c9c3bb);
   word-break: break-all;
 }
 
@@ -252,7 +252,7 @@
 .btn-incident-secondary {
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  color: #e2e8f0;
+  color: var(--text-primary, #f6f4f1);
   padding: 8px 14px;
   border-radius: 6px;
   font-size: 0.85rem;
