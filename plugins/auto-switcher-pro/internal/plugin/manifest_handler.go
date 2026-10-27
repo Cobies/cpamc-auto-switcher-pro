@@ -156,11 +156,11 @@ func handleManifestHTTP(req ManagementRequestPayload) ([]byte, error) {
 		}
 	}
 
-	// Incluir cuentas standalone / unassigned (sin pool)
+	// Incluir cuentas standalone / unassigned (sin pool) de cualquier proveedor (Google, OpenCode, NVIDIA, etc.)
 	authDir := resolveAuthDir()
 	if entries, err := os.ReadDir(authDir); err == nil {
 		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || !strings.HasPrefix(e.Name(), "antigravity-") {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || strings.HasPrefix(e.Name(), ".") {
 				continue
 			}
 			cleanAuth := e.Name()
@@ -186,15 +186,25 @@ func handleManifestHTTP(req ManagementRequestPayload) ([]byte, error) {
 			}
 
 			prefix := ""
+			accountLabel := email
 			if data, err := os.ReadFile(filepath.Join(authDir, cleanAuth)); err == nil {
 				var cred struct {
-					Prefix string `json:"prefix"`
-					Note   string `json:"note"`
+					Prefix   string `json:"prefix"`
+					Note     string `json:"note"`
+					Label    string `json:"label"`
+					Provider string `json:"provider"`
+					Type     string `json:"type"`
+					Email    string `json:"email"`
 				}
 				if json.Unmarshal(data, &cred) == nil {
 					prefix = strings.TrimSpace(cred.Prefix)
 					if prefix == "" {
 						prefix = strings.TrimSpace(cred.Note)
+					}
+					if cred.Label != "" {
+						accountLabel = cred.Label
+					} else if cred.Email != "" {
+						accountLabel = cred.Email
 					}
 				}
 			}
@@ -203,7 +213,7 @@ func handleManifestHTTP(req ManagementRequestPayload) ([]byte, error) {
 
 			accountSummaries = append(accountSummaries, ManifestAccountSummary{
 				AccountKey:      cleanAuth,
-				Email:           email,
+				Email:           accountLabel,
 				PoolID:          "",
 				BasePrefix:      prefix,
 				Role:            "unassigned",

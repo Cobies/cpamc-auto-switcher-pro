@@ -276,11 +276,21 @@ export async function querySwitcherAccounts(force = false): Promise<SwitcherAcco
 								const reset5h = typeof a.window_5h_reset_in === "number" ? a.window_5h_reset_in : undefined;
 								const resetWk = typeof a.weekly_reset_in === "number" ? a.weekly_reset_in : undefined;
 
+								const rawKey = (a.account_key || a.email || "").toLowerCase();
+								let provider = "antigravity";
+								if (rawKey.includes("opencode") || rawKey.includes("nan") || rawKey.includes("nim") || rawKey.includes("nvidia")) {
+									provider = "opencode-go";
+								} else if (rawKey.includes("codex") || rawKey.includes("openai")) {
+									provider = "codex";
+								} else if (rawKey.includes("claude") || rawKey.includes("anthropic")) {
+									provider = "claude";
+								}
+
 								return {
 									status: isLeader ? "[ACTIVE]" : isUnassigned ? "[OTHER]" : "[RESERVE]",
-									provider: "antigravity",
+									provider,
 									profile: basePref,
-									accountId: maskEmailFromAuth(a.account_key || a.email),
+									accountId: a.email || maskEmailFromAuth(a.account_key),
 									prefix,
 									consumed5h: `${c5h}%`,
 									consumedWeekly: `${cWk}%`,
@@ -633,17 +643,24 @@ export function getRotationPairForModelSync(modelId: string, provider: string): 
 	});
 
 	if (poolAccounts.length === 0) {
-		// ¿Es una cuenta standalone / directa identificada por prefijo o email?
+		// ¿Es una cuenta standalone / directa identificada por prefijo exacto (nim_1), base (nim) o nombre?
 		const standalone = accounts.find((a) => {
 			const p = (a.prefix || "").trim().toLowerCase();
 			const accId = (a.accountId || "").trim().toLowerCase();
-			const target = matchedBase.toLowerCase();
-			return p === target || accId.includes(target) || target.includes(p);
+			const targetBase = matchedBase.toLowerCase();
+			const targetPrefix = (info.prefix || "").trim().toLowerCase();
+
+			if (targetPrefix && p === targetPrefix) return true;
+			if (p === targetBase) return true;
+			if (targetPrefix && accId.includes(targetPrefix)) return true;
+			if (accId.includes(targetBase) || targetBase.includes(p)) return true;
+			return false;
 		});
 
 		if (standalone) {
+			const key = info.prefix || standalone.prefix || info.canonicalModelId;
 			return {
-				poolKey: standalone.prefix && standalone.prefix !== "-" ? standalone.prefix : info.canonicalModelId,
+				poolKey: key && key !== "-" ? key : info.canonicalModelId,
 				familyName: "CPAMC Directo",
 				familyIcon: "⚡ ",
 				active: standalone,

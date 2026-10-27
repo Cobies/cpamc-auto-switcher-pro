@@ -103,6 +103,41 @@ describe("Standalone Accounts Quota Card & Model Resolution", () => {
 		});
 	});
 
+	it("resolves numeric indexed standalone accounts like nim_1 or nan", () => {
+		setCachedAccountsForTesting([
+			{
+				status: "[OTHER]",
+				provider: "opencode-go",
+				profile: "nan",
+				accountId: "cuenta nan 1",
+				prefix: "nan",
+				consumed5h: "0%",
+				consumedWeekly: "0%",
+				minAvailable: "100%",
+			},
+			{
+				status: "[OTHER]",
+				provider: "opencode-go",
+				profile: "nim_1",
+				accountId: "cuenta2-wilo9",
+				prefix: "nim_1",
+				consumed5h: "0%",
+				consumedWeekly: "0%",
+				minAvailable: "100%",
+			},
+		]);
+
+		const pairNan = getRotationPairForModelSync("nan/deepseek-v4-flash", "cpamc");
+		assert.ok(pairNan);
+		assert.strictEqual(pairNan.poolKey, "nan");
+		assert.strictEqual(pairNan.isNativeReadOnly, true);
+
+		const pairNim1 = getRotationPairForModelSync("nim_1/deepseek-ai/deepseek-v4.1-flash", "cpamc");
+		assert.ok(pairNim1);
+		assert.strictEqual(pairNim1.poolKey, "nim_1");
+		assert.strictEqual(pairNim1.isNativeReadOnly, true);
+	});
+
 	it("returns null when no matching standalone account is available in cache", () => {
 		setCachedAccountsForTesting([]);
 		const pair = getRotationPairForModelSync("gemini-2.5-flash", "cpamc");
