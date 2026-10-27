@@ -43,7 +43,7 @@ const MODEL_FAMILIES = {
         hintPrefix: 'agy',
         quota: 'Gemini Models',
         targetPatterns: ['gemini'],
-        note: 'Vigila cuota de "Gemini Models" (3.7 y 3.8 comparten el mismo balde). Convención: agy, agy2, agy3...',
+        note: 'Vigila cuota de "Gemini Models" (3.7 y 3.8 comparten el mismo balde).',
       },
       sonnet: {
         key: 'sonnet',
@@ -52,7 +52,7 @@ const MODEL_FAMILIES = {
         hintPrefix: 'agy_son',
         quota: 'Claude and GPT models',
         targetPatterns: ['sonnet'],
-        note: 'Pool dedicado para código y tareas ágiles con claude-sonnet-4-6 y claude-sonnet-5-5-high. Convención: agy_son, agy_son2...',
+        note: 'Pool dedicado para código y tareas ágiles con claude-sonnet-4-6 y claude-sonnet-5-5-high.',
       },
       opus: {
         key: 'opus',
@@ -61,7 +61,7 @@ const MODEL_FAMILIES = {
         hintPrefix: 'agy_opus',
         quota: 'Claude and GPT models',
         targetPatterns: ['opus'],
-        note: 'Pool de razonamiento profundo con claude-opus-4-6-thinking y claude-opus-5-5-high. Convención: agy_opus, agy_opus2...',
+        note: 'Pool de razonamiento profundo con claude-opus-4-6-thinking y claude-opus-5-5-high.',
       },
       claude: {
         key: 'claude',
@@ -70,7 +70,7 @@ const MODEL_FAMILIES = {
         hintPrefix: 'agy_clau',
         quota: 'Claude and GPT models',
         targetPatterns: ['claude', 'gpt'],
-        note: 'Pool dual que rota tanto Sonnet como Opus bajo la misma cuota. Convención: agy_clau, agy_clau2...',
+        note: 'Pool dual que rota tanto Sonnet como Opus bajo la misma cuota.',
       },
     },
   },
@@ -80,7 +80,7 @@ const MODEL_FAMILIES = {
     hintPrefix: 'clau',
     provider: 'claude',
     quota: 'Claude and GPT models',
-    note: 'Cuentas directas oficiales Anthropic (prefijo clau*). Convención: clau, clau2...',
+    note: 'Cuentas directas oficiales de Anthropic.',
   },
   codex: {
     label: 'OpenAI Codex',
@@ -88,7 +88,7 @@ const MODEL_FAMILIES = {
     hintPrefix: 'codex',
     provider: 'codex',
     quota: 'Codex',
-    note: 'Cuentas individuales Codex / OpenAI (prefijo codex*). Convención: codex, codex2...',
+    note: 'Cuentas individuales de Codex / OpenAI.',
   },
 };
 
@@ -99,7 +99,7 @@ const OMNIAUTH_PROVIDER_META = {
     icon: '🐋',
     hintPrefix: 'deepseek',
     quota: 'DeepSeek Chat & Reasoner',
-    note: 'Cuentas de DeepSeek oficiales o compatibles (prefijo deepseek*). Convención: deepseek, deepseek2...',
+    note: 'Cuentas oficiales o compatibles de DeepSeek.',
     models: ['deepseek-chat', 'deepseek-reasoner'],
   },
   nvidia: {
@@ -107,7 +107,7 @@ const OMNIAUTH_PROVIDER_META = {
     icon: '🟢',
     hintPrefix: 'nvidia',
     quota: 'NVIDIA NIM Cluster',
-    note: 'Cuentas de NVIDIA NIM (prefijo nvidia*). Convención: nvidia, nvidia2...',
+    note: 'Cuentas de aceleración NVIDIA NIM.',
     models: ['meta/llama-3.3-70b-instruct', 'deepseek-ai/deepseek-r1', 'nvidia/llama-3.1-nemotron-70b-instruct'],
   },
   groq: {
@@ -115,7 +115,7 @@ const OMNIAUTH_PROVIDER_META = {
     icon: '⚡',
     hintPrefix: 'groq',
     quota: 'Groq Ultra-Fast LPU',
-    note: 'Cuentas de aceleración Groq LPU (prefijo groq*). Convención: groq, groq2...',
+    note: 'Cuentas de aceleración Groq LPU.',
     models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768'],
   },
   cerebras: {
@@ -123,7 +123,7 @@ const OMNIAUTH_PROVIDER_META = {
     icon: '🏎️',
     hintPrefix: 'cerebras',
     quota: 'Cerebras Wafer-Scale',
-    note: 'Cuentas de Cerebras Wafer-Scale Engine (prefijo cerebras*). Convención: cerebras, cerebras2...',
+    note: 'Cuentas de aceleración Cerebras Wafer-Scale Engine.',
     models: ['llama-3.3-70b', 'llama3.1-8b'],
   },
   mistral: {
@@ -131,7 +131,7 @@ const OMNIAUTH_PROVIDER_META = {
     icon: '🌪️',
     hintPrefix: 'mistral',
     quota: 'Mistral La Plateforme',
-    note: 'Cuentas oficiales de Mistral AI (prefijo mistral*). Convención: mistral, mistral2...',
+    note: 'Cuentas oficiales de Mistral AI.',
     models: ['mistral-large-latest', 'codestral-latest'],
   },
   typesafe: {
@@ -139,7 +139,7 @@ const OMNIAUTH_PROVIDER_META = {
     icon: '🛡️',
     hintPrefix: 'typesafe',
     quota: 'TypeSafe AI Router',
-    note: 'Cuentas protegidas de TypeSafe AI (prefijo typesafe*). Convención: typesafe, typesafe2...',
+    note: 'Cuentas protegidas de TypeSafe AI Router.',
     models: ['deepseek-chat', 'deepseek-r1'],
   },
   vercel: {
@@ -147,7 +147,7 @@ const OMNIAUTH_PROVIDER_META = {
     icon: '▲',
     hintPrefix: 'vercel',
     quota: 'Vercel AI Gateway',
-    note: 'Cuentas enrutadas vía Vercel Gateway (prefijo vercel*). Convención: vercel, vercel2...',
+    note: 'Cuentas enrutadas vía Vercel AI Gateway.',
     models: ['anthropic/claude-3-7-sonnet', 'openai/gpt-4o'],
   },
   nan: {
@@ -155,7 +155,7 @@ const OMNIAUTH_PROVIDER_META = {
     icon: '🧬',
     hintPrefix: 'nan',
     quota: 'NaN Builders Fleet',
-    note: 'Cuentas del clúster NaN Builders (prefijo nan*). Convención: nan, nan2...',
+    note: 'Cuentas del clúster NaN Builders.',
     models: ['deepseek-v4-flash', 'glm-5.3-flash', 'mimo-v2.6-flash'],
   },
   opencode: {
@@ -163,7 +163,7 @@ const OMNIAUTH_PROVIDER_META = {
     icon: '💻',
     hintPrefix: 'opencode',
     quota: 'OpenCode Catalogs',
-    note: 'Cuentas de catálogo dinámico OpenCode (prefijo opencode*). Convención: opencode, opencode2...',
+    note: 'Cuentas de catálogo dinámico OpenCode.',
     models: ['deepseek-chat', 'gemini-2.5-flash'],
   },
   'openai-compat': {
@@ -171,7 +171,7 @@ const OMNIAUTH_PROVIDER_META = {
     icon: '🌐',
     hintPrefix: 'custom',
     quota: 'OpenAI Compatible Endpoint',
-    note: 'Endpoints compatibles con especificación OpenAI (prefijo custom*). Convención: custom, custom2...',
+    note: 'Endpoints compatibles con especificación OpenAI.',
     models: ['default'],
   },
 };
@@ -515,7 +515,7 @@ export default function GroupManager({
       hintPrefix: fam.hintPrefix,
       provider: fam.provider || family,
       quota: fam.quota || `${fam.label} API`,
-      note: fam.note || `Cuentas de ${fam.label} (prefijo ${fam.hintPrefix}*).`,
+      note: fam.note || `Cuentas de ${fam.label}.`,
       isOmniAuthPro: fam.isOmniAuthPro || false,
       models: fam.models || [],
     };
@@ -2062,14 +2062,30 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
                   )}
                 </div>
 
-                {/* Badge de Capacidad en Tiempo Real */}
+                {/* Badge de Capacidad en Tiempo Real (Contextual y Amigable) */}
                 {family && (() => {
                   const totalEligible = leaderCandidates.length;
                   const maxGroups = Math.floor(totalEligible / 2);
+
+                  if (totalEligible === 0) {
+                    return (
+                      <div className="group-capacity-badge" data-testid="capacity-badge" style={{ borderColor: 'rgba(148, 163, 184, 0.4)' }}>
+                        <span>ℹ️ <strong>0 cuentas libres</strong> · Todas tus cuentas ya están en pools activos o necesitas vincular una nueva.</span>
+                      </div>
+                    );
+                  }
+
+                  if (totalEligible === 1) {
+                    return (
+                      <div className="group-capacity-badge" data-testid="capacity-badge" style={{ borderColor: 'rgba(234, 179, 8, 0.4)', background: 'rgba(234, 179, 8, 0.08)' }}>
+                        <span>⚠️ <strong>Tienes 1 cuenta libre</strong> · Necesitas al menos 1 Titular + 1 Suplente para activar rotación.</span>
+                      </div>
+                    );
+                  }
+
                   return (
-                    <div className="group-capacity-badge" data-testid="capacity-badge">
-                      <span>📊 Cuentas disponibles sin asignar: <strong>{totalEligible}</strong></span>
-                      <span> · Capacidad máxima: <strong>{maxGroups}</strong> grupo(s) de rotación (mínimo 2 cuentas/grupo)</span>
+                    <div className="group-capacity-badge" data-testid="capacity-badge" style={{ borderColor: 'rgba(16, 185, 129, 0.4)', background: 'rgba(16, 185, 129, 0.08)' }}>
+                      <span>✅ <strong>{totalEligible} cuentas listas</strong> · Puedes armar hasta <strong>{maxGroups}</strong> {maxGroups === 1 ? 'pool' : 'pools'} de rotación (o 1 pool con {totalEligible - 1} {totalEligible - 1 === 1 ? 'reserva' : 'reservas'}).</span>
                     </div>
                   );
                 })()}

@@ -721,8 +721,8 @@ describe('GroupManager - family-aware pools, honest failures & isolated routes',
     fireEvent.click(screen.getByTestId('subfamily-gemini-opus'));
 
     const capacityBadge = screen.getByTestId('capacity-badge');
-    expect(capacityBadge.textContent).toContain('Capacidad máxima: 2');
-    expect(capacityBadge.textContent).toContain('4');
+    expect(capacityBadge.textContent).toContain('Puedes armar hasta 2 pools de rotación');
+    expect(capacityBadge.textContent).toContain('4 cuentas listas');
   });
 
   it('preserves user typed prefix when selecting a virtual source account (no input clobbering)', () => {
