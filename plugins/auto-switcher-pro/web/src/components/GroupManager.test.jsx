@@ -1592,6 +1592,13 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
       fireEvent.click(nanChip);
 
       const specialistSelect = screen.getByTestId('select-specialist-model');
+      // Antes de seleccionar cuenta titular, el selector está deshabilitado
+      expect(specialistSelect.disabled).toBe(true);
+
+      // Al seleccionar la cuenta titular, se habilita dinámicamente
+      fireEvent.change(screen.getByTestId('select-active-account'), { target: { value: 'nan-acc1.json' } });
+      expect(specialistSelect.disabled).toBe(false);
+
       const specialistOptions = Array.from(specialistSelect.querySelectorAll('option')).map((o) => o.value);
 
       // Verify specialist models are strictly NaN models, never Gemini
@@ -1599,10 +1606,10 @@ describe('GroupManager - Homologación 2N (dual-familia por rol de cuota)', () =
       expect(specialistOptions).not.toContain('gemini-3.8-flash-high');
       expect(specialistOptions).not.toContain('gemini-3.7-flash-high');
 
-      // The selected specialist model must be the top-version NaN flagship model
-      expect(specialistSelect.value).toBe('deepseek-v4-flash');
-      const firstOptionText = specialistSelect.querySelectorAll('option')[0].textContent;
-      expect(firstOptionText).toContain('⭐ (Recomendado)');
+      // Comienza sin ningún valor preseleccionado arbitrario (vacío)
+      expect(specialistSelect.value).toBe('');
+      const optionsTexts = Array.from(specialistSelect.querySelectorAll('option')).map((o) => o.textContent);
+      expect(optionsTexts.some((t) => t.includes('deepseek-v4-flash') && t.includes('⭐ (Recomendado)'))).toBe(true);
     });
 
     it('does not render family chip when family has no logged-in accounts (e.g. OpenAI Codex)', () => {

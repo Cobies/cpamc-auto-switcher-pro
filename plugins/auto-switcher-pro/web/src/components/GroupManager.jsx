@@ -714,17 +714,13 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
     return sortModelsByFamilyAndVersion(models, targetFamilyRole, isCodex, isGemini);
   }, [effectiveFamily, nodes, catalogModels, selectedAuthModels, targetFamilyRole, excludeVersion55]);
 
-  // Actualizar el modelo especialista predeterminado cuando cambie la familia o subtipo
+  // Actualizar el modelo especialista predeterminado cuando cambie la familia o subtipo:
+  // no autoseleccionar a ciegas, comenzar vacío hasta que el usuario elija conscientemente
   useEffect(() => {
-    if (availableSpecialistModels.length > 0) {
-      setSelectedSpecialistModel((prev) => {
-        if (prev && availableSpecialistModels.includes(prev)) return prev;
-        // Al estar ordenado por versión más alta / recomendada, el primer elemento es el modelo estrella
-        return availableSpecialistModels[0] || '';
-      });
-    } else {
-      setSelectedSpecialistModel('');
-    }
+    setSelectedSpecialistModel((prev) => {
+      if (prev && availableSpecialistModels.includes(prev)) return prev;
+      return '';
+    });
   }, [availableSpecialistModels]);
 
   // ¿El prefijo corresponde al sub-tipo Gemini objetivo (mismo paquete)?
@@ -2266,27 +2262,36 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
                         <select
                           className="group-select bento-select"
                           value={selectedSpecialistModel}
-                          disabled={availableSpecialistModels.length === 0}
+                          disabled={!selectedActiveNodeId || availableSpecialistModels.length === 0}
                           onChange={(e) => setSelectedSpecialistModel(e.target.value)}
                           data-testid="select-specialist-model"
                         >
-                          {availableSpecialistModels.length === 0 ? (
-                            <option value="">-- Sin cuentas logeadas / No hay modelos disponibles --</option>
+                          {!selectedActiveNodeId ? (
+                            <option value="">-- Selecciona primero la cuenta titular en RAM --</option>
                           ) : (
-                            availableSpecialistModels.map((m, idx) => (
-                              <option key={m} value={m}>
-                                {m}{idx === 0 ? ' ⭐ (Recomendado)' : ''}
-                              </option>
-                            ))
+                            <option value="">-- Selecciona el modelo especialista --</option>
                           )}
+                          {availableSpecialistModels.map((m, idx) => (
+                            <option key={m} value={m}>
+                              {m}{idx === 0 ? ' ⭐ (Recomendado)' : ''}
+                            </option>
+                          ))}
                         </select>
-                        {availableSpecialistModels.length === 0 ? (
+                        {!selectedActiveNodeId ? (
+                          <p className="bento-specialist-hint" style={{ color: '#94a3b8' }}>
+                            🔒 Selecciona primero una cuenta titular (líder en RAM) para desplegar y habilitar sus modelos especialistas disponibles.
+                          </p>
+                        ) : availableSpecialistModels.length === 0 ? (
                           <p className="bento-specialist-hint" style={{ color: '#f59e0b' }}>
                             ⚠️ No hay cuentas vinculadas ni modelos disponibles en CPAMC para {effectiveFamily?.label || 'esta familia'}.
                           </p>
+                        ) : !selectedSpecialistModel ? (
+                          <p className="bento-specialist-hint" style={{ color: '#38bdf8' }}>
+                            👉 Elige el modelo específico de esta cuenta que este pool atenderá de forma exclusiva.
+                          </p>
                         ) : (
                           <p className="bento-specialist-hint">
-                            🔒 Este pool responderá <strong>únicamente</strong> a <code>{selectedSpecialistModel || 'este modelo'}</code>. Los restantes {Math.max(0, availableSpecialistModels.length - 1)} modelos de su familia quedan automáticamente bloqueados para aislar la cuota.
+                            🔒 Este pool responderá <strong>únicamente</strong> a <code>{selectedSpecialistModel}</code>. Los restantes {Math.max(0, availableSpecialistModels.length - 1)} modelos de su familia quedan automáticamente bloqueados para aislar la cuota.
                           </p>
                         )}
                         {/* Casilla 5.5 solo visible para familias de Claude donde existe dicha versión */}
