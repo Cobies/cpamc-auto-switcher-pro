@@ -2098,7 +2098,9 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
                         </>
                       )}
                       {totalEligible === 0 && (
-                        <span><strong>0 cuentas libres</strong> · Todas tus cuentas ya están en pools activos o necesitas vincular una nueva.</span>
+                        <span data-testid="no-compatible-accounts-alert">
+                          <strong>0 cuentas libres</strong> (operando en pools activos). Libera cuentas en <em>"💥 Disolver / Adoptar"</em> o vincula una nueva en CPAMC.
+                        </span>
                       )}
                       {totalEligible === 1 && (
                         <span>⚠️ <strong>Tienes 1 cuenta libre</strong> · Necesitas al menos 1 Titular + 1 Suplente para activar rotación.</span>
@@ -2109,19 +2111,6 @@ function sortModelsByFamilyAndVersion(models, familyRole, isCodex, isGemini) {
                     </div>
                   );
                 })()}
-
-                {/* Mensaje informativo si no hay cuentas compatibles suficientes */}
-                {family && leaderCandidates.length === 0 && (
-                  <div className="group-family-warning" style={{ margin: '16px 0', padding: '14px', borderRadius: 8, background: 'rgba(234, 179, 8, 0.1)', border: '1px solid rgba(234, 179, 8, 0.3)' }} data-testid="no-compatible-accounts-alert">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: '#facc15', marginBottom: 4 }}>
-                      <span>ℹ️</span>
-                      <span>No hay cuentas libres compatibles para armar un nuevo pool de {effectiveFamily ? effectiveFamily.label : 'esta familia'}</span>
-                    </div>
-                    <p style={{ margin: 0, fontSize: 13, color: '#cbd5e1', lineHeight: 1.5 }}>
-                      Se requieren al menos 2 cuentas disponibles (1 titular y 1 reserva). Tus cuentas actuales ya están operando dentro de los pools activos. Puedes liberar cuentas existentes en la pestaña <strong>"💥 Disolver / Desagrupar Pools"</strong> o vincular una nueva cuenta en CPAMC.
-                    </p>
-                  </div>
-                )}
 
                 {/* Si no se ha elegido familia/proveedor, mostrar recuadro prominente de selección */}
                 {!family ? (
