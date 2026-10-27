@@ -428,7 +428,30 @@ export default function App() {
               <span>Inicio & Info</span>
             </button>
 
-            {/* 1. Crear Group/Pefiles */}
+            {/* 0. Inicio & Resumen */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('home')}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                border: activeTab === 'home' ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid transparent',
+                background: activeTab === 'home' ? 'rgba(56, 189, 248, 0.35)' : 'transparent',
+                color: activeTab === 'home' ? '#e0f2fe' : '#94a3b8',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+              data-testid="tab-home"
+            >
+              <span>🏠</span>
+              <span>Inicio & Resumen</span>
+            </button>
+
+            {/* 1. Armar Pools & Grupos */}
             <button
               type="button"
               onClick={() => setActiveTab('create-groups')}
@@ -448,33 +471,10 @@ export default function App() {
               data-testid="tab-create-groups"
             >
               <span>🛠️</span>
-              <span>Crear Group/Perfiles</span>
+              <span>Armar Pools & Grupos</span>
             </button>
 
-            {/* 2. Auto Auth Files */}
-            <button
-              type="button"
-              onClick={() => setActiveTab('auto-auth-files')}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '6px',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                border: activeTab === 'auto-auth-files' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
-                background: activeTab === 'auto-auth-files' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
-                color: activeTab === 'auto-auth-files' ? '#f3e8ff' : '#94a3b8',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-              data-testid="tab-auto-auth-files"
-            >
-              <span>🗂️</span>
-              <span>Auto Auth Files</span>
-            </button>
-
-            {/* 3. Control Switcher */}
+            {/* 2. Control Switcher */}
             <button
               type="button"
               onClick={() => setActiveTab('switcher')}
@@ -497,53 +497,30 @@ export default function App() {
               <span>Control Switcher</span>
             </button>
 
-            {/* 4. Visual Profile */}
+            {/* 3. Auto Auth Files */}
             <button
               type="button"
-              onClick={() => setActiveTab('profiles')}
+              onClick={() => setActiveTab('auto-auth-files')}
               style={{
                 padding: '6px 12px',
                 borderRadius: '6px',
                 fontSize: '11px',
                 fontWeight: 700,
                 cursor: 'pointer',
-                border: activeTab === 'profiles' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
-                background: activeTab === 'profiles' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
-                color: activeTab === 'profiles' ? '#f3e8ff' : '#94a3b8',
+                border: activeTab === 'auto-auth-files' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
+                background: activeTab === 'auto-auth-files' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
+                color: activeTab === 'auto-auth-files' ? '#f3e8ff' : '#94a3b8',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
               }}
-              data-testid="tab-visual-profile"
+              data-testid="tab-auto-auth-files"
             >
-              <span>🔵</span>
-              <span>Visual Profile</span>
+              <span>🗂️</span>
+              <span>Auto Auth Files</span>
             </button>
 
-            {/* 5. Pulse Tokens */}
-            <button
-              type="button"
-              onClick={() => setActiveTab('tokens')}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '6px',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                border: activeTab === 'tokens' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
-                background: activeTab === 'tokens' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
-                color: activeTab === 'tokens' ? '#f3e8ff' : '#94a3b8',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-              data-testid="tab-pulse-tokens"
-            >
-              <span>🏷️</span>
-              <span>Pulse Tokens</span>
-            </button>
-
-            {/* 6. Directorio Cuentas */}
+            {/* 4. Directorio Cuentas */}
             <button
               type="button"
               onClick={() => setActiveTab('create-prefixes')}
@@ -566,53 +543,76 @@ export default function App() {
               <span>Directorio Cuentas</span>
             </button>
 
-            {/* 7. CPAMC Salud & Mantenimiento */}
+            {/* 5. Matriz de Agentes */}
             <button
               type="button"
-              onClick={() => setActiveTab('maintenance')}
+              onClick={() => setActiveTab('agent-matrix')}
               style={{
                 padding: '6px 12px',
                 borderRadius: '6px',
                 fontSize: '11px',
                 fontWeight: 700,
                 cursor: 'pointer',
-                border: activeTab === 'maintenance' ? '1px solid rgba(16, 185, 129, 0.5)' : '1px solid transparent',
-                background: activeTab === 'maintenance' ? 'rgba(16, 185, 129, 0.25)' : 'transparent',
-                color: activeTab === 'maintenance' ? '#a7f3d0' : '#94a3b8',
+                border: activeTab === 'agent-matrix' ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid transparent',
+                background: activeTab === 'agent-matrix' ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
+                color: activeTab === 'agent-matrix' ? '#bae6fd' : '#94a3b8',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
               }}
-              data-testid="tab-maintenance"
+              data-testid="tab-agent-matrix"
             >
-              <span>🩺</span>
-              <span>Salud & Mant.</span>
+              <span>🎛️</span>
+              <span>Matriz de Agentes</span>
             </button>
 
-            {/* 8. Guía Rápida */}
+            {/* 6. Pulse Tokens */}
             <button
               type="button"
-              onClick={() => setActiveTab('quick-guide')}
+              onClick={() => setActiveTab('tokens')}
               style={{
                 padding: '6px 12px',
                 borderRadius: '6px',
                 fontSize: '11px',
                 fontWeight: 700,
                 cursor: 'pointer',
-                border: activeTab === 'quick-guide' ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid transparent',
-                background: activeTab === 'quick-guide' ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
-                color: activeTab === 'quick-guide' ? '#7dd3fc' : '#94a3b8',
+                border: activeTab === 'tokens' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
+                background: activeTab === 'tokens' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
+                color: activeTab === 'tokens' ? '#f3e8ff' : '#94a3b8',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
               }}
-              data-testid="tab-quick-guide"
+              data-testid="tab-pulse-tokens"
             >
-              <span>❓</span>
-              <span>Guía Rápida</span>
+              <span>🏷️</span>
+              <span>Pulse Tokens</span>
             </button>
 
-            {/* 9. Bitácora & Caja Negra */}
+            {/* 7. Visual Profile */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('profiles')}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                border: activeTab === 'profiles' ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid transparent',
+                background: activeTab === 'profiles' ? 'rgba(147, 51, 234, 0.35)' : 'transparent',
+                color: activeTab === 'profiles' ? '#f3e8ff' : '#94a3b8',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+              data-testid="tab-visual-profile"
+            >
+              <span>🔵</span>
+              <span>Visual Profile</span>
+            </button>
+
+            {/* 8. Bitácora & Caja Negra */}
             <button
               type="button"
               onClick={() => setActiveTab('audit-log')}
@@ -635,27 +635,50 @@ export default function App() {
               <span>Bitácora & Caja Negra</span>
             </button>
 
-            {/* 10. Matriz de Agentes & Orquestación */}
+            {/* 9. Salud & Limpieza */}
             <button
               type="button"
-              onClick={() => setActiveTab('agent-matrix')}
+              onClick={() => setActiveTab('maintenance')}
               style={{
                 padding: '6px 12px',
                 borderRadius: '6px',
                 fontSize: '11px',
                 fontWeight: 700,
                 cursor: 'pointer',
-                border: activeTab === 'agent-matrix' ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid transparent',
-                background: activeTab === 'agent-matrix' ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
-                color: activeTab === 'agent-matrix' ? '#bae6fd' : '#94a3b8',
+                border: activeTab === 'maintenance' ? '1px solid rgba(16, 185, 129, 0.5)' : '1px solid transparent',
+                background: activeTab === 'maintenance' ? 'rgba(16, 185, 129, 0.25)' : 'transparent',
+                color: activeTab === 'maintenance' ? '#a7f3d0' : '#94a3b8',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
               }}
-              data-testid="tab-agent-matrix"
+              data-testid="tab-maintenance"
             >
-              <span>🎛️</span>
-              <span>Matriz de Agentes</span>
+              <span>🩺</span>
+              <span>Salud & Limpieza</span>
+            </button>
+
+            {/* 10. Guía Rápida */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('quick-guide')}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                border: activeTab === 'quick-guide' ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid transparent',
+                background: activeTab === 'quick-guide' ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
+                color: activeTab === 'quick-guide' ? '#7dd3fc' : '#94a3b8',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+              data-testid="tab-quick-guide"
+            >
+              <span>❓</span>
+              <span>Guía Rápida</span>
             </button>
           </div>
 
