@@ -51,6 +51,18 @@ export default function HomeCenter({ onNavigateTab, onOpenLicenseModal }) {
   const [harnessCount, setHarnessCount] = useState(0);
   const [showAllPillars, setShowAllPillars] = useState(false);
   const [openPillars, setOpenPillars] = useState({ 1: true });
+  const [telemetryEnabled, setTelemetryEnabled] = useState(() => {
+    if (typeof window === 'undefined' || !window.localStorage) return true;
+    return window.localStorage.getItem('telemetry_enabled') !== 'false';
+  });
+
+  const handleToggleTelemetry = (e) => {
+    const nextVal = e.target.checked;
+    setTelemetryEnabled(nextVal);
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem('telemetry_enabled', nextVal ? 'true' : 'false');
+    }
+  };
 
   const togglePillar = (id) => {
     setOpenPillars((prev) => ({
@@ -468,6 +480,67 @@ export default function HomeCenter({ onNavigateTab, onOpenLicenseModal }) {
             <span className="cockpit-val mono text-highlight" title={machineId}>
               {machineId}
             </span>
+          </div>
+        </div>
+
+        {/* CAJA DE PREFERENCIA DE TELEMETRÍA Y OPTIMIZACIÓN CONTINUA */}
+        <div className="home-telemetry-box" data-testid="home-telemetry-box">
+          <div className="telemetry-box-header">
+            <label className="telemetry-toggle-label" htmlFor="chk-home-telemetry">
+              <input
+                type="checkbox"
+                id="chk-home-telemetry"
+                checked={telemetryEnabled}
+                onChange={handleToggleTelemetry}
+                data-testid="chk-home-telemetry"
+                className="telemetry-checkbox"
+              />
+              <span className="telemetry-title">
+                <Icons.Activity
+                  size={15}
+                  style={{
+                    marginRight: 6,
+                    verticalAlign: 'middle',
+                    color: telemetryEnabled ? '#10b981' : 'var(--text-tertiary, #9c958d)',
+                  }}
+                />
+                Telemetría de Cuotas & Optimización Continua
+              </span>
+            </label>
+            <span
+              className={`telemetry-status-pill ${telemetryEnabled ? 'active' : 'inactive'}`}
+              data-testid="telemetry-status-badge"
+            >
+              {telemetryEnabled ? '● Habilitada (Recomendado)' : '○ Deshabilitada'}
+            </span>
+          </div>
+
+          <div className="telemetry-box-body">
+            {telemetryEnabled ? (
+              <p className="telemetry-desc active" data-testid="telemetry-active-msg">
+                <strong style={{ color: '#10b981' }}>Te sugerimos mantenerla activa:</strong> Esta telemetría es 100% anónima y no recopila credenciales, prompts ni código fuente. Solo registra métricas de salud (latencias, consumo de cuota y ventana de 5h) para que el motor predictivo anticipe bloqueos 429, calibre las rotaciones y mejore continuamente tu experiencia y estabilidad de desarrollo.
+              </p>
+            ) : (
+              <div className="telemetry-desc inactive" data-testid="telemetry-inactive-msg">
+                <p style={{ margin: 0 }}>
+                  <strong style={{ color: '#f59e0b' }}>⚠️ Telemetría desactivada:</strong> El balanceador funcionará de forma puramente reactiva tras errores en caliente. Te invitamos a mantenerla activa para que el motor predictivo pueda proteger tus flujos antes de que se agote la cuota y optimizar el rendimiento sin compartir datos privados.
+                </p>
+                <button
+                  type="button"
+                  className="btn-re-enable-telemetry"
+                  onClick={() => {
+                    setTelemetryEnabled(true);
+                    if (typeof window !== 'undefined' && window.localStorage) {
+                      window.localStorage.setItem('telemetry_enabled', 'true');
+                    }
+                  }}
+                  data-testid="btn-re-enable-telemetry"
+                >
+                  <Icons.Zap size={13} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+                  Mantener activa para mejor experiencia
+                </button>
+              </div>
+            )}
           </div>
         </div>
 

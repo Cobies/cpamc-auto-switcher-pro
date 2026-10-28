@@ -181,6 +181,118 @@
   transform: translateY(-1px);
 }
 
+/* CAJA DE PREFERENCIA DE TELEMETRÍA Y OPTIMIZACIÓN */
+.home-telemetry-box {
+  width: 100%;
+  max-width: 980px;
+  margin-bottom: 20px;
+  background: var(--bg-surface, #1d1b18);
+  border: 1px solid var(--border-color, #3a3530);
+  border-radius: 12px;
+  padding: 14px 18px;
+  text-align: left;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.home-telemetry-box:hover {
+  border-color: rgba(56, 189, 248, 0.35);
+}
+
+.telemetry-box-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.telemetry-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.telemetry-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: #10b981;
+  cursor: pointer;
+}
+
+.telemetry-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary, #f6f4f1);
+  display: inline-flex;
+  align-items: center;
+}
+
+.telemetry-status-pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  letter-spacing: 0.2px;
+}
+
+.telemetry-status-pill.active {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.telemetry-status-pill.inactive {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.telemetry-box-body {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.telemetry-desc {
+  margin: 0;
+  color: var(--text-secondary, #c9c3bb);
+}
+
+.telemetry-desc.active {
+  color: var(--text-secondary, #c9c3bb);
+}
+
+.telemetry-desc.inactive {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.btn-re-enable-telemetry {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: #34d399;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-re-enable-telemetry:hover {
+  background: rgba(16, 185, 129, 0.28);
+  border-color: #10b981;
+  color: #6ee7b7;
+  transform: translateY(-1px);
+}
+
 /* ANATOMÍA TÉCNICA DEL CÓDIGO (ACORDEÓN INTERACTIVO) */
 .home-anatomy-box {
   width: 100%;

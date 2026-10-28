@@ -147,4 +147,45 @@ describe('HomeCenter Component - Portada Principal & Directorio de Menús', () =
     fireEvent.click(cardSwitcher);
     expect(navigateMock).toHaveBeenCalledWith('switcher');
   });
+
+  it('renders telemetry preference toggle, enables by default, and allows toggling with helpful invitation', async () => {
+    window.localStorage.removeItem('telemetry_enabled');
+    render(<HomeCenter onNavigateTab={vi.fn()} />);
+
+    const telemetryBox = screen.getByTestId('home-telemetry-box');
+    expect(telemetryBox).toBeTruthy();
+
+    const chk = screen.getByTestId('chk-home-telemetry');
+    expect(chk.checked).toBe(true);
+
+    const badge = screen.getByTestId('telemetry-status-badge');
+    expect(badge.textContent).toContain('Habilitada (Recomendado)');
+    expect(screen.getByTestId('telemetry-active-msg')).toBeTruthy();
+    expect(screen.getByText(/Te sugerimos mantenerla activa/i)).toBeTruthy();
+
+    // Toggle off: disables telemetry and shows friendly invitation
+    fireEvent.click(chk);
+    expect(chk.checked).toBe(false);
+    expect(window.localStorage.getItem('telemetry_enabled')).toBe('false');
+    expect(screen.getByTestId('telemetry-inactive-msg')).toBeTruthy();
+    expect(screen.getByText(/Telemetría desactivada/i)).toBeTruthy();
+
+    // 1-click re-enable button restores telemetry
+    const reEnableBtn = screen.getByTestId('btn-re-enable-telemetry');
+    expect(reEnableBtn).toBeTruthy();
+    fireEvent.click(reEnableBtn);
+
+    expect(chk.checked).toBe(true);
+    expect(window.localStorage.getItem('telemetry_enabled')).toBe('true');
+    expect(screen.getByTestId('telemetry-active-msg')).toBeTruthy();
+  });
+
+  it('respects pre-existing disabled telemetry setting in localStorage on load', () => {
+    window.localStorage.setItem('telemetry_enabled', 'false');
+    render(<HomeCenter onNavigateTab={vi.fn()} />);
+
+    const chk = screen.getByTestId('chk-home-telemetry');
+    expect(chk.checked).toBe(false);
+    expect(screen.getByTestId('telemetry-inactive-msg')).toBeTruthy();
+  });
 });

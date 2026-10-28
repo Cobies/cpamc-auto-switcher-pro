@@ -3231,8 +3231,13 @@ export async function fetchCardQuota(cardOrNode, options = {}) {
         cardOrNode?.auth_index ||
         '';
 
-      // Solo empujar telemetría si se obtuvieron cuotas reales para la familia (evita falso 100%)
-      if (accKey && (win5h !== null || winWeekly !== null)) {
+      // Solo empujar telemetría si se obtuvieron cuotas reales para la familia y la telemetría está habilitada
+      const isTelemetryEnabled =
+        typeof window === 'undefined' ||
+        !window.localStorage ||
+        window.localStorage.getItem('telemetry_enabled') !== 'false';
+
+      if (accKey && (win5h !== null || winWeekly !== null) && isTelemetryEnabled) {
         // Fire-and-forget background push to Go CGO plugin
         apiFetch('/v0/management/auto-switcher-pro/predictive/telemetry', {
           method: 'POST',
